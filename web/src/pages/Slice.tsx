@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import ModelViewer from "../components/ModelViewer";
+import SearchSelect from "../components/SearchSelect";
 
 interface Printer {
   id: string;
@@ -98,13 +99,15 @@ export default function SlicePage() {
     }
   }, [modelFile, printerId, routing, machine, process, filament, navigate]);
 
-  const groupByVendor = (entries: ProfileEntry[]) => {
-    const groups: Record<string, ProfileEntry[]> = {};
-    for (const e of entries) {
-      (groups[e.vendor] ??= []).push(e);
-    }
-    return groups;
-  };
+  const machineOptions = useMemo(
+    () =>
+      machines.map((m) => ({
+        value: m.name,
+        label: m.name,
+        group: m.vendor,
+      })),
+    [machines],
+  );
 
   return (
     <div className="page slice-page">
@@ -133,20 +136,12 @@ export default function SlicePage() {
 
           <label>
             Machine Profile
-            <select value={machine} onChange={(e) => setMachine(e.target.value)}>
-              <option value="">Select machine...</option>
-              {Object.entries(groupByVendor(machines)).map(
-                ([vendor, entries]) => (
-                  <optgroup key={vendor} label={vendor}>
-                    {entries.map((m) => (
-                      <option key={m.name} value={m.name}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ),
-              )}
-            </select>
+            <SearchSelect
+              options={machineOptions}
+              value={machine}
+              onChange={setMachine}
+              placeholder="Search machines..."
+            />
           </label>
 
           <label>

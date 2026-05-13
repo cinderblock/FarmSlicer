@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import SearchSelect from "../components/SearchSelect";
 
 interface Printer {
   id: string;
@@ -17,8 +18,19 @@ interface ProfileEntry {
   vendor: string;
 }
 
+interface DiscoveredPrinter {
+  serial: string;
+  name: string;
+  model_code: string;
+  model_name: string;
+  machine_profile: string;
+  ip: string;
+  signal: string;
+}
+
 export default function PrintersPage() {
   const [printers, setPrinters] = useState<Printer[]>([]);
+  const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
   const [machines, setMachines] = useState<ProfileEntry[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -40,6 +52,25 @@ export default function PrintersPage() {
       .then(setMachines)
       .catch(() => {});
   }, [fetchPrinters]);
+
+  // Poll for discovered printers
+  useEffect(() => {
+    const fetchDiscovered = () => {
+      fetch("/api/discovery")
+        .then((r) => r.json())
+        .then(setDiscovered)
+        .catch(() => {});
+    };
+    fetchDiscovered();
+    const interval = setInterval(fetchDiscovered, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const machineOptions = machines.map((m) => ({
+    value: m.name,
+    label: m.name,
+    group: m.vendor,
+  }));
 
   const resetForm = () => {
     setName("");
@@ -74,21 +105,35 @@ export default function PrintersPage() {
     fetchPrinters();
   };
 
-  const groupByVendor = (entries: ProfileEntry[]) => {
-    const groups: Record<string, ProfileEntry[]> = {};
-    for (const e of entries) {
-      (groups[e.vendor] ??= []).push(e);
-    }
-    return groups;
+  const handleAddDiscovered = (d: DiscoveredPrinter) => {
+    setName(d.name);
+    setMachineProfile(d.machine_profile);
+    setProtocol("bambu");
+    setAddress(d.ip);
+    setSerialNumber(d.serial);
+    setAccessCode("");
+    setShowForm(true);
   };
 
   const isBambu = protocol === "bambu";
+
+  // Filter out already-configured printers from discovered list
+  const configuredSerials = new Set(
+    printers.map((p) => p.serial_number).filter(Boolean),
+  );
+  const newDiscovered = discovered.filter(
+    (d) => !configuredSerials.has(d.serial),
+  );
 
   return (
     <div className="page">
       <h2>Printers</h2>
       <div className="page-actions">
-        <button className="btn-primary" style={{ width: "auto" }} onClick={() => setShowForm(!showForm)}>
+        <button
+          className="btn-primary"
+          style={{ width: "auto" }}
+          onClick={() => setShowForm(!showForm)}
+        >
           {showForm ? "Cancel" : "Add Printer"}
         </button>
       </div>
@@ -108,23 +153,12 @@ export default function PrintersPage() {
 
             <label>
               Machine Profile
-              <select
+              <SearchSelect
+                options={machineOptions}
                 value={machineProfile}
-                onChange={(e) => setMachineProfile(e.target.value)}
-              >
-                <option value="">Select machine...</option>
-                {Object.entries(groupByVendor(machines)).map(
-                  ([vendor, entries]) => (
-                    <optgroup key={vendor} label={vendor}>
-                      {entries.map((m) => (
-                        <option key={m.name} value={m.name}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ),
-                )}
-              </select>
+                onChange={setMachineProfile}
+                placeholder="Search machines..."
+              />
             </label>
 
             <label>
@@ -172,16 +206,46 @@ export default function PrintersPage() {
               </>
             )}
 
-            <button className="btn-primary" onClick={handleAdd} style={{ marginTop: "0.5rem" }}>
+            <button
+              className="btn-primary"
+              onClick={handleAdd}
+              style={{ marginTop: "0.5rem" }}
+            >
               Add Printer
             </button>
           </div>
         </div>
       )}
 
-      {printers.length === 0 ? (
+      {newDiscovered.length > 0 && (
+        <div className="discovered-section">
+          <h3>Detected on Network</h3>
+          <div className="card-grid">
+            {newDiscovered.map((d) => (
+              <div key={d.serial} className="card discovered-card">
+                <div className="printer-header">
+                  <h3>{d.name || d.model_name}</h3>
+                  <span className="pulse-dot" />
+                </div>
+                <p className="hint">{d.model_name}</p>
+                <p className="hint">{d.ip}</p>
+                <p className="hint">S/N: {d.serial}</p>
+                <button
+                  className="btn-sm"
+                  style={{ marginTop: "0.5rem" }}
+                  onClick={() => handleAddDiscovered(d)}
+                >
+                  Add to Farm
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {printers.length === 0 && newDiscovered.length === 0 ? (
         <p className="empty-state">No printers configured yet.</p>
-      ) : (
+      ) : printers.length === 0 ? null : (
         <div className="card-grid">
           {printers.map((printer) => (
             <div key={printer.id} className="card printer-card">
@@ -192,10 +256,12 @@ export default function PrintersPage() {
               {printer.machine_profile && (
                 <p className="hint">{printer.machine_profile}</p>
               )}
-              <p className="hint">{printer.protocol === "bambu" ? "Bambu Lab (LAN)" : printer.protocol}</p>
-              {printer.address && (
-                <p className="hint">{printer.address}</p>
-              )}
+              <p className="hint">
+                {printer.protocol === "bambu"
+                  ? "Bambu Lab (LAN)"
+                  : printer.protocol}
+              </p>
+              {printer.address && <p className="hint">{printer.address}</p>}
               {printer.current_job ? (
                 <p>Printing: {printer.current_job}</p>
               ) : (

@@ -1,10 +1,12 @@
 mod db;
+mod discovery;
 mod profiles;
 mod server;
 mod slicer;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() {
@@ -20,7 +22,17 @@ async fn main() {
     let profiles_dir = PathBuf::from("extern/OrcaSlicer/resources/profiles");
     let profile_store = profiles::ProfileStore::load(&profiles_dir);
 
-    let state = Arc::new(server::AppState::new(db, data_dir, slicer, profile_store));
+    let discovered = Arc::new(Mutex::new(HashMap::new()));
+
+    tokio::spawn(discovery::run(discovered.clone()));
+
+    let state = Arc::new(server::AppState::new(
+        db,
+        data_dir,
+        slicer,
+        profile_store,
+        discovered,
+    ));
 
     let app = server::router(state);
 

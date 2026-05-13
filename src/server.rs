@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 
 use crate::db::Db;
+use crate::discovery;
 use crate::profiles::ProfileStore;
 use crate::slicer;
 
@@ -25,6 +26,7 @@ pub struct AppState {
     pub data_dir: std::path::PathBuf,
     slicer: Mutex<SlicerHandle>,
     pub profile_store: ProfileStore,
+    pub discovered: Arc<discovery::DiscoveryMap>,
 }
 
 impl AppState {
@@ -33,12 +35,14 @@ impl AppState {
         data_dir: std::path::PathBuf,
         slicer: UniquePtr<slicer::Slicer>,
         profile_store: ProfileStore,
+        discovered: Arc<discovery::DiscoveryMap>,
     ) -> Self {
         Self {
             db,
             data_dir,
             slicer: Mutex::new(SlicerHandle(slicer)),
             profile_store,
+            discovered,
         }
     }
 }
@@ -110,6 +114,27 @@ async fn list_filaments(
             .collect(),
     };
     Json(json!(filaments))
+}
+
+// -- Discovery --
+
+async fn list_discovered(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let map = state.discovered.lock().unwrap();
+    let printers: Vec<_> = map
+        .values()
+        .map(|p| {
+            json!({
+                "serial": p.serial,
+                "name": p.name,
+                "model_code": p.model_code,
+                "model_name": p.model_name,
+                "machine_profile": p.machine_profile,
+                "ip": p.ip,
+                "signal": p.signal,
+            })
+        })
+        .collect();
+    Json(json!(printers))
 }
 
 // -- Printers --
@@ -367,6 +392,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/profiles/machines", get(list_machines))
         .route("/api/profiles/processes", get(list_processes))
         .route("/api/profiles/filaments", get(list_filaments))
+        .route("/api/discovery", get(list_discovered))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/{id}", delete(delete_printer))
         .route("/api/jobs", get(list_jobs).post(create_job))

@@ -379,6 +379,98 @@ body {
   width: 100%;
 }
 
+/* Searchable select */
+.search-select {
+  position: relative;
+}
+
+.search-select input {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+.search-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  z-index: 10;
+}
+
+.search-select-group {
+  padding: 0.4rem 0.5rem 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.search-select-option {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.search-select-option.highlighted {
+  background: var(--bg-card-hover);
+}
+
+.search-select-option.selected {
+  color: var(--accent);
+}
+
+.search-select-empty {
+  padding: 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+/* Discovered printers */
+.discovered-section {
+  margin-bottom: 1.5rem;
+}
+
+.discovered-section h3 {
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  color: var(--text-dim);
+}
+
+.discovered-card {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.discovered-card .printer-header h3 {
+  font-size: 1rem;
+}
+
+.pulse-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 .btn-danger {
   color: var(--error);
   border-color: var(--error);
