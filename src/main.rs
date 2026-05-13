@@ -1,0 +1,19 @@
+mod server;
+
+#[tokio::main]
+async fn main() {
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
+
+    let app = server::router();
+
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
+        .await
+        .expect("failed to bind");
+
+    println!("FarmSlicer listening on http://localhost:{port}");
+
+    axum::serve(listener, app).await.expect("server error");
+}
