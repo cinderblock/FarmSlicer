@@ -17,6 +17,20 @@ pub struct ProfileEntry {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compatible_printers: Option<Vec<String>>,
+    /// For machine profiles: the base model name (e.g., "Bambu Lab A1")
+    #[serde(skip)]
+    pub printer_model: Option<String>,
+    /// For machine profiles: the nozzle variant (e.g., "0.4")
+    #[serde(skip)]
+    pub printer_variant: Option<String>,
+}
+
+/// A base printer model with its available nozzle sizes.
+#[derive(Debug, Clone, Serialize)]
+pub struct MachineModel {
+    pub name: String,
+    pub vendor: String,
+    pub nozzle_diameters: Vec<String>,
 }
 
 pub struct ProfileStore {
@@ -25,6 +39,7 @@ pub struct ProfileStore {
     processes: Vec<ProfileEntry>,
     filaments: Vec<ProfileEntry>,
     by_name: HashMap<String, PathBuf>,
+    machine_models: Vec<MachineModel>,
 }
 
 impl ProfileStore {
@@ -33,6 +48,8 @@ impl ProfileStore {
         let mut processes = Vec::new();
         let mut filaments = Vec::new();
         let mut by_name: HashMap<String, PathBuf> = HashMap::new();
+        // Collect machine_model entries: model_name → (vendor, nozzle_diameters)
+        let mut model_nozzles: HashMap<String, (String, Vec<String>)> = HashMap::new();
 
         let Ok(vendors) = std::fs::read_dir(profiles_dir) else {
             return Self {
@@ -41,6 +58,7 @@ impl ProfileStore {
                 processes,
                 filaments,
                 by_name,
+                machine_models: Vec::new(),
             };
         };
 
@@ -67,6 +85,14 @@ impl ProfileStore {
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
                     }
+
+                    // Check for machine_model entries (base models with nozzle lists)
+                    if subdir == "machine" {
+                        if let Some((name, nozzles)) = load_machine_model_nozzles(&path) {
+                            model_nozzles.insert(name, (vendor.clone(), nozzles));
+                        }
+                    }
+
                     if let Some(pe) = load_profile_entry(&path, &vendor, subdir) {
                         by_name.insert(pe.name.clone(), path);
                         target.push(pe);
@@ -75,13 +101,49 @@ impl ProfileStore {
             }
         }
 
+        // Build machine_models: merge nozzle sizes from machine_model entries and
+        // instantiable machine variants into a single list per base model.
+        for m in &machines {
+            if !m.instantiable {
+                continue;
+            }
+            if let (Some(ref model_name), Some(ref variant)) = (&m.printer_model, &m.printer_variant) {
+                let entry = model_nozzles
+                    .entry(model_name.clone())
+                    .or_insert_with(|| (m.vendor.clone(), Vec::new()));
+                if !entry.1.contains(variant) {
+                    entry.1.push(variant.clone());
+                }
+            }
+        }
+
+        let mut machine_models: Vec<MachineModel> = model_nozzles
+            .into_iter()
+            .map(|(name, (vendor, mut nozzles))| {
+                // Sort nozzle sizes numerically
+                nozzles.sort_by(|a, b| {
+                    a.parse::<f32>()
+                        .unwrap_or(0.0)
+                        .partial_cmp(&b.parse::<f32>().unwrap_or(0.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                MachineModel {
+                    name,
+                    vendor,
+                    nozzle_diameters: nozzles,
+                }
+            })
+            .collect();
+        machine_models.sort_by(|a, b| a.name.cmp(&b.name));
+
         machines.sort_by(|a, b| a.name.cmp(&b.name));
         processes.sort_by(|a, b| a.name.cmp(&b.name));
         filaments.sort_by(|a, b| a.name.cmp(&b.name));
 
         println!(
-            "Profiles loaded: {} machines, {} processes, {} filaments",
+            "Profiles loaded: {} machines ({} models), {} processes, {} filaments",
             machines.len(),
+            machine_models.len(),
             processes.len(),
             filaments.len()
         );
@@ -92,7 +154,12 @@ impl ProfileStore {
             processes,
             filaments,
             by_name,
+            machine_models,
         }
+    }
+
+    pub fn machine_models(&self) -> &[MachineModel] {
+        &self.machine_models
     }
 
     pub fn machines(&self) -> &[ProfileEntry] {
@@ -109,6 +176,19 @@ impl ProfileStore {
 
     pub fn instantiable_machines(&self) -> Vec<&ProfileEntry> {
         self.machines.iter().filter(|m| m.instantiable).collect()
+    }
+
+    /// Resolve a base model name + nozzle variant into the full instantiable profile name.
+    /// E.g., ("Bambu Lab A1", "0.4") → "Bambu Lab A1 0.4 nozzle"
+    pub fn resolve_machine_variant(&self, model: &str, nozzle: &str) -> Option<String> {
+        self.machines
+            .iter()
+            .find(|m| {
+                m.instantiable
+                    && m.printer_model.as_deref() == Some(model)
+                    && m.printer_variant.as_deref() == Some(nozzle)
+            })
+            .map(|m| m.name.clone())
     }
 
     fn vendor_for_machine(&self, machine_name: &str) -> Option<&str> {
@@ -234,6 +314,29 @@ fn merge_into(base: &mut Map<String, Value>, overlay: &Map<String, Value>) {
     }
 }
 
+/// Extract nozzle diameters from a machine_model JSON file.
+/// Returns (model_name, nozzle_diameters) if the file is a machine_model type.
+fn load_machine_model_nozzles(path: &Path) -> Option<(String, Vec<String>)> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let obj: Map<String, Value> = serde_json::from_str(&content).ok()?;
+
+    let profile_type = obj.get("type")?.as_str()?;
+    if profile_type != "machine_model" {
+        return None;
+    }
+
+    let name = obj.get("name")?.as_str()?.to_string();
+
+    // nozzle_diameter is a semicolon-separated string in machine_model entries
+    let nozzles = obj
+        .get("nozzle_diameter")
+        .and_then(|v| v.as_str())
+        .map(|s| s.split(';').map(|n| n.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    Some((name, nozzles))
+}
+
 fn load_profile_entry(path: &Path, vendor: &str, profile_type: &str) -> Option<ProfileEntry> {
     let content = std::fs::read_to_string(path).ok()?;
     let obj: Map<String, Value> = serde_json::from_str(&content).ok()?;
@@ -256,6 +359,16 @@ fn load_profile_entry(path: &Path, vendor: &str, profile_type: &str) -> Option<P
             .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
     });
 
+    let printer_model = obj
+        .get("printer_model")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let printer_variant = obj
+        .get("printer_variant")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     Some(ProfileEntry {
         name,
         profile_type: profile_type.to_string(),
@@ -264,5 +377,7 @@ fn load_profile_entry(path: &Path, vendor: &str, profile_type: &str) -> Option<P
         instantiable,
         description,
         compatible_printers,
+        printer_model,
+        printer_variant,
     })
 }

@@ -12,6 +12,7 @@ pub struct Printer {
     pub id: String,
     pub name: String,
     pub machine_profile: String,
+    pub nozzle_diameter: String,
     pub protocol: String,
     pub address: String,
     pub serial_number: String,
@@ -63,6 +64,7 @@ impl Db {
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 machine_profile TEXT NOT NULL DEFAULT '',
+                nozzle_diameter TEXT NOT NULL DEFAULT '',
                 protocol TEXT NOT NULL DEFAULT 'bambu',
                 address TEXT NOT NULL DEFAULT '',
                 serial_number TEXT NOT NULL DEFAULT '',
@@ -98,7 +100,7 @@ impl Db {
         ).expect("failed to create tables");
 
         // Migrations — add columns that may not exist in older databases
-        for col in &["machine_profile", "serial_number", "access_code"] {
+        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code"] {
             if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {
                 conn.execute_batch(
                     &format!("ALTER TABLE printers ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
@@ -114,19 +116,20 @@ impl Db {
     pub fn list_printers(&self) -> Vec<Printer> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, machine_profile, protocol, address, serial_number, access_code, status, current_job FROM printers ORDER BY name")
+            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job FROM printers ORDER BY name")
             .unwrap();
         stmt.query_map([], |row| {
             Ok(Printer {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 machine_profile: row.get(2)?,
-                protocol: row.get(3)?,
-                address: row.get(4)?,
-                serial_number: row.get(5)?,
-                access_code: row.get(6)?,
-                status: row.get(7)?,
-                current_job: row.get(8)?,
+                nozzle_diameter: row.get(3)?,
+                protocol: row.get(4)?,
+                address: row.get(5)?,
+                serial_number: row.get(6)?,
+                access_code: row.get(7)?,
+                status: row.get(8)?,
+                current_job: row.get(9)?,
             })
         })
         .unwrap()
@@ -138,6 +141,7 @@ impl Db {
         &self,
         name: &str,
         machine_profile: &str,
+        nozzle_diameter: &str,
         protocol: &str,
         address: &str,
         serial_number: &str,
@@ -146,14 +150,15 @@ impl Db {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO printers (id, name, machine_profile, protocol, address, serial_number, access_code) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, name, machine_profile, protocol, address, serial_number, access_code],
+            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code],
         )
         .unwrap();
         Printer {
             id,
             name: name.to_string(),
             machine_profile: machine_profile.to_string(),
+            nozzle_diameter: nozzle_diameter.to_string(),
             protocol: protocol.to_string(),
             address: address.to_string(),
             serial_number: serial_number.to_string(),

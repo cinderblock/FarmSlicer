@@ -5,6 +5,7 @@ interface Printer {
   id: string;
   name: string;
   machine_profile: string;
+  nozzle_diameter: string;
   status: string;
   protocol: string;
   address: string;
@@ -13,9 +14,10 @@ interface Printer {
   current_job: string | null;
 }
 
-interface ProfileEntry {
+interface MachineModel {
   name: string;
   vendor: string;
+  nozzle_diameters: string[];
 }
 
 interface DiscoveredPrinter {
@@ -31,10 +33,11 @@ interface DiscoveredPrinter {
 export default function PrintersPage() {
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
-  const [machines, setMachines] = useState<ProfileEntry[]>([]);
+  const [models, setModels] = useState<MachineModel[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [machineProfile, setMachineProfile] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [selectedNozzle, setSelectedNozzle] = useState("");
   const [protocol, setProtocol] = useState("bambu");
   const [address, setAddress] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
@@ -47,9 +50,9 @@ export default function PrintersPage() {
 
   useEffect(() => {
     fetchPrinters();
-    fetch("/api/profiles/machines")
+    fetch("/api/profiles/machine-models")
       .then((r) => r.json())
-      .then(setMachines)
+      .then(setModels)
       .catch(() => {});
   }, [fetchPrinters]);
 
@@ -66,15 +69,33 @@ export default function PrintersPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const machineOptions = machines.map((m) => ({
+  const modelOptions = models.map((m) => ({
     value: m.name,
     label: m.name,
     group: m.vendor,
   }));
 
+  const currentModel = models.find((m) => m.name === selectedModel);
+  const nozzleOptions = currentModel?.nozzle_diameters ?? [];
+
+  // Auto-select nozzle when model changes
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model);
+    const m = models.find((x) => x.name === model);
+    if (m && m.nozzle_diameters.length > 0) {
+      // Default to 0.4 if available, otherwise first option
+      const defaultNozzle =
+        m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0];
+      setSelectedNozzle(defaultNozzle);
+    } else {
+      setSelectedNozzle("");
+    }
+  };
+
   const resetForm = () => {
     setName("");
-    setMachineProfile("");
+    setSelectedModel("");
+    setSelectedNozzle("");
     setProtocol("bambu");
     setAddress("");
     setSerialNumber("");
@@ -89,7 +110,8 @@ export default function PrintersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
-        machine_profile: machineProfile,
+        machine_profile: selectedModel,
+        nozzle_diameter: selectedNozzle,
         protocol,
         address,
         serial_number: serialNumber,
@@ -107,7 +129,29 @@ export default function PrintersPage() {
 
   const handleAddDiscovered = (d: DiscoveredPrinter) => {
     setName(d.name);
-    setMachineProfile(d.machine_profile);
+    // Discovery provides the full profile name (e.g., "Bambu Lab A1 0.4 nozzle").
+    // Try to find the matching model and extract the nozzle from it.
+    const matchedModel = models.find((m) =>
+      d.machine_profile.startsWith(m.name),
+    );
+    if (matchedModel) {
+      setSelectedModel(matchedModel.name);
+      // Extract nozzle from the profile name suffix
+      const suffix = d.machine_profile.slice(matchedModel.name.length).trim();
+      const nozzleMatch = suffix.match(/^([\d.]+)\s*nozzle/);
+      if (nozzleMatch && matchedModel.nozzle_diameters.includes(nozzleMatch[1])) {
+        setSelectedNozzle(nozzleMatch[1]);
+      } else {
+        const defaultNozzle =
+          matchedModel.nozzle_diameters.find((n) => n === "0.4") ??
+          matchedModel.nozzle_diameters[0] ??
+          "";
+        setSelectedNozzle(defaultNozzle);
+      }
+    } else {
+      setSelectedModel(d.machine_profile);
+      setSelectedNozzle("");
+    }
     setProtocol("bambu");
     setAddress(d.ip);
     setSerialNumber(d.serial);
@@ -152,14 +196,30 @@ export default function PrintersPage() {
             </label>
 
             <label>
-              Machine Profile
+              Printer Model
               <SearchSelect
-                options={machineOptions}
-                value={machineProfile}
-                onChange={setMachineProfile}
-                placeholder="Search machines..."
+                options={modelOptions}
+                value={selectedModel}
+                onChange={handleModelChange}
+                placeholder="Search printer models..."
               />
             </label>
+
+            {nozzleOptions.length > 0 && (
+              <label>
+                Nozzle Size
+                <select
+                  value={selectedNozzle}
+                  onChange={(e) => setSelectedNozzle(e.target.value)}
+                >
+                  {nozzleOptions.map((n) => (
+                    <option key={n} value={n}>
+                      {n}mm
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <label>
               Protocol
@@ -254,7 +314,10 @@ export default function PrintersPage() {
                 <span className={`status-dot status-${printer.status}`} />
               </div>
               {printer.machine_profile && (
-                <p className="hint">{printer.machine_profile}</p>
+                <p className="hint">
+                  {printer.machine_profile}
+                  {printer.nozzle_diameter && ` (${printer.nozzle_diameter}mm nozzle)`}
+                </p>
               )}
               <p className="hint">
                 {printer.protocol === "bambu"

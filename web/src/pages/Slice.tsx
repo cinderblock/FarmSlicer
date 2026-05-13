@@ -8,6 +8,12 @@ interface Printer {
   name: string;
 }
 
+interface MachineModel {
+  name: string;
+  vendor: string;
+  nozzle_diameters: string[];
+}
+
 interface ProfileEntry {
   name: string;
   vendor: string;
@@ -19,11 +25,12 @@ export default function SlicePage() {
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
-  const [machines, setMachines] = useState<ProfileEntry[]>([]);
+  const [models, setModels] = useState<MachineModel[]>([]);
   const [processes, setProcesses] = useState<ProfileEntry[]>([]);
   const [filaments, setFilaments] = useState<ProfileEntry[]>([]);
   const [printerId, setPrinterId] = useState("");
-  const [machine, setMachine] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [selectedNozzle, setSelectedNozzle] = useState("");
   const [process, setProcess] = useState("");
   const [filament, setFilament] = useState("");
   const [routing, setRouting] = useState("auto");
@@ -36,19 +43,45 @@ export default function SlicePage() {
       .then((r) => r.json())
       .then(setPrinters)
       .catch(() => {});
-    fetch("/api/profiles/machines")
+    fetch("/api/profiles/machine-models")
       .then((r) => r.json())
-      .then(setMachines)
+      .then(setModels)
       .catch(() => {});
   }, []);
 
+  const currentModel = models.find((m) => m.name === selectedModel);
+  const nozzleOptions = currentModel?.nozzle_diameters ?? [];
+
+  // Resolve the full machine profile name from model + nozzle
+  // The backend uses this to find compatible processes/filaments
+  const resolvedMachine = useMemo(() => {
+    if (!selectedModel || !selectedNozzle) return "";
+    // Try common naming patterns used by OrcaSlicer profiles
+    // Pattern: "{model} {nozzle} nozzle"
+    return `${selectedModel} ${selectedNozzle} nozzle`;
+  }, [selectedModel, selectedNozzle]);
+
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model);
+    const m = models.find((x) => x.name === model);
+    if (m && m.nozzle_diameters.length > 0) {
+      const defaultNozzle =
+        m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0];
+      setSelectedNozzle(defaultNozzle);
+    } else {
+      setSelectedNozzle("");
+    }
+  };
+
   useEffect(() => {
-    if (!machine) {
+    if (!resolvedMachine) {
       setProcesses([]);
       setFilaments([]);
       return;
     }
-    fetch(`/api/profiles/processes?machine=${encodeURIComponent(machine)}`)
+    fetch(
+      `/api/profiles/processes?machine=${encodeURIComponent(resolvedMachine)}`,
+    )
       .then((r) => r.json())
       .then((data: ProfileEntry[]) => {
         setProcesses(data);
@@ -58,7 +91,9 @@ export default function SlicePage() {
         }
       })
       .catch(() => {});
-    fetch(`/api/profiles/filaments?machine=${encodeURIComponent(machine)}`)
+    fetch(
+      `/api/profiles/filaments?machine=${encodeURIComponent(resolvedMachine)}`,
+    )
       .then((r) => r.json())
       .then((data: ProfileEntry[]) => {
         setFilaments(data);
@@ -68,7 +103,7 @@ export default function SlicePage() {
         }
       })
       .catch(() => {});
-  }, [machine]);
+  }, [resolvedMachine]);
 
   const handleSlice = useCallback(async () => {
     if (!modelFile) return;
@@ -79,7 +114,7 @@ export default function SlicePage() {
     formData.append("model", modelFile);
     formData.append("routing", routing);
     if (printerId) formData.append("printer_id", printerId);
-    if (machine) formData.append("machine", machine);
+    if (resolvedMachine) formData.append("machine", resolvedMachine);
     if (process) formData.append("process", process);
     if (filament) formData.append("filament", filament);
 
@@ -97,16 +132,16 @@ export default function SlicePage() {
     } finally {
       setSlicing(false);
     }
-  }, [modelFile, printerId, routing, machine, process, filament, navigate]);
+  }, [modelFile, printerId, routing, resolvedMachine, process, filament, navigate]);
 
-  const machineOptions = useMemo(
+  const modelOptions = useMemo(
     () =>
-      machines.map((m) => ({
+      models.map((m) => ({
         value: m.name,
         label: m.name,
         group: m.vendor,
       })),
-    [machines],
+    [models],
   );
 
   return (
@@ -135,25 +170,41 @@ export default function SlicePage() {
           </label>
 
           <label>
-            Machine Profile
+            Printer Model
             <SearchSelect
-              options={machineOptions}
-              value={machine}
-              onChange={setMachine}
-              placeholder="Search machines..."
+              options={modelOptions}
+              value={selectedModel}
+              onChange={handleModelChange}
+              placeholder="Search printer models..."
             />
           </label>
+
+          {nozzleOptions.length > 0 && (
+            <label>
+              Nozzle Size
+              <select
+                value={selectedNozzle}
+                onChange={(e) => setSelectedNozzle(e.target.value)}
+              >
+                {nozzleOptions.map((n) => (
+                  <option key={n} value={n}>
+                    {n}mm
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <label>
             Print Quality
             <select
               value={process}
               onChange={(e) => setProcess(e.target.value)}
-              disabled={!machine}
+              disabled={!resolvedMachine}
             >
               {processes.length === 0 ? (
                 <option>
-                  {machine ? "Loading..." : "Select machine first"}
+                  {resolvedMachine ? "Loading..." : "Select machine first"}
                 </option>
               ) : (
                 processes.map((p) => (
@@ -170,11 +221,11 @@ export default function SlicePage() {
             <select
               value={filament}
               onChange={(e) => setFilament(e.target.value)}
-              disabled={!machine}
+              disabled={!resolvedMachine}
             >
               {filaments.length === 0 ? (
                 <option>
-                  {machine ? "Loading..." : "Select machine first"}
+                  {resolvedMachine ? "Loading..." : "Select machine first"}
                 </option>
               ) : (
                 filaments.map((f) => (

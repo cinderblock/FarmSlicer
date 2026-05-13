@@ -154,6 +154,22 @@ async fn health() -> Json<Value> {
 
 // -- Profiles --
 
+async fn list_machine_models(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let models: Vec<_> = state
+        .profile_store
+        .machine_models()
+        .iter()
+        .map(|m| {
+            json!({
+                "name": m.name,
+                "vendor": m.vendor,
+                "nozzle_diameters": m.nozzle_diameters,
+            })
+        })
+        .collect();
+    Json(json!(models))
+}
+
 async fn list_machines(State(state): State<Arc<AppState>>) -> Json<Value> {
     let machines: Vec<_> = state
         .profile_store
@@ -249,6 +265,7 @@ async fn list_printers(State(state): State<Arc<AppState>>) -> Json<Value> {
 struct CreatePrinter {
     name: String,
     machine_profile: Option<String>,
+    nozzle_diameter: Option<String>,
     protocol: Option<String>,
     address: Option<String>,
     serial_number: Option<String>,
@@ -262,6 +279,7 @@ async fn create_printer(
     let printer = state.db.create_printer(
         &body.name,
         body.machine_profile.as_deref().unwrap_or(""),
+        body.nozzle_diameter.as_deref().unwrap_or(""),
         body.protocol.as_deref().unwrap_or("bambu"),
         body.address.as_deref().unwrap_or(""),
         body.serial_number.as_deref().unwrap_or(""),
@@ -498,6 +516,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     // Protected routes — require auth when ADMIN_PASSPHRASE is set
     let protected = Router::new()
+        .route("/api/profiles/machine-models", get(list_machine_models))
         .route("/api/profiles/machines", get(list_machines))
         .route("/api/profiles/processes", get(list_processes))
         .route("/api/profiles/filaments", get(list_filaments))
