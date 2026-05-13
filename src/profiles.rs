@@ -107,7 +107,7 @@ impl ProfileStore {
             if !m.instantiable {
                 continue;
             }
-            if let (Some(ref model_name), Some(ref variant)) = (&m.printer_model, &m.printer_variant) {
+            if let (Some(model_name), Some(variant)) = (&m.printer_model, &m.printer_variant) {
                 let entry = model_nozzles
                     .entry(model_name.clone())
                     .or_insert_with(|| (m.vendor.clone(), Vec::new()));
