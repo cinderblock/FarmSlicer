@@ -1,5 +1,9 @@
+mod db;
 mod server;
 mod slicer;
+
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -8,7 +12,11 @@ async fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3000);
 
-    let app = server::router();
+    let data_dir = PathBuf::from("data");
+    let db = db::Db::open(&data_dir);
+    let state = Arc::new(server::AppState { db, data_dir });
+
+    let app = server::router(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await

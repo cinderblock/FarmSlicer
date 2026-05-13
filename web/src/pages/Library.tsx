@@ -1,13 +1,38 @@
+import { useState, useEffect, useCallback } from "react";
+
+interface SliceRecord {
+  id: string;
+  model_name: string;
+  print_time_sec: number;
+  filament_used_g: number;
+  file_size: number;
+  created_at: string;
+}
+
+function formatTime(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export default function LibraryPage() {
-  // TODO: fetch from /api/slices
-  const slices: {
-    id: string;
-    modelName: string;
-    createdAt: string;
-    printTime: string;
-    filamentUsed: string;
-    fileSize: string;
-  }[] = [];
+  const [slices, setSlices] = useState<SliceRecord[]>([]);
+
+  const fetchSlices = useCallback(async () => {
+    const res = await fetch("/api/slices");
+    setSlices(await res.json());
+  }, []);
+
+  useEffect(() => {
+    fetchSlices();
+  }, [fetchSlices]);
 
   return (
     <div className="page">
@@ -31,14 +56,19 @@ export default function LibraryPage() {
           <tbody>
             {slices.map((s) => (
               <tr key={s.id}>
-                <td>{s.modelName}</td>
-                <td>{s.createdAt}</td>
-                <td>{s.printTime}</td>
-                <td>{s.filamentUsed}</td>
-                <td>{s.fileSize}</td>
+                <td>{s.model_name}</td>
+                <td>{new Date(s.created_at + "Z").toLocaleDateString()}</td>
+                <td>{formatTime(s.print_time_sec)}</td>
+                <td>{s.filament_used_g.toFixed(1)}g</td>
+                <td>{formatSize(s.file_size)}</td>
                 <td>
-                  <button className="btn-sm">Print</button>
-                  <button className="btn-sm">Download</button>
+                  <a
+                    className="btn-sm"
+                    href={`/api/slices/${s.id}/download`}
+                    download
+                  >
+                    Download
+                  </a>
                 </td>
               </tr>
             ))}

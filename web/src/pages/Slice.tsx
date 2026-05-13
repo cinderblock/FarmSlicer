@@ -1,28 +1,52 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import ModelViewer from "../components/ModelViewer";
+
+interface Printer {
+  id: string;
+  name: string;
+}
 
 export default function SlicePage() {
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [slicing, setSlicing] = useState(false);
+  const [printers, setPrinters] = useState<Printer[]>([]);
+  const [printerId, setPrinterId] = useState("");
+  const [routing, setRouting] = useState("auto");
+  const [result, setResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/printers")
+      .then((r) => r.json())
+      .then(setPrinters)
+      .catch(() => {});
+  }, []);
 
   const handleSlice = useCallback(async () => {
     if (!modelFile) return;
     setSlicing(true);
+    setResult(null);
 
     const formData = new FormData();
     formData.append("model", modelFile);
-    // TODO: append config/profile selection
+    formData.append("routing", routing);
+    if (printerId) {
+      formData.append("printer_id", printerId);
+    }
 
     try {
-      const res = await fetch("/api/slice", { method: "POST", body: formData });
+      const res = await fetch("/api/jobs", { method: "POST", body: formData });
       const data = await res.json();
-      console.log("Slice job created:", data);
+      if (res.ok) {
+        setResult(`Job created: ${data.id}`);
+      } else {
+        setResult(`Error: ${data.error}`);
+      }
     } catch (err) {
-      console.error("Slice failed:", err);
+      setResult(`Failed: ${err}`);
     } finally {
       setSlicing(false);
     }
-  }, [modelFile]);
+  }, [modelFile, printerId, routing]);
 
   return (
     <div className="page slice-page">
@@ -36,28 +60,44 @@ export default function SlicePage() {
 
           <label>
             Printer
-            <select>
-              <option>Select printer...</option>
+            <select
+              value={printerId}
+              onChange={(e) => setPrinterId(e.target.value)}
+            >
+              <option value="">Any available</option>
+              {printers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             Filament
             <select>
-              <option>Select filament...</option>
+              <option>PLA (default)</option>
+              <option>PETG</option>
+              <option>ABS</option>
+              <option>TPU</option>
             </select>
           </label>
 
           <label>
             Profile
             <select>
-              <option>Select profile...</option>
+              <option>0.20mm Standard</option>
+              <option>0.12mm Fine</option>
+              <option>0.28mm Draft</option>
             </select>
           </label>
 
           <label>
             Routing
-            <select>
+            <select
+              value={routing}
+              onChange={(e) => setRouting(e.target.value)}
+            >
               <option value="auto">Auto-assign printer</option>
               <option value="lock">Lock to selected printer</option>
             </select>
@@ -77,8 +117,14 @@ export default function SlicePage() {
             disabled={!modelFile || slicing}
             onClick={handleSlice}
           >
-            {slicing ? "Slicing..." : "Slice"}
+            {slicing ? "Submitting..." : "Slice"}
           </button>
+
+          {result && (
+            <p className="hint" style={{ marginTop: "0.5rem" }}>
+              {result}
+            </p>
+          )}
         </div>
       </div>
     </div>
