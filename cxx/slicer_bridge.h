@@ -27,5 +27,6 @@ private:
 };
 
 std::unique_ptr<Slicer> new_slicer();
+bool slicer_ping();
 
 } // namespace farmslicer

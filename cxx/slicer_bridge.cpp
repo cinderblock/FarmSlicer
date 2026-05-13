@@ -94,4 +94,8 @@ std::unique_ptr<Slicer> new_slicer() {
     return std::make_unique<Slicer>();
 }
 
+bool slicer_ping() {
+    return true;
+}
+
 } // namespace farmslicer

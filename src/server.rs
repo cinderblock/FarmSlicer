@@ -5,20 +5,54 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use cxx::UniquePtr;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 
 use crate::db::Db;
+use crate::slicer;
+
+struct SlicerHandle(UniquePtr<slicer::Slicer>);
+// Safety: Slicer is only accessed through Mutex, one thread at a time
+unsafe impl Send for SlicerHandle {}
+unsafe impl Sync for SlicerHandle {}
 
 pub struct AppState {
     pub db: Db,
     pub data_dir: std::path::PathBuf,
+    slicer: Mutex<SlicerHandle>,
+    pub profiles_dir: String,
+    pub profile_names: Vec<String>,
+}
+
+impl AppState {
+    pub fn new(
+        db: Db,
+        data_dir: std::path::PathBuf,
+        slicer: UniquePtr<slicer::Slicer>,
+        profiles_dir: String,
+        profile_names: Vec<String>,
+    ) -> Self {
+        Self {
+            db,
+            data_dir,
+            slicer: Mutex::new(SlicerHandle(slicer)),
+            profiles_dir,
+            profile_names,
+        }
+    }
 }
 
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+// -- Profiles --
+
+async fn list_profiles(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!(state.profile_names))
 }
 
 // -- Printers --
@@ -85,10 +119,7 @@ async fn create_job(
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "model" => {
-                let file_name = field
-                    .file_name()
-                    .unwrap_or("model.stl")
-                    .to_string();
+                let file_name = field.file_name().unwrap_or("model.stl").to_string();
                 let data = field
                     .bytes()
                     .await
@@ -101,8 +132,12 @@ async fn create_job(
                     .unwrap_or("stl");
                 let dest = models_dir.join(format!("{id}.{ext}"));
 
-                std::fs::write(&dest, &data)
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))))?;
+                std::fs::write(&dest, &data).map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": e.to_string()})),
+                    )
+                })?;
 
                 model_name = file_name;
                 model_path = dest.to_string_lossy().to_string();
@@ -131,7 +166,60 @@ async fn create_job(
         .db
         .create_job(&model_name, &model_path, printer_id.as_deref(), &routing);
 
+    // Spawn slicing in background
+    let job_id = job.id.clone();
+    let state_clone = state.clone();
+    let model_path_clone = model_path.clone();
+    tokio::task::spawn_blocking(move || {
+        run_slice(&state_clone, &job_id, &model_path_clone);
+    });
+
     Ok((StatusCode::CREATED, Json(json!(job))))
+}
+
+fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str) {
+    state.db.update_job_status(job_id, "slicing", 10);
+
+    let gcode_dir = state.data_dir.join("gcode");
+    std::fs::create_dir_all(&gcode_dir).ok();
+    let output_path = gcode_dir
+        .join(format!("{job_id}.gcode"))
+        .to_string_lossy()
+        .to_string();
+
+    let config_json = "{}";
+
+    let result = {
+        let handle = state.slicer.lock().unwrap();
+        handle.0.slice(model_path, config_json, &output_path)
+    };
+
+    if result.success {
+        let file_size = std::fs::metadata(&result.gcode_path)
+            .map(|m| m.len() as i64)
+            .unwrap_or(0);
+
+        state.db.complete_job(
+            job_id,
+            &result.gcode_path,
+            result.print_time_sec,
+            result.filament_used_g,
+        );
+
+        let job = state.db.list_jobs().into_iter().find(|j| j.id == job_id);
+        if let Some(job) = job {
+            state.db.create_slice(
+                job_id,
+                &job.model_name,
+                &result.gcode_path,
+                result.print_time_sec,
+                result.filament_used_g,
+                file_size,
+            );
+        }
+    } else {
+        state.db.fail_job(job_id, &result.error);
+    }
 }
 
 async fn cancel_job(
@@ -187,6 +275,7 @@ async fn download_gcode(
 pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .route("/api/health", get(health))
+        .route("/api/profiles", get(list_profiles))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/{id}", delete(delete_printer))
         .route("/api/jobs", get(list_jobs).post(create_job))

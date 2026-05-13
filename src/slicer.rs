@@ -19,6 +19,7 @@ mod ffi {
         type Slicer;
 
         fn new_slicer() -> UniquePtr<Slicer>;
+        fn slicer_ping() -> bool;
         fn slice(&self, model_path: &str, config_json: &str, output_path: &str) -> SliceResult;
         fn list_profiles(&self, profiles_dir: &str) -> Vec<String>;
     }

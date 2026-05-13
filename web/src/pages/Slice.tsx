@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import ModelViewer from "../components/ModelViewer";
 
 interface Printer {
@@ -7,17 +8,25 @@ interface Printer {
 }
 
 export default function SlicePage() {
+  const navigate = useNavigate();
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
+  const [profiles, setProfiles] = useState<string[]>([]);
   const [printerId, setPrinterId] = useState("");
   const [routing, setRouting] = useState("auto");
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     fetch("/api/printers")
       .then((r) => r.json())
       .then(setPrinters)
+      .catch(() => {});
+    fetch("/api/profiles")
+      .then((r) => r.json())
+      .then(setProfiles)
       .catch(() => {});
   }, []);
 
@@ -37,16 +46,17 @@ export default function SlicePage() {
       const res = await fetch("/api/jobs", { method: "POST", body: formData });
       const data = await res.json();
       if (res.ok) {
-        setResult(`Job created: ${data.id}`);
+        setResult({ ok: true, message: `Slicing started` });
+        setTimeout(() => navigate("/jobs"), 1500);
       } else {
-        setResult(`Error: ${data.error}`);
+        setResult({ ok: false, message: data.error });
       }
     } catch (err) {
-      setResult(`Failed: ${err}`);
+      setResult({ ok: false, message: `${err}` });
     } finally {
       setSlicing(false);
     }
-  }, [modelFile, printerId, routing]);
+  }, [modelFile, printerId, routing, navigate]);
 
   return (
     <div className="page slice-page">
@@ -74,21 +84,26 @@ export default function SlicePage() {
           </label>
 
           <label>
-            Filament
+            Printer Profile
             <select>
-              <option>PLA (default)</option>
-              <option>PETG</option>
-              <option>ABS</option>
-              <option>TPU</option>
+              {profiles.length === 0 ? (
+                <option>Loading...</option>
+              ) : (
+                profiles.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 
           <label>
-            Profile
+            Quality
             <select>
-              <option>0.20mm Standard</option>
-              <option>0.12mm Fine</option>
-              <option>0.28mm Draft</option>
+              <option value="0.20">0.20mm Standard</option>
+              <option value="0.12">0.12mm Fine</option>
+              <option value="0.28">0.28mm Draft</option>
             </select>
           </label>
 
@@ -121,8 +136,14 @@ export default function SlicePage() {
           </button>
 
           {result && (
-            <p className="hint" style={{ marginTop: "0.5rem" }}>
-              {result}
+            <p
+              className="hint"
+              style={{
+                marginTop: "0.5rem",
+                color: result.ok ? "var(--success)" : "var(--error)",
+              }}
+            >
+              {result.message}
             </p>
           )}
         </div>

@@ -14,7 +14,23 @@ async fn main() {
 
     let data_dir = PathBuf::from("data");
     let db = db::Db::open(&data_dir);
-    let state = Arc::new(server::AppState { db, data_dir });
+
+    let slicer = slicer::new_slicer();
+    let profiles_dir = "extern/OrcaSlicer/resources/profiles";
+    let profiles: Vec<String> = slicer
+        .list_profiles(profiles_dir)
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    println!("{} printer profiles loaded", profiles.len());
+
+    let state = Arc::new(server::AppState::new(
+        db,
+        data_dir,
+        slicer,
+        profiles_dir.to_string(),
+        profiles,
+    ));
 
     let app = server::router(state);
 
