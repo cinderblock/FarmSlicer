@@ -26,12 +26,20 @@ async fn main() {
 
     tokio::spawn(discovery::run(discovered.clone()));
 
+    let passphrase = server::AppState::passphrase();
+    if passphrase.is_some() {
+        println!("Auth enabled (ADMIN_PASSPHRASE set)");
+    } else {
+        println!("Auth disabled (no ADMIN_PASSPHRASE)");
+    }
+
     let state = Arc::new(server::AppState::new(
         db,
         data_dir,
         slicer,
         profile_store,
         discovered,
+        passphrase,
     ));
 
     let app = server::router(state);

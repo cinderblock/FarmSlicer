@@ -23,6 +23,7 @@ REPO_URL="${REPO_URL:-git@github.com:cinderblock/FarmSlicer.git}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/farmslicer}"
 SERVICE_NAME="${SERVICE_NAME:-farmslicer}"
 SERVICE_PORT="${SERVICE_PORT:-9337}"
+ADMIN_PASSPHRASE="${ADMIN_PASSPHRASE:-}"
 BUILD_JOBS="${BUILD_JOBS:-}"
 
 SSH_TARGET="$DEPLOY_USER@$DEPLOY_HOST"
@@ -246,6 +247,7 @@ Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
 Environment=PORT=$SERVICE_PORT
+Environment=ADMIN_PASSPHRASE=$ADMIN_PASSPHRASE
 
 [Install]
 WantedBy=multi-user.target

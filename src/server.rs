@@ -1,6 +1,7 @@
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
-    http::StatusCode,
+    extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State},
+    http::{header, StatusCode},
+    middleware::{self, Next},
     response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
@@ -27,6 +28,8 @@ pub struct AppState {
     slicer: Mutex<SlicerHandle>,
     pub profile_store: ProfileStore,
     pub discovered: Arc<discovery::DiscoveryMap>,
+    /// Random session token, set on successful login. None = auth disabled.
+    pub session_token: Option<String>,
 }
 
 impl AppState {
@@ -36,16 +39,114 @@ impl AppState {
         slicer: UniquePtr<slicer::Slicer>,
         profile_store: ProfileStore,
         discovered: Arc<discovery::DiscoveryMap>,
+        passphrase: Option<String>,
     ) -> Self {
+        let session_token = passphrase.map(|_| uuid::Uuid::new_v4().to_string());
         Self {
             db,
             data_dir,
             slicer: Mutex::new(SlicerHandle(slicer)),
             profile_store,
             discovered,
+            session_token,
         }
     }
+
+    /// Returns the passphrase from env, if set.
+    pub fn passphrase() -> Option<String> {
+        std::env::var("ADMIN_PASSPHRASE").ok().filter(|s| !s.is_empty())
+    }
 }
+
+// -- Auth --
+
+fn get_session_cookie(req: &Request) -> Option<String> {
+    let cookie_header = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        if let Some(value) = part.strip_prefix("fs_session=") {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> impl IntoResponse {
+    // If no passphrase configured, auth is disabled
+    let Some(ref expected) = state.session_token else {
+        return next.run(req).await;
+    };
+
+    match get_session_cookie(&req) {
+        Some(token) if token == *expected => next.run(req).await,
+        _ => StatusCode::UNAUTHORIZED.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    passphrase: String,
+}
+
+async fn login(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LoginRequest>,
+) -> impl IntoResponse {
+    let passphrase = AppState::passphrase();
+
+    match (&passphrase, &state.session_token) {
+        (Some(expected), Some(token)) if body.passphrase == *expected => {
+            let cookie = format!(
+                "fs_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800"
+            );
+            (
+                StatusCode::OK,
+                [(header::SET_COOKIE, cookie)],
+                Json(json!({"ok": true})),
+            )
+                .into_response()
+        }
+        (None, None) => {
+            // Auth disabled
+            (StatusCode::OK, Json(json!({"ok": true}))).into_response()
+        }
+        _ => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"ok": false, "error": "Invalid passphrase"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn logout() -> impl IntoResponse {
+    let cookie = "fs_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie.to_string())],
+        Json(json!({"ok": true})),
+    )
+}
+
+async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
+    let auth_required = state.session_token.is_some();
+    let authenticated = if let Some(ref expected) = state.session_token {
+        get_session_cookie(&req)
+            .map(|t| t == *expected)
+            .unwrap_or(false)
+    } else {
+        true
+    };
+    Json(json!({
+        "auth_required": auth_required,
+        "authenticated": authenticated,
+    }))
+}
+
+// -- Health --
 
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
@@ -387,8 +488,16 @@ async fn download_gcode(
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
-    let api = Router::new()
+    // Public routes — no auth required
+    let public = Router::new()
         .route("/api/health", get(health))
+        .route("/api/auth/status", get(auth_status))
+        .route("/api/auth/login", post(login))
+        .route("/api/auth/logout", post(logout))
+        .with_state(state.clone());
+
+    // Protected routes — require auth when ADMIN_PASSPHRASE is set
+    let protected = Router::new()
         .route("/api/profiles/machines", get(list_machines))
         .route("/api/profiles/processes", get(list_processes))
         .route("/api/profiles/filaments", get(list_filaments))
@@ -400,11 +509,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/slices", get(list_slices))
         .route("/api/slices/{id}/download", get(download_gcode))
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 
     let static_files = ServeDir::new("dist/web")
         .append_index_html_on_directories(true)
         .fallback(tower_http::services::ServeFile::new("dist/web/index.html"));
 
-    api.fallback_service(static_files)
+    public.merge(protected).fallback_service(static_files)
 }
