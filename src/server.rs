@@ -1,5 +1,5 @@
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{delete, get, post},
@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 
 use crate::db::Db;
+use crate::profiles::ProfileStore;
 use crate::slicer;
 
 struct SlicerHandle(UniquePtr<slicer::Slicer>);
@@ -23,8 +24,7 @@ pub struct AppState {
     pub db: Db,
     pub data_dir: std::path::PathBuf,
     slicer: Mutex<SlicerHandle>,
-    pub profiles_dir: String,
-    pub profile_names: Vec<String>,
+    pub profile_store: ProfileStore,
 }
 
 impl AppState {
@@ -32,15 +32,13 @@ impl AppState {
         db: Db,
         data_dir: std::path::PathBuf,
         slicer: UniquePtr<slicer::Slicer>,
-        profiles_dir: String,
-        profile_names: Vec<String>,
+        profile_store: ProfileStore,
     ) -> Self {
         Self {
             db,
             data_dir,
             slicer: Mutex::new(SlicerHandle(slicer)),
-            profiles_dir,
-            profile_names,
+            profile_store,
         }
     }
 }
@@ -51,8 +49,67 @@ async fn health() -> Json<Value> {
 
 // -- Profiles --
 
-async fn list_profiles(State(state): State<Arc<AppState>>) -> Json<Value> {
-    Json(json!(state.profile_names))
+async fn list_machines(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let machines: Vec<_> = state
+        .profile_store
+        .instantiable_machines()
+        .into_iter()
+        .map(|m| json!({"name": m.name, "vendor": m.vendor}))
+        .collect();
+    Json(json!(machines))
+}
+
+#[derive(Deserialize)]
+struct ProfileQuery {
+    machine: Option<String>,
+}
+
+async fn list_processes(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProfileQuery>,
+) -> Json<Value> {
+    let processes: Vec<_> = match &q.machine {
+        Some(machine) => state
+            .profile_store
+            .processes_for_machine(machine)
+            .into_iter()
+            .map(|p| {
+                json!({"name": p.name, "vendor": p.vendor, "description": p.description})
+            })
+            .collect(),
+        None => state
+            .profile_store
+            .processes()
+            .iter()
+            .filter(|p| p.instantiable)
+            .map(|p| {
+                json!({"name": p.name, "vendor": p.vendor, "description": p.description})
+            })
+            .collect(),
+    };
+    Json(json!(processes))
+}
+
+async fn list_filaments(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProfileQuery>,
+) -> Json<Value> {
+    let filaments: Vec<_> = match &q.machine {
+        Some(machine) => state
+            .profile_store
+            .filaments_for_machine(machine)
+            .into_iter()
+            .map(|f| json!({"name": f.name, "vendor": f.vendor}))
+            .collect(),
+        None => state
+            .profile_store
+            .filaments()
+            .iter()
+            .filter(|f| f.instantiable)
+            .map(|f| json!({"name": f.name, "vendor": f.vendor}))
+            .collect(),
+    };
+    Json(json!(filaments))
 }
 
 // -- Printers --
@@ -110,6 +167,9 @@ async fn create_job(
     let mut model_path = String::new();
     let mut printer_id: Option<String> = None;
     let mut routing = "auto".to_string();
+    let mut machine_profile = String::new();
+    let mut process_profile = String::new();
+    let mut filament_profile = String::new();
 
     while let Some(field) = multipart
         .next_field()
@@ -151,6 +211,15 @@ async fn create_job(
             "routing" => {
                 routing = field.text().await.unwrap_or("auto".into());
             }
+            "machine" => {
+                machine_profile = field.text().await.unwrap_or_default();
+            }
+            "process" => {
+                process_profile = field.text().await.unwrap_or_default();
+            }
+            "filament" => {
+                filament_profile = field.text().await.unwrap_or_default();
+            }
             _ => {}
         }
     }
@@ -162,22 +231,38 @@ async fn create_job(
         ));
     }
 
+    let config_json = if !machine_profile.is_empty()
+        && !process_profile.is_empty()
+        && !filament_profile.is_empty()
+    {
+        state
+            .profile_store
+            .resolve_config(&machine_profile, &process_profile, &filament_profile)
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Profile error: {e}")})),
+                )
+            })?
+    } else {
+        "{}".to_string()
+    };
+
     let job = state
         .db
         .create_job(&model_name, &model_path, printer_id.as_deref(), &routing);
 
-    // Spawn slicing in background
     let job_id = job.id.clone();
     let state_clone = state.clone();
     let model_path_clone = model_path.clone();
     tokio::task::spawn_blocking(move || {
-        run_slice(&state_clone, &job_id, &model_path_clone);
+        run_slice(&state_clone, &job_id, &model_path_clone, &config_json);
     });
 
     Ok((StatusCode::CREATED, Json(json!(job))))
 }
 
-fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str) {
+fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json: &str) {
     state.db.update_job_status(job_id, "slicing", 10);
 
     let gcode_dir = state.data_dir.join("gcode");
@@ -186,8 +271,6 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str) {
         .join(format!("{job_id}.gcode"))
         .to_string_lossy()
         .to_string();
-
-    let config_json = "{}";
 
     let result = {
         let handle = state.slicer.lock().unwrap();
@@ -275,7 +358,9 @@ async fn download_gcode(
 pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .route("/api/health", get(health))
-        .route("/api/profiles", get(list_profiles))
+        .route("/api/profiles/machines", get(list_machines))
+        .route("/api/profiles/processes", get(list_processes))
+        .route("/api/profiles/filaments", get(list_filaments))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/{id}", delete(delete_printer))
         .route("/api/jobs", get(list_jobs).post(create_job))
@@ -285,7 +370,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .with_state(state);
 
-    let static_files = ServeDir::new("dist/web").append_index_html_on_directories(true);
+    let static_files = ServeDir::new("dist/web")
+        .append_index_html_on_directories(true)
+        .fallback(tower_http::services::ServeFile::new("dist/web/index.html"));
 
     api.fallback_service(static_files)
 }

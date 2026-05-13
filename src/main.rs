@@ -1,4 +1,5 @@
 mod db;
+mod profiles;
 mod server;
 mod slicer;
 
@@ -16,21 +17,10 @@ async fn main() {
     let db = db::Db::open(&data_dir);
 
     let slicer = slicer::new_slicer();
-    let profiles_dir = "extern/OrcaSlicer/resources/profiles";
-    let profiles: Vec<String> = slicer
-        .list_profiles(profiles_dir)
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect();
-    println!("{} printer profiles loaded", profiles.len());
+    let profiles_dir = PathBuf::from("extern/OrcaSlicer/resources/profiles");
+    let profile_store = profiles::ProfileStore::load(&profiles_dir);
 
-    let state = Arc::new(server::AppState::new(
-        db,
-        data_dir,
-        slicer,
-        profiles_dir.to_string(),
-        profiles,
-    ));
+    let state = Arc::new(server::AppState::new(db, data_dir, slicer, profile_store));
 
     let app = server::router(state);
 

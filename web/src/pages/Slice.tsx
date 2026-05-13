@@ -7,13 +7,24 @@ interface Printer {
   name: string;
 }
 
+interface ProfileEntry {
+  name: string;
+  vendor: string;
+  description?: string;
+}
+
 export default function SlicePage() {
   const navigate = useNavigate();
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
-  const [profiles, setProfiles] = useState<string[]>([]);
+  const [machines, setMachines] = useState<ProfileEntry[]>([]);
+  const [processes, setProcesses] = useState<ProfileEntry[]>([]);
+  const [filaments, setFilaments] = useState<ProfileEntry[]>([]);
   const [printerId, setPrinterId] = useState("");
+  const [machine, setMachine] = useState("");
+  const [process, setProcess] = useState("");
+  const [filament, setFilament] = useState("");
   const [routing, setRouting] = useState("auto");
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
@@ -24,11 +35,39 @@ export default function SlicePage() {
       .then((r) => r.json())
       .then(setPrinters)
       .catch(() => {});
-    fetch("/api/profiles")
+    fetch("/api/profiles/machines")
       .then((r) => r.json())
-      .then(setProfiles)
+      .then(setMachines)
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!machine) {
+      setProcesses([]);
+      setFilaments([]);
+      return;
+    }
+    fetch(`/api/profiles/processes?machine=${encodeURIComponent(machine)}`)
+      .then((r) => r.json())
+      .then((data: ProfileEntry[]) => {
+        setProcesses(data);
+        if (data.length > 0 && !data.some((p) => p.name === process)) {
+          const standard = data.find((p) => p.name.includes("0.20mm"));
+          setProcess(standard?.name ?? data[0].name);
+        }
+      })
+      .catch(() => {});
+    fetch(`/api/profiles/filaments?machine=${encodeURIComponent(machine)}`)
+      .then((r) => r.json())
+      .then((data: ProfileEntry[]) => {
+        setFilaments(data);
+        if (data.length > 0 && !data.some((f) => f.name === filament)) {
+          const pla = data.find((f) => f.name.includes("PLA"));
+          setFilament(pla?.name ?? data[0].name);
+        }
+      })
+      .catch(() => {});
+  }, [machine]);
 
   const handleSlice = useCallback(async () => {
     if (!modelFile) return;
@@ -38,15 +77,16 @@ export default function SlicePage() {
     const formData = new FormData();
     formData.append("model", modelFile);
     formData.append("routing", routing);
-    if (printerId) {
-      formData.append("printer_id", printerId);
-    }
+    if (printerId) formData.append("printer_id", printerId);
+    if (machine) formData.append("machine", machine);
+    if (process) formData.append("process", process);
+    if (filament) formData.append("filament", filament);
 
     try {
       const res = await fetch("/api/jobs", { method: "POST", body: formData });
       const data = await res.json();
       if (res.ok) {
-        setResult({ ok: true, message: `Slicing started` });
+        setResult({ ok: true, message: "Slicing started" });
         setTimeout(() => navigate("/jobs"), 1500);
       } else {
         setResult({ ok: false, message: data.error });
@@ -56,7 +96,15 @@ export default function SlicePage() {
     } finally {
       setSlicing(false);
     }
-  }, [modelFile, printerId, routing, navigate]);
+  }, [modelFile, printerId, routing, machine, process, filament, navigate]);
+
+  const groupByVendor = (entries: ProfileEntry[]) => {
+    const groups: Record<string, ProfileEntry[]> = {};
+    for (const e of entries) {
+      (groups[e.vendor] ??= []).push(e);
+    }
+    return groups;
+  };
 
   return (
     <div className="page slice-page">
@@ -84,14 +132,38 @@ export default function SlicePage() {
           </label>
 
           <label>
-            Printer Profile
-            <select>
-              {profiles.length === 0 ? (
-                <option>Loading...</option>
+            Machine Profile
+            <select value={machine} onChange={(e) => setMachine(e.target.value)}>
+              <option value="">Select machine...</option>
+              {Object.entries(groupByVendor(machines)).map(
+                ([vendor, entries]) => (
+                  <optgroup key={vendor} label={vendor}>
+                    {entries.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ),
+              )}
+            </select>
+          </label>
+
+          <label>
+            Print Quality
+            <select
+              value={process}
+              onChange={(e) => setProcess(e.target.value)}
+              disabled={!machine}
+            >
+              {processes.length === 0 ? (
+                <option>
+                  {machine ? "Loading..." : "Select machine first"}
+                </option>
               ) : (
-                profiles.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                processes.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
                   </option>
                 ))
               )}
@@ -99,11 +171,23 @@ export default function SlicePage() {
           </label>
 
           <label>
-            Quality
-            <select>
-              <option value="0.20">0.20mm Standard</option>
-              <option value="0.12">0.12mm Fine</option>
-              <option value="0.28">0.28mm Draft</option>
+            Filament
+            <select
+              value={filament}
+              onChange={(e) => setFilament(e.target.value)}
+              disabled={!machine}
+            >
+              {filaments.length === 0 ? (
+                <option>
+                  {machine ? "Loading..." : "Select machine first"}
+                </option>
+              ) : (
+                filaments.map((f) => (
+                  <option key={f.name} value={f.name}>
+                    {f.name}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 
