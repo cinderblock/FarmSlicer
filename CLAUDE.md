@@ -59,7 +59,7 @@ cargo build
 # Windows only: copy OCCT/GMP/MPFR DLLs to target/debug/ (they're dynamic)
 # Linux: set LD_LIBRARY_PATH or use rpath if OCCT linked dynamically
 
-cargo run          # Server on http://localhost:3000
+cargo run          # Server on http://localhost:9337
 ```
 
 ### build.rs adaptation

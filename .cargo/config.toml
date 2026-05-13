@@ -1,0 +1,6 @@
+# GNU ld (bfd) is required on Linux because the static C++ archives have
+# circular dependencies that need --start-group/--end-group to resolve.
+# lld (LLVM's linker, often the Rust default) doesn't handle these groups
+# correctly with rustc-link-arg, causing undefined symbol errors.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=bfd"]

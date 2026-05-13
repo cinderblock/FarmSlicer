@@ -11,7 +11,7 @@ async fn main() {
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(3000);
+        .unwrap_or(9337);
 
     let data_dir = PathBuf::from("data");
     let db = db::Db::open(&data_dir);
