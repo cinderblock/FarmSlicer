@@ -5,24 +5,47 @@ Rust backend (axum + tokio), libslic3r (via OrcaSlicer submodule) for slicing, R
 
 ## Build & Run
 
-### Prerequisites (Windows)
+### Prerequisites
 
-1. **Rust toolchain** — `rustup` with stable MSVC target
-2. **CMake** — must appear in PATH before Strawberry Perl's `c/bin`
-3. **Strawberry Perl** — needed for OpenSSL build (MSYS perl won't work)
-4. **Visual Studio Build Tools** — C++ workload with MSVC and Windows SDK
-5. **Node.js** — for frontend build
+**Common**: Rust toolchain (`rustup`), CMake, Node.js, C++ compiler, Perl
+
+**Linux (Ubuntu/Debian)**:
+```bash
+sudo apt install build-essential cmake perl libssl-dev libgtk-3-dev libglu1-mesa-dev \
+  libfontconfig1-dev libdbus-1-dev pkg-config m4 git curl
+```
+
+**Windows**:
+- Visual Studio Build Tools (C++ workload with MSVC and Windows SDK)
+- Strawberry Perl (MSYS perl won't work for OpenSSL)
+- CMake must appear in PATH before Strawberry Perl's `c/bin`
 
 ### Build OrcaSlicer deps (one-time)
 
 ```bash
-# From extern/OrcaSlicer/deps:
+git submodule update --init --recursive
+
+# Build deps
+cd extern/OrcaSlicer/deps
 mkdir build && cd build
+
+# Linux:
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc) dep_CURL dep_TBB dep_Boost dep_OCCT dep_OpenVDB
+
+# Windows:
 cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release --target dep_CURL dep_TBB dep_Boost dep_OCCT dep_OpenVDB
+
 # Then build libslic3r itself:
 cd ../../
 mkdir build && cd build
+
+# Linux:
+cmake .. -DCMAKE_BUILD_TYPE=Release -DSLIC3R_GUI=OFF
+make -j$(nproc) libslic3r libslic3r_cgal libnest2d
+
+# Windows:
 cmake .. -G "Visual Studio 17 2022" -A x64 -DSLIC3R_GUI=OFF
 cmake --build . --config Release --target libslic3r libslic3r_cgal libnest2d
 ```
@@ -32,9 +55,21 @@ cmake --build . --config Release --target libslic3r libslic3r_cgal libnest2d
 ```bash
 cd web && npm install && npx vite build && cd ..
 cargo build
-# Copy OCCT/GMP/MPFR DLLs to target/debug/ (they're dynamic)
+
+# Windows only: copy OCCT/GMP/MPFR DLLs to target/debug/ (they're dynamic)
+# Linux: set LD_LIBRARY_PATH or use rpath if OCCT linked dynamically
+
 cargo run          # Server on http://localhost:3000
 ```
+
+### build.rs adaptation
+
+The `build.rs` has hardcoded paths for Windows library layout (`Release/` subdirs,
+`.lib` extensions). On Linux you'll need to adjust:
+- Library search paths: no `Release/` subdirectory (libs are directly in build dirs)
+- Library names: `libslic3r` not `libslic3r.lib`, link via `-l` names
+- System libs: replace Windows-specific libs (Psapi, Advapi32, etc.) with Linux equivalents (pthread, dl, m)
+- OCCT/Boost/TBB may be `.a` or `.so` depending on build config
 
 ## Project Structure
 
