@@ -122,8 +122,11 @@ async fn list_printers(State(state): State<Arc<AppState>>) -> Json<Value> {
 #[derive(Deserialize)]
 struct CreatePrinter {
     name: String,
+    machine_profile: Option<String>,
     protocol: Option<String>,
     address: Option<String>,
+    serial_number: Option<String>,
+    access_code: Option<String>,
 }
 
 async fn create_printer(
@@ -132,8 +135,11 @@ async fn create_printer(
 ) -> (StatusCode, Json<Value>) {
     let printer = state.db.create_printer(
         &body.name,
+        body.machine_profile.as_deref().unwrap_or(""),
         body.protocol.as_deref().unwrap_or("bambu"),
         body.address.as_deref().unwrap_or(""),
+        body.serial_number.as_deref().unwrap_or(""),
+        body.access_code.as_deref().unwrap_or(""),
     );
     (StatusCode::CREATED, Json(json!(printer)))
 }

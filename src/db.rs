@@ -11,8 +11,11 @@ pub struct Db {
 pub struct Printer {
     pub id: String,
     pub name: String,
+    pub machine_profile: String,
     pub protocol: String,
     pub address: String,
+    pub serial_number: String,
+    pub access_code: String,
     pub status: String,
     pub current_job: Option<String>,
 }
@@ -59,8 +62,11 @@ impl Db {
             "CREATE TABLE IF NOT EXISTS printers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                machine_profile TEXT NOT NULL DEFAULT '',
                 protocol TEXT NOT NULL DEFAULT 'bambu',
                 address TEXT NOT NULL DEFAULT '',
+                serial_number TEXT NOT NULL DEFAULT '',
+                access_code TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'offline',
                 current_job TEXT
             );
@@ -91,6 +97,15 @@ impl Db {
             );"
         ).expect("failed to create tables");
 
+        // Migrations — add columns that may not exist in older databases
+        for col in &["machine_profile", "serial_number", "access_code"] {
+            if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {
+                conn.execute_batch(
+                    &format!("ALTER TABLE printers ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
+                ).ok();
+            }
+        }
+
         Db { conn: Mutex::new(conn) }
     }
 
@@ -99,16 +114,19 @@ impl Db {
     pub fn list_printers(&self) -> Vec<Printer> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, protocol, address, status, current_job FROM printers ORDER BY name")
+            .prepare("SELECT id, name, machine_profile, protocol, address, serial_number, access_code, status, current_job FROM printers ORDER BY name")
             .unwrap();
         stmt.query_map([], |row| {
             Ok(Printer {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                protocol: row.get(2)?,
-                address: row.get(3)?,
-                status: row.get(4)?,
-                current_job: row.get(5)?,
+                machine_profile: row.get(2)?,
+                protocol: row.get(3)?,
+                address: row.get(4)?,
+                serial_number: row.get(5)?,
+                access_code: row.get(6)?,
+                status: row.get(7)?,
+                current_job: row.get(8)?,
             })
         })
         .unwrap()
@@ -116,19 +134,30 @@ impl Db {
         .collect()
     }
 
-    pub fn create_printer(&self, name: &str, protocol: &str, address: &str) -> Printer {
+    pub fn create_printer(
+        &self,
+        name: &str,
+        machine_profile: &str,
+        protocol: &str,
+        address: &str,
+        serial_number: &str,
+        access_code: &str,
+    ) -> Printer {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO printers (id, name, protocol, address) VALUES (?1, ?2, ?3, ?4)",
-            params![id, name, protocol, address],
+            "INSERT INTO printers (id, name, machine_profile, protocol, address, serial_number, access_code) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, name, machine_profile, protocol, address, serial_number, access_code],
         )
         .unwrap();
         Printer {
             id,
             name: name.to_string(),
+            machine_profile: machine_profile.to_string(),
             protocol: protocol.to_string(),
             address: address.to_string(),
+            serial_number: serial_number.to_string(),
+            access_code: access_code.to_string(),
             status: "offline".to_string(),
             current_job: None,
         }
