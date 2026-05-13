@@ -15,6 +15,7 @@ fn main() {
         .include(orca_dir.join("src/libslic3r"))
         // Dependencies from the OrcaSlicer deps build
         .include(deps_prefix.join("include"))
+        .include(deps_prefix.join("include/boost-1_84"))
         // Windows defines
         .define("_USE_MATH_DEFINES", None)
         .define("_WIN32", None)
