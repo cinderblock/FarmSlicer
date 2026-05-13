@@ -224,14 +224,20 @@ REMOTE_SCRIPT
 
 cmd_setup_service() {
     echo "==> Installing systemd service on $DEPLOY_HOST..."
-    ssh_run bash -s -- "$SERVICE_NAME" "$REMOTE_DIR" "$DEPLOY_USER" "$SERVICE_PORT" <<'REMOTE_SCRIPT'
+    ssh_run bash -s -- "$SERVICE_NAME" "$REMOTE_DIR" "$DEPLOY_USER" "$SERVICE_PORT" "$ADMIN_PASSPHRASE" <<'REMOTE_SCRIPT'
 set -euo pipefail
 SERVICE_NAME="$1"
 REMOTE_DIR="$2"
 SERVICE_USER="$3"
 SERVICE_PORT="$4"
+ADMIN_PASSPHRASE="${5:-}"
 
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+
+PASSPHRASE_LINE=""
+if [[ -n "$ADMIN_PASSPHRASE" ]]; then
+    PASSPHRASE_LINE="Environment=ADMIN_PASSPHRASE=$ADMIN_PASSPHRASE"
+fi
 
 sudo tee "$UNIT_FILE" > /dev/null <<UNIT
 [Unit]
@@ -247,7 +253,7 @@ Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
 Environment=PORT=$SERVICE_PORT
-Environment=ADMIN_PASSPHRASE=$ADMIN_PASSPHRASE
+$PASSPHRASE_LINE
 
 [Install]
 WantedBy=multi-user.target
