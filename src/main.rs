@@ -1,4 +1,5 @@
 mod server;
+mod slicer;
 
 #[tokio::main]
 async fn main() {
