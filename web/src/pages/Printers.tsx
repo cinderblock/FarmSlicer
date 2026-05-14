@@ -238,7 +238,7 @@ export default function PrintersPage() {
               </datalist>
             </label>
 
-            {selectedVendor && (
+            {vendorModels.length > 0 && (
               <label>
                 Printer Model
                 <select

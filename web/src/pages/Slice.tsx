@@ -198,7 +198,7 @@ export default function SlicePage() {
             </datalist>
           </label>
 
-          {selectedVendor && (
+          {vendorModels.length > 0 && (
             <label>
               Printer Model
               <select
