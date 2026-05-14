@@ -7,6 +7,8 @@ interface SettingDef {
   max?: number;
   step?: number;
   options?: string[];
+  category: string;
+  common: boolean;
 }
 
 interface Props {
