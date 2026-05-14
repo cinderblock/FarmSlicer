@@ -58,9 +58,16 @@ Separate nozzle size selection from machine model selection in both the Printers
 - [x] Update discovery mapping to separate model from nozzle
 - [x] Deployed to buildhost (commits 740cd92, aa7127b, dc02edb)
 - [x] Visual verification of cascading dropdowns in browser (both Printers and Slice pages confirmed working)
+- [x] Frontend: Material → Variant → Filament → Color cascade for filament selection (commit 6e4732c)
+- [x] Deployed and verified filament cascade on buildhost
+- [x] Phase 1: Per-job overrides — Quick Settings panel on Slice page (commits 94b48cb, 193d0de)
+- [x] Phase 2: Custom profiles — SQLite CRUD, Profiles page, Save as Profile (commit 8e4e7c9)
+- [x] Phase 3: Full profile editor — 90 settings, categorized tabs, search, raw JSON (commit 2cd3ea5)
 
 ## Decisions Made
 
 1. Printer DB stores base model (`machine_profile`) + `nozzle_diameter` separately so nozzle can be changed without re-selecting the model.
 2. Used native `<select>` elements with a Manufacturer → Model → Nozzle cascade instead of the SearchSelect component.
 3. Default nozzle auto-selects 0.4mm when available.
+4. Filament selection has three layers: Material type (PLA, PETG, ...) → Structural variant (Standard, CF, GF, FR — only shown when >1 exists) → Specific filament profile (brand + finish).
+5. Color is a free-text metadata field, separate from the profile-driven selections. Not yet wired to backend storage — placeholder for future farm routing by filament color.
