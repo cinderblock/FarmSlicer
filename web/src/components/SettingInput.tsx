@@ -13,14 +13,17 @@ interface SettingDef {
 
 interface Props {
   setting: SettingDef;
-  defaultValue: string | undefined;
+  defaultValue: unknown;
   value: string | undefined;
   onChange: (key: string, value: string | undefined) => void;
 }
 
-function parseOrcaValue(raw: string | undefined): string {
-  if (raw === undefined) return "";
-  // OrcaSlicer stores some values as single-element JSON arrays: ["40"]
+function parseOrcaValue(raw: unknown): string {
+  if (raw === undefined || raw === null) return "";
+  if (typeof raw !== "string") {
+    if (Array.isArray(raw)) return String(raw[0] ?? "");
+    return String(raw);
+  }
   if (raw.startsWith("[")) {
     try {
       const arr = JSON.parse(raw);
