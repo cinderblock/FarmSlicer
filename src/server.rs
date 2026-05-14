@@ -186,6 +186,30 @@ struct ProfileQuery {
     machine: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ResolveQuery {
+    machine: String,
+    process: String,
+    filament: String,
+}
+
+async fn resolve_profiles(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ResolveQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config_str = state
+        .profile_store
+        .resolve_config(&q.machine, &q.process, &q.filament)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Profile error: {e}")})),
+            )
+        })?;
+    let config: Value = serde_json::from_str(&config_str).unwrap_or(json!({}));
+    Ok(Json(config))
+}
+
 async fn list_processes(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProfileQuery>,
@@ -321,6 +345,7 @@ async fn create_job(
     let mut machine_profile = String::new();
     let mut process_profile = String::new();
     let mut filament_profile = String::new();
+    let mut overrides_str = String::new();
 
     while let Some(field) = multipart
         .next_field()
@@ -371,6 +396,9 @@ async fn create_job(
             "filament" => {
                 filament_profile = field.text().await.unwrap_or_default();
             }
+            "overrides" => {
+                overrides_str = field.text().await.unwrap_or_default();
+            }
             _ => {}
         }
     }
@@ -386,7 +414,7 @@ async fn create_job(
         && !process_profile.is_empty()
         && !filament_profile.is_empty()
     {
-        state
+        let mut config_str = state
             .profile_store
             .resolve_config(&machine_profile, &process_profile, &filament_profile)
             .map_err(|e| {
@@ -394,14 +422,39 @@ async fn create_job(
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": format!("Profile error: {e}")})),
                 )
-            })?
+            })?;
+
+        // Merge per-job overrides on top of resolved config
+        if !overrides_str.is_empty() {
+            if let Ok(overrides) = serde_json::from_str::<serde_json::Map<String, Value>>(&overrides_str) {
+                if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
+                    for (k, v) in overrides {
+                        config.insert(k, v);
+                    }
+                    config_str = serde_json::to_string(&Value::Object(config)).unwrap();
+                }
+            }
+        }
+
+        config_str
     } else {
         "{}".to_string()
     };
 
-    let job = state
-        .db
-        .create_job(&model_name, &model_path, printer_id.as_deref(), &routing);
+    let overrides_json = if overrides_str.is_empty() {
+        None
+    } else {
+        Some(overrides_str)
+    };
+
+    let job = state.db.create_job(
+        &model_name,
+        &model_path,
+        printer_id.as_deref(),
+        &routing,
+        Some(&config_json),
+        overrides_json.as_deref(),
+    );
 
     let job_id = job.id.clone();
     let state_clone = state.clone();
@@ -521,6 +574,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/profiles/machines", get(list_machines))
         .route("/api/profiles/processes", get(list_processes))
         .route("/api/profiles/filaments", get(list_filaments))
+        .route("/api/profiles/resolve", get(resolve_profiles))
         .route("/api/discovery", get(list_discovered))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/{id}", delete(delete_printer))

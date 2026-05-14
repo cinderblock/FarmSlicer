@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import ModelViewer from "../components/ModelViewer";
+import OverridesPanel from "../components/OverridesPanel";
 
 interface Printer {
   id: string;
@@ -95,6 +96,8 @@ export default function SlicePage() {
   const [materialFilter, setMaterialFilter] = useState("");
   const [variantFilter, setVariantFilter] = useState("");
   const [color, setColor] = useState("");
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [resolvedConfig, setResolvedConfig] = useState<Record<string, string> | null>(null);
   const [routing, setRouting] = useState("auto");
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
@@ -262,6 +265,23 @@ export default function SlicePage() {
       .catch(() => {});
   }, [resolvedMachine]);
 
+  // Fetch resolved config when profile selections change
+  useEffect(() => {
+    if (!resolvedMachine || !process || !filament) {
+      setResolvedConfig(null);
+      return;
+    }
+    const params = new URLSearchParams({
+      machine: resolvedMachine,
+      process,
+      filament,
+    });
+    fetch(`/api/profiles/resolve?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setResolvedConfig(data))
+      .catch(() => setResolvedConfig(null));
+  }, [resolvedMachine, process, filament]);
+
   const handleSlice = useCallback(async () => {
     if (!modelFile) return;
     setSlicing(true);
@@ -275,6 +295,9 @@ export default function SlicePage() {
     if (process) formData.append("process", process);
     if (filament) formData.append("filament", filament);
     if (color) formData.append("color", color);
+    if (Object.keys(overrides).length > 0) {
+      formData.append("overrides", JSON.stringify(overrides));
+    }
 
     try {
       const res = await fetch("/api/jobs", { method: "POST", body: formData });
@@ -446,6 +469,13 @@ export default function SlicePage() {
               disabled={!resolvedMachine}
             />
           </label>
+
+          <OverridesPanel
+            resolvedConfig={resolvedConfig}
+            overrides={overrides}
+            onChange={setOverrides}
+            disabled={!resolvedMachine}
+          />
 
           <label>
             Routing

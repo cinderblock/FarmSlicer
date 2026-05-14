@@ -1,0 +1,223 @@
+[
+  {
+    "key": "layer_height",
+    "label": "Layer Height",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.04,
+    "max": 0.6,
+    "step": 0.04,
+    "category": "Quality",
+    "common": true
+  },
+  {
+    "key": "initial_layer_print_height",
+    "label": "Initial Layer Height",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.04,
+    "max": 0.6,
+    "step": 0.04,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "line_width",
+    "label": "Line Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "wall_loops",
+    "label": "Wall Loops",
+    "type": "int",
+    "min": 1,
+    "max": 20,
+    "step": 1,
+    "category": "Strength",
+    "common": true
+  },
+  {
+    "key": "top_shell_layers",
+    "label": "Top Layers",
+    "type": "int",
+    "min": 0,
+    "max": 20,
+    "step": 1,
+    "category": "Strength",
+    "common": true
+  },
+  {
+    "key": "bottom_shell_layers",
+    "label": "Bottom Layers",
+    "type": "int",
+    "min": 0,
+    "max": 20,
+    "step": 1,
+    "category": "Strength",
+    "common": true
+  },
+  {
+    "key": "sparse_infill_density",
+    "label": "Infill Density",
+    "type": "percent",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Strength",
+    "common": true
+  },
+  {
+    "key": "sparse_infill_pattern",
+    "label": "Infill Pattern",
+    "type": "enum",
+    "options": [
+      "grid", "triangles", "tri-hexagon", "cubic", "gyroid",
+      "honeycomb", "3dhoneycomb", "adaptivecubic", "alignedrectilinear",
+      "rectilinear", "concentric", "hilbertcurve", "archimedeanChords",
+      "octagramSpiral", "supportcubic", "lightning", "crosshatch"
+    ],
+    "category": "Strength",
+    "common": true
+  },
+  {
+    "key": "enable_support",
+    "label": "Enable Support",
+    "type": "bool",
+    "category": "Support",
+    "common": true
+  },
+  {
+    "key": "support_type",
+    "label": "Support Type",
+    "type": "enum",
+    "options": ["normal(auto)", "tree(auto)", "normal(manual)", "tree(manual)"],
+    "category": "Support",
+    "common": true
+  },
+  {
+    "key": "support_on_build_plate_only",
+    "label": "Support on Build Plate Only",
+    "type": "bool",
+    "category": "Support",
+    "common": true
+  },
+  {
+    "key": "support_threshold_angle",
+    "label": "Support Threshold Angle",
+    "type": "int",
+    "unit": "°",
+    "min": 0,
+    "max": 90,
+    "step": 5,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "outer_wall_speed",
+    "label": "Outer Wall Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": true
+  },
+  {
+    "key": "inner_wall_speed",
+    "label": "Inner Wall Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": true
+  },
+  {
+    "key": "sparse_infill_speed",
+    "label": "Infill Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": true
+  },
+  {
+    "key": "top_surface_speed",
+    "label": "Top Surface Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "travel_speed",
+    "label": "Travel Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 10,
+    "max": 1000,
+    "step": 10,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "initial_layer_speed",
+    "label": "Initial Layer Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 200,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "brim_width",
+    "label": "Brim Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 50,
+    "step": 1,
+    "category": "Adhesion",
+    "common": false
+  },
+  {
+    "key": "raft_layers",
+    "label": "Raft Layers",
+    "type": "int",
+    "min": 0,
+    "max": 10,
+    "step": 1,
+    "category": "Adhesion",
+    "common": false
+  },
+  {
+    "key": "spiral_mode",
+    "label": "Spiral Vase Mode",
+    "type": "bool",
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "ironing_type",
+    "label": "Ironing",
+    "type": "enum",
+    "options": ["no ironing", "top", "topmost", "all solid layer"],
+    "category": "Quality",
+    "common": false
+  }
+]

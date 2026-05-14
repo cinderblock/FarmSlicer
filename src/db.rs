@@ -35,6 +35,8 @@ pub struct Job {
     pub print_time_sec: Option<f64>,
     pub filament_used_g: Option<f64>,
     pub error: Option<String>,
+    pub config_json: Option<String>,
+    pub overrides_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -104,6 +106,13 @@ impl Db {
             if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {
                 conn.execute_batch(
                     &format!("ALTER TABLE printers ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
+                ).ok();
+            }
+        }
+        for col in &["config_json", "overrides_json"] {
+            if conn.prepare(&format!("SELECT {col} FROM jobs LIMIT 0")).is_err() {
+                conn.execute_batch(
+                    &format!("ALTER TABLE jobs ADD COLUMN {col} TEXT;")
                 ).ok();
             }
         }
@@ -184,6 +193,7 @@ impl Db {
                 "SELECT j.id, j.model_name, j.model_path, j.status, j.progress,
                         j.printer_id, p.name, j.routing, j.gcode_path,
                         j.print_time_sec, j.filament_used_g, j.error,
+                        j.config_json, j.overrides_json,
                         j.created_at, j.updated_at
                  FROM jobs j LEFT JOIN printers p ON j.printer_id = p.id
                  ORDER BY j.created_at DESC",
@@ -203,8 +213,10 @@ impl Db {
                 print_time_sec: row.get(9)?,
                 filament_used_g: row.get(10)?,
                 error: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                config_json: row.get(12)?,
+                overrides_json: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })
         .unwrap()
@@ -218,12 +230,14 @@ impl Db {
         model_path: &str,
         printer_id: Option<&str>,
         routing: &str,
+        config_json: Option<&str>,
+        overrides_json: Option<&str>,
     ) -> Job {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, model_name, model_path, printer_id, routing],
+            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, model_name, model_path, printer_id, routing, config_json, overrides_json],
         )
         .unwrap();
         let created_at: String = conn
@@ -242,6 +256,8 @@ impl Db {
             print_time_sec: None,
             filament_used_g: None,
             error: None,
+            config_json: config_json.map(String::from),
+            overrides_json: overrides_json.map(String::from),
             created_at: created_at.clone(),
             updated_at: created_at,
         }
