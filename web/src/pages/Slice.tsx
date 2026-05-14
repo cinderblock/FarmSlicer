@@ -15,6 +15,72 @@ interface ProfileEntry {
   description?: string;
 }
 
+// Extract the base material type from a filament profile name.
+// e.g., "Bambu PLA Aero @BBL X1C" → "PLA"
+//       "Generic PETG-CF @BBL H2D" → "PETG"
+//       "Bambu PA6-CF @BBL H2D" → "PA"
+function materialType(name: string): string {
+  const base = name.replace(/@.*$/, "").trim();
+  const afterBrand = base.replace(/^\S+\s+/, "");
+
+  // Ordered: check longer/more-specific prefixes first.
+  // Composites (PA6-CF, PLA-CF, PETG-CF, ...) group with their base polymer.
+  const groups: [string, string][] = [
+    ["PAHT", "PA"],
+    ["PA6", "PA"],
+    ["PA", "PA"],
+    ["PETG", "PETG"],
+    ["PET", "PET"],
+    ["PLA", "PLA"],
+    ["PPS", "PPS"],
+    ["PPA", "PPA"],
+    ["PP", "PP"],
+    ["PCTG", "PCTG"],
+    ["PC", "PC"],
+    ["PE", "PE"],
+    ["ASA", "ASA"],
+    ["ABS", "ABS"],
+    ["TPU", "TPU"],
+    ["PVA", "PVA"],
+    ["BVOH", "BVOH"],
+    ["HIPS", "HIPS"],
+    ["EVA", "EVA"],
+    ["PHA", "PHA"],
+    ["Support", "Support"],
+  ];
+
+  for (const [prefix, group] of groups) {
+    if (afterBrand.startsWith(prefix)) return group;
+  }
+  return "Other";
+}
+
+// Extract the structural material variant from a filament profile name.
+// CF (Carbon Fiber), GF (Glass Fiber), FR (Fire Retardant) are compositional
+// modifiers that fundamentally change printing requirements (e.g., hardened nozzle).
+// Returns "Standard" for base materials without a structural modifier.
+function materialVariant(name: string): string {
+  const base = name.replace(/@.*$/, "").trim();
+  const afterBrand = base.replace(/^\S+\s+/, "");
+
+  // Match hyphenated structural suffixes: PLA-CF, PA6-GF, PETG-CF, etc.
+  const hyphenMatch = afterBrand.match(/-(\w+)/);
+  if (hyphenMatch) {
+    const suffix = hyphenMatch[1].toUpperCase();
+    if (["CF", "GF", "FR"].includes(suffix)) return suffix;
+  }
+
+  // Space-separated: "PC FR"
+  if (/\bFR\b/.test(afterBrand) && materialType(name) === "PC") return "FR";
+
+  return "Standard";
+}
+
+// Strip the @machine suffix for display
+function filamentDisplayName(name: string): string {
+  return name.replace(/@.*$/, "").trim();
+}
+
 export default function SlicePage() {
   const navigate = useNavigate();
   const [modelFile, setModelFile] = useState<File | null>(null);
@@ -26,6 +92,9 @@ export default function SlicePage() {
   const [selectedMachine, setSelectedMachine] = useState("");
   const [process, setProcess] = useState("");
   const [filament, setFilament] = useState("");
+  const [materialFilter, setMaterialFilter] = useState("");
+  const [variantFilter, setVariantFilter] = useState("");
+  const [color, setColor] = useState("");
   const [routing, setRouting] = useState("auto");
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
@@ -63,10 +132,80 @@ export default function SlicePage() {
     return selectedMachine || availableMachines[0] || "";
   }, [printerId, printers, selectedMachine, availableMachines]);
 
+  // Material types available for the current filament list
+  const materialTypes = useMemo(() => {
+    const types = new Set(filaments.map((f) => materialType(f.name)));
+    return [...types].sort();
+  }, [filaments]);
+
+  // Structural variants available for the selected material type
+  const availableVariants = useMemo(() => {
+    if (!materialFilter) return [];
+    const ofType = filaments.filter((f) => materialType(f.name) === materialFilter);
+    const variants = [...new Set(ofType.map((f) => materialVariant(f.name)))];
+    return variants.sort((a, b) =>
+      a === "Standard" ? -1 : b === "Standard" ? 1 : a.localeCompare(b),
+    );
+  }, [filaments, materialFilter]);
+
+  // Filaments filtered by material type and structural variant
+  const filteredFilaments = useMemo(() => {
+    let filtered = filaments;
+    if (materialFilter) {
+      filtered = filtered.filter((f) => materialType(f.name) === materialFilter);
+    }
+    if (variantFilter) {
+      filtered = filtered.filter(
+        (f) => materialVariant(f.name) === variantFilter,
+      );
+    }
+    return filtered;
+  }, [filaments, materialFilter, variantFilter]);
+
   const handlePrinterChange = (id: string) => {
     setPrinterId(id);
     setProcess("");
     setFilament("");
+    setMaterialFilter("");
+    setVariantFilter("");
+  };
+
+  const handleMaterialChange = (type: string) => {
+    setMaterialFilter(type);
+    const ofType = type
+      ? filaments.filter((f) => materialType(f.name) === type)
+      : filaments;
+    // Default to "Standard" variant if available
+    const variants = [...new Set(ofType.map((f) => materialVariant(f.name)))];
+    const defaultVariant = variants.includes("Standard")
+      ? "Standard"
+      : variants[0] ?? "";
+    setVariantFilter(defaultVariant);
+    // Auto-select filament from the variant-filtered set
+    const filtered = ofType.filter(
+      (f) => materialVariant(f.name) === defaultVariant,
+    );
+    if (filtered.length > 0 && !filtered.some((f) => f.name === filament)) {
+      const basic =
+        filtered.find((f) => f.name.includes("Basic")) ??
+        filtered.find((f) => f.name.startsWith("Generic")) ??
+        filtered[0];
+      setFilament(basic.name);
+    }
+  };
+
+  const handleVariantChange = (variant: string) => {
+    setVariantFilter(variant);
+    const filtered = filaments
+      .filter((f) => materialType(f.name) === materialFilter)
+      .filter((f) => materialVariant(f.name) === variant);
+    if (filtered.length > 0 && !filtered.some((f) => f.name === filament)) {
+      const basic =
+        filtered.find((f) => f.name.includes("Basic")) ??
+        filtered.find((f) => f.name.startsWith("Generic")) ??
+        filtered[0];
+      setFilament(basic.name);
+    }
   };
 
   useEffect(() => {
@@ -93,9 +232,31 @@ export default function SlicePage() {
       .then((r) => r.json())
       .then((data: ProfileEntry[]) => {
         setFilaments(data);
-        if (data.length > 0 && !data.some((f) => f.name === filament)) {
-          const pla = data.find((f) => f.name.includes("PLA"));
-          setFilament(pla?.name ?? data[0].name);
+        // Default to PLA material filter
+        const types = [...new Set(data.map((f) => materialType(f.name)))];
+        const defaultType = types.includes("PLA") ? "PLA" : types[0] ?? "";
+        setMaterialFilter(defaultType);
+        // Default to Standard variant
+        const ofType = data.filter(
+          (f) => materialType(f.name) === defaultType,
+        );
+        const variants = [
+          ...new Set(ofType.map((f) => materialVariant(f.name))),
+        ];
+        const defaultVariant = variants.includes("Standard")
+          ? "Standard"
+          : variants[0] ?? "";
+        setVariantFilter(defaultVariant);
+        // Auto-select a default filament from the filtered material + variant
+        const filtered = ofType.filter(
+          (f) => materialVariant(f.name) === defaultVariant,
+        );
+        if (filtered.length > 0 && !filtered.some((f) => f.name === filament)) {
+          const basic =
+            filtered.find((f) => f.name.includes("Basic")) ??
+            filtered.find((f) => f.name.startsWith("Generic")) ??
+            filtered[0];
+          setFilament(basic.name);
         }
       })
       .catch(() => {});
@@ -113,6 +274,7 @@ export default function SlicePage() {
     if (resolvedMachine) formData.append("machine", resolvedMachine);
     if (process) formData.append("process", process);
     if (filament) formData.append("filament", filament);
+    if (color) formData.append("color", color);
 
     try {
       const res = await fetch("/api/jobs", { method: "POST", body: formData });
@@ -135,6 +297,7 @@ export default function SlicePage() {
     resolvedMachine,
     process,
     filament,
+    color,
     navigate,
   ]);
 
@@ -205,13 +368,13 @@ export default function SlicePage() {
           </label>
 
           <label>
-            Filament
+            Material
             <select
-              value={filament}
-              onChange={(e) => setFilament(e.target.value)}
+              value={materialFilter}
+              onChange={(e) => handleMaterialChange(e.target.value)}
               disabled={!resolvedMachine}
             >
-              {filaments.length === 0 ? (
+              {materialTypes.length === 0 ? (
                 <option>
                   {resolvedMachine
                     ? "Loading..."
@@ -220,13 +383,68 @@ export default function SlicePage() {
                       : "Select printer first"}
                 </option>
               ) : (
-                filaments.map((f) => (
+                <>
+                  <option value="">All materials</option>
+                  {materialTypes.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          </label>
+
+          {availableVariants.length > 1 && (
+            <label>
+              Variant
+              <select
+                value={variantFilter}
+                onChange={(e) => handleVariantChange(e.target.value)}
+              >
+                {availableVariants.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label>
+            Filament
+            <select
+              value={filament}
+              onChange={(e) => setFilament(e.target.value)}
+              disabled={!resolvedMachine}
+            >
+              {filteredFilaments.length === 0 ? (
+                <option>
+                  {resolvedMachine
+                    ? "Loading..."
+                    : printers.length === 0
+                      ? "Add a printer first"
+                      : "Select printer first"}
+                </option>
+              ) : (
+                filteredFilaments.map((f) => (
                   <option key={f.name} value={f.name}>
-                    {f.name}
+                    {filamentDisplayName(f.name)}
                   </option>
                 ))
               )}
             </select>
+          </label>
+
+          <label>
+            Color
+            <input
+              type="text"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              placeholder="Any / not specified"
+              disabled={!resolvedMachine}
+            />
           </label>
 
           <label>
