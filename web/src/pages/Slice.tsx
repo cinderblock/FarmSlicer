@@ -5,13 +5,8 @@ import ModelViewer from "../components/ModelViewer";
 interface Printer {
   id: string;
   name: string;
-}
-
-interface MachineModel {
-  name: string;
-  vendor: string;
-  vendor_display: string;
-  nozzle_diameters: string[];
+  machine_profile: string;
+  nozzle_diameter: string;
 }
 
 interface ProfileEntry {
@@ -25,13 +20,10 @@ export default function SlicePage() {
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
-  const [models, setModels] = useState<MachineModel[]>([]);
   const [processes, setProcesses] = useState<ProfileEntry[]>([]);
   const [filaments, setFilaments] = useState<ProfileEntry[]>([]);
   const [printerId, setPrinterId] = useState("");
-  const [selectedVendor, setSelectedVendor] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [selectedNozzle, setSelectedNozzle] = useState("");
+  const [selectedMachine, setSelectedMachine] = useState("");
   const [process, setProcess] = useState("");
   const [filament, setFilament] = useState("");
   const [routing, setRouting] = useState("auto");
@@ -44,48 +36,37 @@ export default function SlicePage() {
       .then((r) => r.json())
       .then(setPrinters)
       .catch(() => {});
-    fetch("/api/profiles/machine-models")
-      .then((r) => r.json())
-      .then(setModels)
-      .catch(() => {});
   }, []);
 
-  const vendors = useMemo(() => {
-    const v = [...new Set(models.map((m) => m.vendor_display))];
-    v.sort();
-    return v;
-  }, [models]);
-
-  const vendorModels = useMemo(
-    () => models.filter((m) => m.vendor_display === selectedVendor),
-    [models, selectedVendor],
-  );
-
-  const currentModel = models.find((m) => m.name === selectedModel);
-  const nozzleOptions = currentModel?.nozzle_diameters ?? [];
-
-  // Resolve the full machine profile name from model + nozzle
-  const resolvedMachine = useMemo(() => {
-    if (!selectedModel || !selectedNozzle) return "";
-    return `${selectedModel} ${selectedNozzle} nozzle`;
-  }, [selectedModel, selectedNozzle]);
-
-  const handleVendorChange = (vendor: string) => {
-    setSelectedVendor(vendor);
-    setSelectedModel("");
-    setSelectedNozzle("");
-  };
-
-  const handleModelChange = (modelName: string) => {
-    setSelectedModel(modelName);
-    const m = models.find((x) => x.name === modelName);
-    if (m && m.nozzle_diameters.length > 0) {
-      const defaultNozzle =
-        m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0];
-      setSelectedNozzle(defaultNozzle);
-    } else {
-      setSelectedNozzle("");
+  // Unique machine profiles derived from configured printers
+  const availableMachines = useMemo(() => {
+    const machines = new Set<string>();
+    for (const p of printers) {
+      const resolved = p.nozzle_diameter
+        ? `${p.machine_profile} ${p.nozzle_diameter} nozzle`
+        : p.machine_profile;
+      if (resolved) machines.add(resolved);
     }
+    return [...machines].sort();
+  }, [printers]);
+
+  // Resolve machine profile from the selected printer or manual selection
+  const resolvedMachine = useMemo(() => {
+    if (printerId) {
+      const p = printers.find((pr) => pr.id === printerId);
+      if (p) {
+        return p.nozzle_diameter
+          ? `${p.machine_profile} ${p.nozzle_diameter} nozzle`
+          : p.machine_profile;
+      }
+    }
+    return selectedMachine || availableMachines[0] || "";
+  }, [printerId, printers, selectedMachine, availableMachines]);
+
+  const handlePrinterChange = (id: string) => {
+    setPrinterId(id);
+    setProcess("");
+    setFilament("");
   };
 
   useEffect(() => {
@@ -171,7 +152,7 @@ export default function SlicePage() {
             Printer
             <select
               value={printerId}
-              onChange={(e) => setPrinterId(e.target.value)}
+              onChange={(e) => handlePrinterChange(e.target.value)}
             >
               <option value="">Any available</option>
               {printers.map((p) => (
@@ -182,49 +163,16 @@ export default function SlicePage() {
             </select>
           </label>
 
-          <label>
-            Manufacturer
-            <input
-              type="text"
-              list="vendor-list"
-              value={selectedVendor}
-              onChange={(e) => handleVendorChange(e.target.value)}
-              placeholder="Type to search..."
-            />
-            <datalist id="vendor-list">
-              {vendors.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-          </label>
-
-          {vendorModels.length > 0 && (
+          {!printerId && availableMachines.length > 1 && (
             <label>
-              Printer Model
+              Machine Profile
               <select
-                value={selectedModel}
-                onChange={(e) => handleModelChange(e.target.value)}
+                value={selectedMachine || availableMachines[0] || ""}
+                onChange={(e) => setSelectedMachine(e.target.value)}
               >
-                <option value="">Select model...</option>
-                {vendorModels.map((m) => (
-                  <option key={m.name} value={m.name}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {nozzleOptions.length > 0 && (
-            <label>
-              Nozzle Size
-              <select
-                value={selectedNozzle}
-                onChange={(e) => setSelectedNozzle(e.target.value)}
-              >
-                {nozzleOptions.map((n) => (
-                  <option key={n} value={n}>
-                    {n}mm
+                {availableMachines.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
                   </option>
                 ))}
               </select>
@@ -240,7 +188,11 @@ export default function SlicePage() {
             >
               {processes.length === 0 ? (
                 <option>
-                  {resolvedMachine ? "Loading..." : "Select machine first"}
+                  {resolvedMachine
+                    ? "Loading..."
+                    : printers.length === 0
+                      ? "Add a printer first"
+                      : "Select printer first"}
                 </option>
               ) : (
                 processes.map((p) => (
@@ -261,7 +213,11 @@ export default function SlicePage() {
             >
               {filaments.length === 0 ? (
                 <option>
-                  {resolvedMachine ? "Loading..." : "Select machine first"}
+                  {resolvedMachine
+                    ? "Loading..."
+                    : printers.length === 0
+                      ? "Add a printer first"
+                      : "Select printer first"}
                 </option>
               ) : (
                 filaments.map((f) => (
