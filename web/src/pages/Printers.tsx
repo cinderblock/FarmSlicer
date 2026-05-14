@@ -16,6 +16,7 @@ interface Printer {
 interface MachineModel {
   name: string;
   vendor: string;
+  vendor_display: string;
   nozzle_diameters: string[];
 }
 
@@ -38,7 +39,7 @@ export default function PrintersPage() {
   const [selectedVendor, setSelectedVendor] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedNozzle, setSelectedNozzle] = useState("");
-  const [protocol, setProtocol] = useState("bambu");
+  const [protocol, setProtocol] = useState("");
   const [address, setAddress] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [accessCode, setAccessCode] = useState("");
@@ -70,15 +71,21 @@ export default function PrintersPage() {
   }, []);
 
   const vendors = useMemo(() => {
-    const v = [...new Set(models.map((m) => m.vendor))];
+    const v = [...new Set(models.map((m) => m.vendor_display))];
     v.sort();
     return v;
   }, [models]);
 
   const vendorModels = useMemo(
-    () => models.filter((m) => m.vendor === selectedVendor),
+    () => models.filter((m) => m.vendor_display === selectedVendor),
     [models, selectedVendor],
   );
+
+  const vendorCode = useMemo(() => {
+    return models.find((m) => m.vendor_display === selectedVendor)?.vendor ?? "";
+  }, [models, selectedVendor]);
+
+  const isBambuVendor = vendorCode === "BBL";
 
   const currentModel = models.find((m) => m.name === selectedModel);
   const nozzleOptions = currentModel?.nozzle_diameters ?? [];
@@ -87,6 +94,12 @@ export default function PrintersPage() {
     setSelectedVendor(vendor);
     setSelectedModel("");
     setSelectedNozzle("");
+    const code = models.find((m) => m.vendor_display === vendor)?.vendor;
+    if (code === "BBL") {
+      setProtocol("bambu");
+    } else if (code) {
+      setProtocol((prev) => (prev === "bambu" || !prev) ? "octoprint" : prev);
+    }
   };
 
   const handleModelChange = (modelName: string) => {
@@ -106,7 +119,7 @@ export default function PrintersPage() {
     setSelectedVendor("");
     setSelectedModel("");
     setSelectedNozzle("");
-    setProtocol("bambu");
+    setProtocol("");
     setAddress("");
     setSerialNumber("");
     setAccessCode("");
@@ -145,7 +158,7 @@ export default function PrintersPage() {
       d.machine_profile.startsWith(m.name),
     );
     if (matchedModel) {
-      setSelectedVendor(matchedModel.vendor);
+      setSelectedVendor(matchedModel.vendor_display);
       setSelectedModel(matchedModel.name);
       const suffix = d.machine_profile.slice(matchedModel.name.length).trim();
       const nozzleMatch = suffix.match(/^([\d.]+)\s*nozzle/);
@@ -173,7 +186,7 @@ export default function PrintersPage() {
     setShowForm(true);
   };
 
-  const isBambu = protocol === "bambu";
+  const isBambuProtocol = protocol === "bambu";
 
   // Filter out already-configured printers from discovered list
   const configuredSerials = new Set(
@@ -211,17 +224,18 @@ export default function PrintersPage() {
 
             <label>
               Manufacturer
-              <select
+              <input
+                type="text"
+                list="vendor-list"
                 value={selectedVendor}
                 onChange={(e) => handleVendorChange(e.target.value)}
-              >
-                <option value="">Select manufacturer...</option>
+                placeholder="Type to search..."
+              />
+              <datalist id="vendor-list">
                 {vendors.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
+                  <option key={v} value={v} />
                 ))}
-              </select>
+              </datalist>
             </label>
 
             {selectedVendor && (
@@ -263,7 +277,10 @@ export default function PrintersPage() {
                 value={protocol}
                 onChange={(e) => setProtocol(e.target.value)}
               >
-                <option value="bambu">Bambu Lab (LAN)</option>
+                {!protocol && <option value="">Select protocol...</option>}
+                {isBambuVendor && (
+                  <option value="bambu">Bambu Lab (LAN)</option>
+                )}
                 <option value="octoprint">OctoPrint</option>
                 <option value="klipper">Klipper / Moonraker</option>
               </select>
@@ -279,7 +296,7 @@ export default function PrintersPage() {
               />
             </label>
 
-            {isBambu && (
+            {isBambuProtocol && (
               <>
                 <label>
                   Serial Number

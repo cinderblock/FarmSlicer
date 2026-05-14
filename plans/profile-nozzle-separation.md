@@ -50,13 +50,17 @@ Separate nozzle size selection from machine model selection in both the Printers
 
 ## Progress
 
-- [ ] Backend: Parse `machine_model` entries and build model → nozzle map
-- [ ] Backend: New API endpoint for machine models
-- [ ] Frontend: Split Printers.tsx machine select into model + nozzle
-- [ ] Frontend: Split Slice.tsx machine select into model + nozzle
-- [ ] Update discovery mapping to separate model from nozzle
-- [ ] Test on buildhost
+- [x] Backend: Parse `machine_model` entries and build model → nozzle map
+- [x] Backend: New API endpoint for machine models (`/api/profiles/machine-models`)
+- [x] Backend: Store `nozzle_diameter` separately in printers DB table
+- [x] Frontend: Cascading Manufacturer → Model → Nozzle dropdowns in Printers.tsx
+- [x] Frontend: Cascading Manufacturer → Model → Nozzle dropdowns in Slice.tsx
+- [x] Update discovery mapping to separate model from nozzle
+- [x] Deployed to buildhost (commits 740cd92, aa7127b, dc02edb)
+- [x] Visual verification of cascading dropdowns in browser (both Printers and Slice pages confirmed working)
 
-## Open Questions
+## Decisions Made
 
-1. Should the printer DB record store the base model + nozzle separately, or keep storing the full profile name? Recommendation: store them separately (`machine_model` + `nozzle_diameter`) so the nozzle can be changed without re-selecting the model.
+1. Printer DB stores base model (`machine_profile`) + `nozzle_diameter` separately so nozzle can be changed without re-selecting the model.
+2. Used native `<select>` elements with a Manufacturer → Model → Nozzle cascade instead of the SearchSelect component.
+3. Default nozzle auto-selects 0.4mm when available.

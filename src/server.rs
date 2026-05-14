@@ -163,6 +163,7 @@ async fn list_machine_models(State(state): State<Arc<AppState>>) -> Json<Value> 
             json!({
                 "name": m.name,
                 "vendor": m.vendor,
+                "vendor_display": m.vendor_display,
                 "nozzle_diameters": m.nozzle_diameters,
             })
         })

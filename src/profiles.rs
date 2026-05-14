@@ -30,6 +30,7 @@ pub struct ProfileEntry {
 pub struct MachineModel {
     pub name: String,
     pub vendor: String,
+    pub vendor_display: String,
     pub nozzle_diameters: Vec<String>,
 }
 
@@ -117,6 +118,28 @@ impl ProfileStore {
             }
         }
 
+        // Compute vendor display names from the common prefix of model names.
+        // E.g., BBL models all start with "Bambu Lab" → vendor_display = "Bambu Lab".
+        let mut vendor_model_names: HashMap<String, Vec<String>> = HashMap::new();
+        for (model_name, (vendor, _)) in &model_nozzles {
+            vendor_model_names
+                .entry(vendor.clone())
+                .or_default()
+                .push(model_name.clone());
+        }
+        let vendor_display_names: HashMap<String, String> = vendor_model_names
+            .into_iter()
+            .map(|(vendor, names)| {
+                let display = common_prefix(&names);
+                let display = if display.is_empty() {
+                    vendor.clone()
+                } else {
+                    display
+                };
+                (vendor, display)
+            })
+            .collect();
+
         let mut machine_models: Vec<MachineModel> = model_nozzles
             .into_iter()
             .map(|(name, (vendor, mut nozzles))| {
@@ -127,9 +150,14 @@ impl ProfileStore {
                         .partial_cmp(&b.parse::<f32>().unwrap_or(0.0))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
+                let vendor_display = vendor_display_names
+                    .get(&vendor)
+                    .cloned()
+                    .unwrap_or_else(|| vendor.clone());
                 MachineModel {
                     name,
                     vendor,
+                    vendor_display,
                     nozzle_diameters: nozzles,
                 }
             })
@@ -380,4 +408,26 @@ fn load_profile_entry(path: &Path, vendor: &str, profile_type: &str) -> Option<P
         printer_model,
         printer_variant,
     })
+}
+
+/// Find the longest common prefix of a set of strings, trimmed of trailing whitespace.
+/// Used to derive vendor display names from model names (e.g., "Bambu Lab" from
+/// ["Bambu Lab A1", "Bambu Lab X1 Carbon", ...]).
+fn common_prefix(strings: &[String]) -> String {
+    if strings.is_empty() {
+        return String::new();
+    }
+    let first = strings[0].as_bytes();
+    let mut len = first.len();
+    for s in &strings[1..] {
+        let s = s.as_bytes();
+        len = len.min(s.len());
+        for i in 0..len {
+            if first[i] != s[i] {
+                len = i;
+                break;
+            }
+        }
+    }
+    strings[0][..len].trim_end().to_string()
 }

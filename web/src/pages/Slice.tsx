@@ -10,6 +10,7 @@ interface Printer {
 interface MachineModel {
   name: string;
   vendor: string;
+  vendor_display: string;
   nozzle_diameters: string[];
 }
 
@@ -50,13 +51,13 @@ export default function SlicePage() {
   }, []);
 
   const vendors = useMemo(() => {
-    const v = [...new Set(models.map((m) => m.vendor))];
+    const v = [...new Set(models.map((m) => m.vendor_display))];
     v.sort();
     return v;
   }, [models]);
 
   const vendorModels = useMemo(
-    () => models.filter((m) => m.vendor === selectedVendor),
+    () => models.filter((m) => m.vendor_display === selectedVendor),
     [models, selectedVendor],
   );
 
@@ -183,17 +184,18 @@ export default function SlicePage() {
 
           <label>
             Manufacturer
-            <select
+            <input
+              type="text"
+              list="vendor-list"
               value={selectedVendor}
               onChange={(e) => handleVendorChange(e.target.value)}
-            >
-              <option value="">Select manufacturer...</option>
+              placeholder="Type to search..."
+            />
+            <datalist id="vendor-list">
               {vendors.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
+                <option key={v} value={v} />
               ))}
-            </select>
+            </datalist>
           </label>
 
           {selectedVendor && (
