@@ -295,6 +295,11 @@ impl ProfileStore {
         Ok(serde_json::to_string(&Value::Object(merged)).unwrap())
     }
 
+    pub fn resolve_single(&self, name: &str) -> Result<String, String> {
+        let config = self.resolve_inheritance(name)?;
+        Ok(serde_json::to_string(&Value::Object(config)).unwrap())
+    }
+
     fn resolve_inheritance(&self, name: &str) -> Result<Map<String, Value>, String> {
         let mut chain = Vec::new();
         let mut current = name.to_string();

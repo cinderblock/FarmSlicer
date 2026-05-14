@@ -53,6 +53,17 @@ pub struct SliceRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomProfile {
+    pub id: String,
+    pub name: String,
+    pub profile_type: String,
+    pub base_profile: String,
+    pub overrides: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 impl Db {
     pub fn open(data_dir: &Path) -> Self {
         std::fs::create_dir_all(data_dir).expect("failed to create data dir");
@@ -116,6 +127,18 @@ impl Db {
                 ).ok();
             }
         }
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS custom_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                profile_type TEXT NOT NULL,
+                base_profile TEXT NOT NULL,
+                overrides TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );"
+        ).expect("failed to create custom_profiles table");
 
         Db { conn: Mutex::new(conn) }
     }
@@ -366,5 +389,93 @@ impl Db {
             file_size,
             created_at,
         }
+    }
+
+    // -- Custom Profiles --
+
+    pub fn list_custom_profiles(&self) -> Vec<CustomProfile> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, name, profile_type, base_profile, overrides, created_at, updated_at FROM custom_profiles ORDER BY name")
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok(CustomProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                profile_type: row.get(2)?,
+                base_profile: row.get(3)?,
+                overrides: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    pub fn get_custom_profile(&self, id: &str) -> Option<CustomProfile> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, name, profile_type, base_profile, overrides, created_at, updated_at FROM custom_profiles WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(CustomProfile {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    profile_type: row.get(2)?,
+                    base_profile: row.get(3)?,
+                    overrides: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    pub fn create_custom_profile(
+        &self,
+        name: &str,
+        profile_type: &str,
+        base_profile: &str,
+        overrides: &str,
+    ) -> CustomProfile {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO custom_profiles (id, name, profile_type, base_profile, overrides) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, profile_type, base_profile, overrides],
+        )
+        .unwrap();
+        let created_at: String = conn
+            .query_row("SELECT created_at FROM custom_profiles WHERE id = ?1", params![id], |r| r.get(0))
+            .unwrap();
+        CustomProfile {
+            id,
+            name: name.to_string(),
+            profile_type: profile_type.to_string(),
+            base_profile: base_profile.to_string(),
+            overrides: overrides.to_string(),
+            created_at: created_at.clone(),
+            updated_at: created_at,
+        }
+    }
+
+    pub fn update_custom_profile(&self, id: &str, name: &str, overrides: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE custom_profiles SET name = ?2, overrides = ?3, updated_at = datetime('now') WHERE id = ?1",
+            params![id, name, overrides],
+        )
+        .unwrap()
+            > 0
+    }
+
+    pub fn delete_custom_profile(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM custom_profiles WHERE id = ?1", params![id])
+            .unwrap()
+            > 0
     }
 }

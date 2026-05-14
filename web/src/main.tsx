@@ -7,6 +7,7 @@ import SlicePage from "./pages/Slice";
 import JobsPage from "./pages/Jobs";
 import PrintersPage from "./pages/Printers";
 import LibraryPage from "./pages/Library";
+import ProfilesPage from "./pages/Profiles";
 import LoginPage from "./pages/Login";
 import "./index.css";
 
@@ -58,6 +59,7 @@ function App() {
           <Route path="slice" element={<SlicePage />} />
           <Route path="jobs" element={<JobsPage />} />
           <Route path="printers" element={<PrintersPage />} />
+          <Route path="profiles" element={<ProfilesPage />} />
           <Route path="library" element={<LibraryPage />} />
         </Route>
       </Routes>

@@ -475,6 +475,8 @@ export default function SlicePage() {
             overrides={overrides}
             onChange={setOverrides}
             disabled={!resolvedMachine}
+            processName={process}
+            filamentName={filament}
           />
 
           <label>

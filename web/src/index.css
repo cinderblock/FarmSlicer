@@ -682,3 +682,73 @@ body {
 .btn-reset:hover {
   color: var(--error);
 }
+
+/* Overrides actions row */
+.overrides-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Save as Profile inline form */
+.save-profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+}
+
+.save-profile-form input,
+.save-profile-form select {
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+/* Custom profiles page */
+.profile-card .printer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.profile-type-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.profile-type-badge[data-type="process"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.profile-type-badge[data-type="filament"] {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+/* JSON editor textarea */
+.json-editor {
+  width: 100%;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}

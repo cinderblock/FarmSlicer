@@ -3,7 +3,7 @@ use axum::{
     http::{header, StatusCode},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use cxx::UniquePtr;
@@ -324,6 +324,117 @@ async fn delete_printer(
     }
 }
 
+// -- Custom Profiles --
+
+async fn list_custom_profiles(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let profiles = state.db.list_custom_profiles();
+    Json(json!(profiles))
+}
+
+#[derive(Deserialize)]
+struct CreateCustomProfile {
+    name: String,
+    profile_type: String,
+    base_profile: String,
+    overrides: Option<String>,
+}
+
+async fn create_custom_profile(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateCustomProfile>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    if body.name.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Name is required"})),
+        ));
+    }
+    if !["process", "filament"].contains(&body.profile_type.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "profile_type must be 'process' or 'filament'"})),
+        ));
+    }
+    let overrides = body.overrides.as_deref().unwrap_or("{}");
+    let profile = state.db.create_custom_profile(
+        &body.name,
+        &body.profile_type,
+        &body.base_profile,
+        overrides,
+    );
+    Ok((StatusCode::CREATED, Json(json!(profile))))
+}
+
+#[derive(Deserialize)]
+struct UpdateCustomProfile {
+    name: Option<String>,
+    overrides: Option<String>,
+}
+
+async fn update_custom_profile(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateCustomProfile>,
+) -> StatusCode {
+    let Some(existing) = state.db.get_custom_profile(&id) else {
+        return StatusCode::NOT_FOUND;
+    };
+    let name = body.name.as_deref().unwrap_or(&existing.name);
+    let overrides = body.overrides.as_deref().unwrap_or(&existing.overrides);
+    if state.db.update_custom_profile(&id, name, overrides) {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+async fn delete_custom_profile(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    if state.db.delete_custom_profile(&id) {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+async fn get_custom_profile(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let Some(profile) = state.db.get_custom_profile(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    // Resolve the base profile and overlay custom overrides
+    let resolved = if let Ok(base_config_str) = state.profile_store.resolve_single(&profile.base_profile) {
+        if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&base_config_str) {
+            if let Ok(overrides) = serde_json::from_str::<serde_json::Map<String, Value>>(&profile.overrides) {
+                for (k, v) in overrides {
+                    config.insert(k, v);
+                }
+            }
+            Some(Value::Object(config))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(Json(json!({
+        "id": profile.id,
+        "name": profile.name,
+        "profile_type": profile.profile_type,
+        "base_profile": profile.base_profile,
+        "overrides": serde_json::from_str::<Value>(&profile.overrides).unwrap_or(json!({})),
+        "resolved_config": resolved,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    })))
+}
+
 // -- Jobs --
 
 async fn list_jobs(State(state): State<Arc<AppState>>) -> Json<Value> {
@@ -578,6 +689,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/discovery", get(list_discovered))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/{id}", delete(delete_printer))
+        .route(
+            "/api/custom-profiles",
+            get(list_custom_profiles).post(create_custom_profile),
+        )
+        .route(
+            "/api/custom-profiles/{id}",
+            get(get_custom_profile)
+                .put(update_custom_profile)
+                .delete(delete_custom_profile),
+        )
         .route("/api/jobs", get(list_jobs).post(create_job))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/slices", get(list_slices))
