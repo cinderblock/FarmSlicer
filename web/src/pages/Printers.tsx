@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
-import SearchSelect from "../components/SearchSelect";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 interface Printer {
   id: string;
@@ -36,6 +35,7 @@ export default function PrintersPage() {
   const [models, setModels] = useState<MachineModel[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
+  const [selectedVendor, setSelectedVendor] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedNozzle, setSelectedNozzle] = useState("");
   const [protocol, setProtocol] = useState("bambu");
@@ -69,21 +69,30 @@ export default function PrintersPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const modelOptions = models.map((m) => ({
-    value: m.name,
-    label: m.name,
-    group: m.vendor,
-  }));
+  const vendors = useMemo(() => {
+    const v = [...new Set(models.map((m) => m.vendor))];
+    v.sort();
+    return v;
+  }, [models]);
+
+  const vendorModels = useMemo(
+    () => models.filter((m) => m.vendor === selectedVendor),
+    [models, selectedVendor],
+  );
 
   const currentModel = models.find((m) => m.name === selectedModel);
   const nozzleOptions = currentModel?.nozzle_diameters ?? [];
 
-  // Auto-select nozzle when model changes
-  const handleModelChange = (model: string) => {
-    setSelectedModel(model);
-    const m = models.find((x) => x.name === model);
+  const handleVendorChange = (vendor: string) => {
+    setSelectedVendor(vendor);
+    setSelectedModel("");
+    setSelectedNozzle("");
+  };
+
+  const handleModelChange = (modelName: string) => {
+    setSelectedModel(modelName);
+    const m = models.find((x) => x.name === modelName);
     if (m && m.nozzle_diameters.length > 0) {
-      // Default to 0.4 if available, otherwise first option
       const defaultNozzle =
         m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0];
       setSelectedNozzle(defaultNozzle);
@@ -94,6 +103,7 @@ export default function PrintersPage() {
 
   const resetForm = () => {
     setName("");
+    setSelectedVendor("");
     setSelectedModel("");
     setSelectedNozzle("");
     setProtocol("bambu");
@@ -130,25 +140,29 @@ export default function PrintersPage() {
   const handleAddDiscovered = (d: DiscoveredPrinter) => {
     setName(d.name);
     // Discovery provides the full profile name (e.g., "Bambu Lab A1 0.4 nozzle").
-    // Try to find the matching model and extract the nozzle from it.
+    // Find the matching model and extract vendor + nozzle.
     const matchedModel = models.find((m) =>
       d.machine_profile.startsWith(m.name),
     );
     if (matchedModel) {
+      setSelectedVendor(matchedModel.vendor);
       setSelectedModel(matchedModel.name);
-      // Extract nozzle from the profile name suffix
       const suffix = d.machine_profile.slice(matchedModel.name.length).trim();
       const nozzleMatch = suffix.match(/^([\d.]+)\s*nozzle/);
-      if (nozzleMatch && matchedModel.nozzle_diameters.includes(nozzleMatch[1])) {
+      if (
+        nozzleMatch &&
+        matchedModel.nozzle_diameters.includes(nozzleMatch[1])
+      ) {
         setSelectedNozzle(nozzleMatch[1]);
       } else {
-        const defaultNozzle =
+        setSelectedNozzle(
           matchedModel.nozzle_diameters.find((n) => n === "0.4") ??
-          matchedModel.nozzle_diameters[0] ??
-          "";
-        setSelectedNozzle(defaultNozzle);
+            matchedModel.nozzle_diameters[0] ??
+            "",
+        );
       }
     } else {
+      setSelectedVendor("");
       setSelectedModel(d.machine_profile);
       setSelectedNozzle("");
     }
@@ -196,14 +210,36 @@ export default function PrintersPage() {
             </label>
 
             <label>
-              Printer Model
-              <SearchSelect
-                options={modelOptions}
-                value={selectedModel}
-                onChange={handleModelChange}
-                placeholder="Search printer models..."
-              />
+              Manufacturer
+              <select
+                value={selectedVendor}
+                onChange={(e) => handleVendorChange(e.target.value)}
+              >
+                <option value="">Select manufacturer...</option>
+                {vendors.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
             </label>
+
+            {selectedVendor && (
+              <label>
+                Printer Model
+                <select
+                  value={selectedModel}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                >
+                  <option value="">Select model...</option>
+                  {vendorModels.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {nozzleOptions.length > 0 && (
               <label>
@@ -316,7 +352,8 @@ export default function PrintersPage() {
               {printer.machine_profile && (
                 <p className="hint">
                   {printer.machine_profile}
-                  {printer.nozzle_diameter && ` (${printer.nozzle_diameter}mm nozzle)`}
+                  {printer.nozzle_diameter &&
+                    ` (${printer.nozzle_diameter}mm nozzle)`}
                 </p>
               )}
               <p className="hint">

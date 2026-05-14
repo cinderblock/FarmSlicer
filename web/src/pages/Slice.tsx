@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import ModelViewer from "../components/ModelViewer";
-import SearchSelect from "../components/SearchSelect";
 
 interface Printer {
   id: string;
@@ -29,6 +28,7 @@ export default function SlicePage() {
   const [processes, setProcesses] = useState<ProfileEntry[]>([]);
   const [filaments, setFilaments] = useState<ProfileEntry[]>([]);
   const [printerId, setPrinterId] = useState("");
+  const [selectedVendor, setSelectedVendor] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedNozzle, setSelectedNozzle] = useState("");
   const [process, setProcess] = useState("");
@@ -49,21 +49,35 @@ export default function SlicePage() {
       .catch(() => {});
   }, []);
 
+  const vendors = useMemo(() => {
+    const v = [...new Set(models.map((m) => m.vendor))];
+    v.sort();
+    return v;
+  }, [models]);
+
+  const vendorModels = useMemo(
+    () => models.filter((m) => m.vendor === selectedVendor),
+    [models, selectedVendor],
+  );
+
   const currentModel = models.find((m) => m.name === selectedModel);
   const nozzleOptions = currentModel?.nozzle_diameters ?? [];
 
   // Resolve the full machine profile name from model + nozzle
-  // The backend uses this to find compatible processes/filaments
   const resolvedMachine = useMemo(() => {
     if (!selectedModel || !selectedNozzle) return "";
-    // Try common naming patterns used by OrcaSlicer profiles
-    // Pattern: "{model} {nozzle} nozzle"
     return `${selectedModel} ${selectedNozzle} nozzle`;
   }, [selectedModel, selectedNozzle]);
 
-  const handleModelChange = (model: string) => {
-    setSelectedModel(model);
-    const m = models.find((x) => x.name === model);
+  const handleVendorChange = (vendor: string) => {
+    setSelectedVendor(vendor);
+    setSelectedModel("");
+    setSelectedNozzle("");
+  };
+
+  const handleModelChange = (modelName: string) => {
+    setSelectedModel(modelName);
+    const m = models.find((x) => x.name === modelName);
     if (m && m.nozzle_diameters.length > 0) {
       const defaultNozzle =
         m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0];
@@ -132,17 +146,15 @@ export default function SlicePage() {
     } finally {
       setSlicing(false);
     }
-  }, [modelFile, printerId, routing, resolvedMachine, process, filament, navigate]);
-
-  const modelOptions = useMemo(
-    () =>
-      models.map((m) => ({
-        value: m.name,
-        label: m.name,
-        group: m.vendor,
-      })),
-    [models],
-  );
+  }, [
+    modelFile,
+    printerId,
+    routing,
+    resolvedMachine,
+    process,
+    filament,
+    navigate,
+  ]);
 
   return (
     <div className="page slice-page">
@@ -170,14 +182,36 @@ export default function SlicePage() {
           </label>
 
           <label>
-            Printer Model
-            <SearchSelect
-              options={modelOptions}
-              value={selectedModel}
-              onChange={handleModelChange}
-              placeholder="Search printer models..."
-            />
+            Manufacturer
+            <select
+              value={selectedVendor}
+              onChange={(e) => handleVendorChange(e.target.value)}
+            >
+              <option value="">Select manufacturer...</option>
+              {vendors.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
           </label>
+
+          {selectedVendor && (
+            <label>
+              Printer Model
+              <select
+                value={selectedModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+              >
+                <option value="">Select model...</option>
+                {vendorModels.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           {nozzleOptions.length > 0 && (
             <label>
