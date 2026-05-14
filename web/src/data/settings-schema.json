@@ -33,13 +33,110 @@
     "common": false
   },
   {
+    "key": "initial_layer_line_width",
+    "label": "Initial Layer Line Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "seam_position",
+    "label": "Seam Position",
+    "type": "enum",
+    "options": ["nearest", "aligned", "back", "random"],
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "spiral_mode",
+    "label": "Spiral Vase Mode",
+    "type": "bool",
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "ironing_type",
+    "label": "Ironing",
+    "type": "enum",
+    "options": ["no ironing", "top", "topmost", "all solid layer"],
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "ironing_speed",
+    "label": "Ironing Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 1,
+    "max": 200,
+    "step": 5,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "ironing_flow",
+    "label": "Ironing Flow",
+    "type": "percent",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "ironing_spacing",
+    "label": "Ironing Spacing",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.05,
+    "max": 1.0,
+    "step": 0.05,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "fuzzy_skin",
+    "label": "Fuzzy Skin",
+    "type": "enum",
+    "options": ["none", "external", "all"],
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "fuzzy_skin_thickness",
+    "label": "Fuzzy Skin Thickness",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.05,
+    "max": 1.0,
+    "step": 0.05,
+    "category": "Quality",
+    "common": false
+  },
+  {
+    "key": "fuzzy_skin_point_distance",
+    "label": "Fuzzy Skin Point Distance",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 5.0,
+    "step": 0.1,
+    "category": "Quality",
+    "common": false
+  },
+
+  {
     "key": "wall_loops",
     "label": "Wall Loops",
     "type": "int",
     "min": 1,
     "max": 20,
     "step": 1,
-    "category": "Strength",
+    "category": "Walls",
     "common": true
   },
   {
@@ -49,7 +146,7 @@
     "min": 0,
     "max": 20,
     "step": 1,
-    "category": "Strength",
+    "category": "Walls",
     "common": true
   },
   {
@@ -59,9 +156,57 @@
     "min": 0,
     "max": 20,
     "step": 1,
-    "category": "Strength",
+    "category": "Walls",
     "common": true
   },
+  {
+    "key": "outer_wall_line_width",
+    "label": "Outer Wall Line Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Walls",
+    "common": false
+  },
+  {
+    "key": "inner_wall_line_width",
+    "label": "Inner Wall Line Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Walls",
+    "common": false
+  },
+  {
+    "key": "top_surface_line_width",
+    "label": "Top Surface Line Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Walls",
+    "common": false
+  },
+  {
+    "key": "detect_thin_wall",
+    "label": "Detect Thin Walls",
+    "type": "bool",
+    "category": "Walls",
+    "common": false
+  },
+  {
+    "key": "only_one_wall_top",
+    "label": "Only One Wall on Top",
+    "type": "bool",
+    "category": "Walls",
+    "common": false
+  },
+
   {
     "key": "sparse_infill_density",
     "label": "Infill Density",
@@ -69,7 +214,7 @@
     "min": 0,
     "max": 100,
     "step": 5,
-    "category": "Strength",
+    "category": "Infill",
     "common": true
   },
   {
@@ -82,42 +227,76 @@
       "rectilinear", "concentric", "hilbertcurve", "archimedeanChords",
       "octagramSpiral", "supportcubic", "lightning", "crosshatch"
     ],
-    "category": "Strength",
+    "category": "Infill",
     "common": true
   },
   {
-    "key": "enable_support",
-    "label": "Enable Support",
-    "type": "bool",
-    "category": "Support",
-    "common": true
-  },
-  {
-    "key": "support_type",
-    "label": "Support Type",
-    "type": "enum",
-    "options": ["normal(auto)", "tree(auto)", "normal(manual)", "tree(manual)"],
-    "category": "Support",
-    "common": true
-  },
-  {
-    "key": "support_on_build_plate_only",
-    "label": "Support on Build Plate Only",
-    "type": "bool",
-    "category": "Support",
-    "common": true
-  },
-  {
-    "key": "support_threshold_angle",
-    "label": "Support Threshold Angle",
-    "type": "int",
+    "key": "infill_direction",
+    "label": "Infill Direction",
+    "type": "float",
     "unit": "°",
     "min": 0,
-    "max": 90,
-    "step": 5,
-    "category": "Support",
+    "max": 360,
+    "step": 15,
+    "category": "Infill",
     "common": false
   },
+  {
+    "key": "sparse_infill_line_width",
+    "label": "Infill Line Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.1,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Infill",
+    "common": false
+  },
+  {
+    "key": "infill_wall_overlap",
+    "label": "Infill/Wall Overlap",
+    "type": "percent",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Infill",
+    "common": false
+  },
+  {
+    "key": "top_surface_pattern",
+    "label": "Top Surface Pattern",
+    "type": "enum",
+    "options": ["rectilinear", "monotonic", "monotonicline", "concentric", "archimedeanChords", "hilbertcurve", "octagramSpiral"],
+    "category": "Infill",
+    "common": false
+  },
+  {
+    "key": "bottom_surface_pattern",
+    "label": "Bottom Surface Pattern",
+    "type": "enum",
+    "options": ["rectilinear", "monotonic", "monotonicline", "concentric", "archimedeanChords", "hilbertcurve", "octagramSpiral"],
+    "category": "Infill",
+    "common": false
+  },
+  {
+    "key": "internal_solid_infill_pattern",
+    "label": "Internal Solid Infill Pattern",
+    "type": "enum",
+    "options": ["rectilinear", "monotonic", "concentric"],
+    "category": "Infill",
+    "common": false
+  },
+  {
+    "key": "infill_combination",
+    "label": "Combine Infill Every N Layers",
+    "type": "int",
+    "min": 1,
+    "max": 10,
+    "step": 1,
+    "category": "Infill",
+    "common": false
+  },
+
   {
     "key": "outer_wall_speed",
     "label": "Outer Wall Speed",
@@ -163,6 +342,39 @@
     "common": false
   },
   {
+    "key": "internal_solid_infill_speed",
+    "label": "Internal Solid Infill Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "bridge_speed",
+    "label": "Bridge Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 200,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "gap_infill_speed",
+    "label": "Gap Infill Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
     "key": "travel_speed",
     "label": "Travel Speed",
     "type": "float",
@@ -185,8 +397,583 @@
     "common": false
   },
   {
+    "key": "initial_layer_infill_speed",
+    "label": "Initial Layer Infill Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 200,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "support_speed",
+    "label": "Support Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+  {
+    "key": "support_interface_speed",
+    "label": "Support Interface Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 600,
+    "step": 5,
+    "category": "Speed",
+    "common": false
+  },
+
+  {
+    "key": "default_acceleration",
+    "label": "Default Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "outer_wall_acceleration",
+    "label": "Outer Wall Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "inner_wall_acceleration",
+    "label": "Inner Wall Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "initial_layer_acceleration",
+    "label": "Initial Layer Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "top_surface_acceleration",
+    "label": "Top Surface Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "travel_acceleration",
+    "label": "Travel Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "bridge_acceleration",
+    "label": "Bridge Acceleration",
+    "type": "float",
+    "unit": "mm/s²",
+    "min": 0,
+    "max": 50000,
+    "step": 100,
+    "category": "Acceleration",
+    "common": false
+  },
+  {
+    "key": "default_jerk",
+    "label": "Default Jerk",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 0,
+    "max": 50,
+    "step": 1,
+    "category": "Acceleration",
+    "common": false
+  },
+
+  {
+    "key": "nozzle_temperature",
+    "label": "Nozzle Temperature",
+    "type": "int",
+    "unit": "°C",
+    "min": 150,
+    "max": 450,
+    "step": 5,
+    "category": "Temperature",
+    "common": true
+  },
+  {
+    "key": "nozzle_temperature_initial_layer",
+    "label": "Initial Layer Nozzle Temp",
+    "type": "int",
+    "unit": "°C",
+    "min": 150,
+    "max": 450,
+    "step": 5,
+    "category": "Temperature",
+    "common": false
+  },
+  {
+    "key": "hot_plate_temp",
+    "label": "Bed Temperature (Hot Plate)",
+    "type": "int",
+    "unit": "°C",
+    "min": 0,
+    "max": 150,
+    "step": 5,
+    "category": "Temperature",
+    "common": true
+  },
+  {
+    "key": "hot_plate_temp_initial_layer",
+    "label": "Initial Layer Bed Temp",
+    "type": "int",
+    "unit": "°C",
+    "min": 0,
+    "max": 150,
+    "step": 5,
+    "category": "Temperature",
+    "common": false
+  },
+  {
+    "key": "cool_plate_temp",
+    "label": "Bed Temperature (Cool Plate)",
+    "type": "int",
+    "unit": "°C",
+    "min": 0,
+    "max": 150,
+    "step": 5,
+    "category": "Temperature",
+    "common": false
+  },
+  {
+    "key": "textured_plate_temp",
+    "label": "Bed Temperature (Textured Plate)",
+    "type": "int",
+    "unit": "°C",
+    "min": 0,
+    "max": 150,
+    "step": 5,
+    "category": "Temperature",
+    "common": false
+  },
+  {
+    "key": "chamber_temperature",
+    "label": "Chamber Temperature",
+    "type": "int",
+    "unit": "°C",
+    "min": 0,
+    "max": 80,
+    "step": 5,
+    "category": "Temperature",
+    "common": false
+  },
+
+  {
+    "key": "fan_min_speed",
+    "label": "Min Fan Speed",
+    "type": "int",
+    "unit": "%",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "fan_max_speed",
+    "label": "Max Fan Speed",
+    "type": "int",
+    "unit": "%",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "close_fan_the_first_x_layers",
+    "label": "Disable Fan First N Layers",
+    "type": "int",
+    "min": 0,
+    "max": 20,
+    "step": 1,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "overhang_fan_speed",
+    "label": "Overhang Fan Speed",
+    "type": "int",
+    "unit": "%",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "slow_down_for_layer_cooling",
+    "label": "Slow Down for Layer Cooling",
+    "type": "bool",
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "slow_down_min_speed",
+    "label": "Min Speed (Cooling Slowdown)",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 5,
+    "max": 100,
+    "step": 5,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "fan_cooling_layer_time",
+    "label": "Layer Time Threshold",
+    "type": "float",
+    "unit": "s",
+    "min": 0,
+    "max": 120,
+    "step": 5,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "slow_down_layer_time",
+    "label": "Slowdown Layer Time",
+    "type": "float",
+    "unit": "s",
+    "min": 0,
+    "max": 120,
+    "step": 1,
+    "category": "Cooling",
+    "common": false
+  },
+  {
+    "key": "additional_cooling_fan_speed",
+    "label": "Auxiliary Fan Speed",
+    "type": "int",
+    "unit": "%",
+    "min": 0,
+    "max": 100,
+    "step": 5,
+    "category": "Cooling",
+    "common": false
+  },
+
+  {
+    "key": "filament_retraction_length",
+    "label": "Retraction Length",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 10,
+    "step": 0.1,
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_retraction_speed",
+    "label": "Retraction Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 1,
+    "max": 120,
+    "step": 5,
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_deretraction_speed",
+    "label": "Deretraction Speed",
+    "type": "float",
+    "unit": "mm/s",
+    "min": 0,
+    "max": 120,
+    "step": 5,
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_retraction_minimum_travel",
+    "label": "Min Travel for Retraction",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 20,
+    "step": 0.5,
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_z_hop",
+    "label": "Z Hop Height",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 5,
+    "step": 0.1,
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_retract_restart_extra",
+    "label": "Restart Extra Length",
+    "type": "float",
+    "unit": "mm",
+    "min": -2,
+    "max": 2,
+    "step": 0.05,
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_retract_when_changing_layer",
+    "label": "Retract on Layer Change",
+    "type": "bool",
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_wipe",
+    "label": "Wipe on Retract",
+    "type": "bool",
+    "category": "Retraction",
+    "common": false
+  },
+  {
+    "key": "filament_wipe_distance",
+    "label": "Wipe Distance",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 10,
+    "step": 0.1,
+    "category": "Retraction",
+    "common": false
+  },
+
+  {
+    "key": "enable_support",
+    "label": "Enable Support",
+    "type": "bool",
+    "category": "Support",
+    "common": true
+  },
+  {
+    "key": "support_type",
+    "label": "Support Type",
+    "type": "enum",
+    "options": ["normal(auto)", "tree(auto)", "normal(manual)", "tree(manual)"],
+    "category": "Support",
+    "common": true
+  },
+  {
+    "key": "support_on_build_plate_only",
+    "label": "Support on Build Plate Only",
+    "type": "bool",
+    "category": "Support",
+    "common": true
+  },
+  {
+    "key": "support_threshold_angle",
+    "label": "Support Threshold Angle",
+    "type": "int",
+    "unit": "°",
+    "min": 0,
+    "max": 90,
+    "step": 5,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_base_pattern",
+    "label": "Support Pattern",
+    "type": "enum",
+    "options": ["rectilinear", "rectilinear_grid", "honeycomb", "lightning"],
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_base_pattern_spacing",
+    "label": "Support Pattern Spacing",
+    "type": "float",
+    "unit": "mm",
+    "min": 0.5,
+    "max": 10,
+    "step": 0.5,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_interface_top_layers",
+    "label": "Support Top Interface Layers",
+    "type": "int",
+    "min": 0,
+    "max": 10,
+    "step": 1,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_interface_bottom_layers",
+    "label": "Support Bottom Interface Layers",
+    "type": "int",
+    "min": 0,
+    "max": 10,
+    "step": 1,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_interface_spacing",
+    "label": "Support Interface Spacing",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 5,
+    "step": 0.1,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_interface_pattern",
+    "label": "Support Interface Pattern",
+    "type": "enum",
+    "options": ["auto", "rectilinear", "concentric", "rectilinear_interlaced", "grid"],
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_top_z_distance",
+    "label": "Support Top Z Distance",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 2,
+    "step": 0.05,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_bottom_z_distance",
+    "label": "Support Bottom Z Distance",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 2,
+    "step": 0.05,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_object_xy_distance",
+    "label": "Support XY Distance",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 5,
+    "step": 0.1,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "tree_support_branch_angle",
+    "label": "Tree Branch Angle",
+    "type": "float",
+    "unit": "°",
+    "min": 0,
+    "max": 60,
+    "step": 5,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "tree_support_branch_diameter",
+    "label": "Tree Branch Diameter",
+    "type": "float",
+    "unit": "mm",
+    "min": 1,
+    "max": 20,
+    "step": 0.5,
+    "category": "Support",
+    "common": false
+  },
+
+  {
+    "key": "brim_type",
+    "label": "Brim Type",
+    "type": "enum",
+    "options": ["no_brim", "outer_only", "inner_only", "outer_and_inner", "auto_brim"],
+    "category": "Adhesion",
+    "common": false
+  },
+  {
     "key": "brim_width",
     "label": "Brim Width",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 50,
+    "step": 1,
+    "category": "Adhesion",
+    "common": false
+  },
+  {
+    "key": "brim_object_gap",
+    "label": "Brim-Object Gap",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 5,
+    "step": 0.1,
+    "category": "Adhesion",
+    "common": false
+  },
+  {
+    "key": "skirt_loops",
+    "label": "Skirt Loops",
+    "type": "int",
+    "min": 0,
+    "max": 10,
+    "step": 1,
+    "category": "Adhesion",
+    "common": false
+  },
+  {
+    "key": "skirt_distance",
+    "label": "Skirt Distance",
     "type": "float",
     "unit": "mm",
     "min": 0,
@@ -205,19 +992,119 @@
     "category": "Adhesion",
     "common": false
   },
+
   {
-    "key": "spiral_mode",
-    "label": "Spiral Vase Mode",
+    "key": "enable_pressure_advance",
+    "label": "Enable Pressure Advance",
     "type": "bool",
-    "category": "Quality",
+    "category": "Advanced",
     "common": false
   },
   {
-    "key": "ironing_type",
-    "label": "Ironing",
+    "key": "pressure_advance",
+    "label": "Pressure Advance Value",
+    "type": "float",
+    "min": 0,
+    "max": 2,
+    "step": 0.005,
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "filament_flow_ratio",
+    "label": "Flow Ratio",
+    "type": "float",
+    "min": 0.5,
+    "max": 2.0,
+    "step": 0.01,
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "filament_max_volumetric_speed",
+    "label": "Max Volumetric Speed",
+    "type": "float",
+    "unit": "mm³/s",
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "enable_arc_fitting",
+    "label": "Arc Fitting",
+    "type": "bool",
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "detect_overhang_wall",
+    "label": "Detect Overhang Walls",
+    "type": "bool",
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "reduce_crossing_wall",
+    "label": "Reduce Crossing Walls",
+    "type": "bool",
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "elefant_foot_compensation",
+    "label": "Elephant Foot Compensation",
+    "type": "float",
+    "unit": "mm",
+    "min": 0,
+    "max": 1,
+    "step": 0.05,
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "xy_hole_compensation",
+    "label": "XY Hole Compensation",
+    "type": "float",
+    "unit": "mm",
+    "min": -2,
+    "max": 2,
+    "step": 0.05,
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "xy_contour_compensation",
+    "label": "XY Contour Compensation",
+    "type": "float",
+    "unit": "mm",
+    "min": -2,
+    "max": 2,
+    "step": 0.05,
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "print_sequence",
+    "label": "Print Sequence",
     "type": "enum",
-    "options": ["no ironing", "top", "topmost", "all solid layer"],
-    "category": "Quality",
+    "options": ["by layer", "by object"],
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "exclude_object",
+    "label": "Exclude Object Support",
+    "type": "bool",
+    "category": "Advanced",
+    "common": false
+  },
+  {
+    "key": "gcode_comments",
+    "label": "G-code Comments",
+    "type": "bool",
+    "category": "Advanced",
     "common": false
   }
 ]

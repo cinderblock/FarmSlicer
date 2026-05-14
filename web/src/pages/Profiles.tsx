@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import ProfileEditor from "../components/ProfileEditor";
 
 interface CustomProfile {
   id: string;
@@ -17,7 +18,7 @@ export default function ProfilesPage() {
   const [name, setName] = useState("");
   const [profileType, setProfileType] = useState("process");
   const [baseProfile, setBaseProfile] = useState("");
-  const [overridesText, setOverridesText] = useState("{}");
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [bases, setBases] = useState<string[]>([]);
   const [error, setError] = useState("");
 
@@ -51,7 +52,7 @@ export default function ProfilesPage() {
     setName("");
     setProfileType("process");
     setBaseProfile("");
-    setOverridesText("{}");
+    setOverrides({});
     setEditingId(null);
     setShowForm(false);
     setError("");
@@ -62,18 +63,14 @@ export default function ProfilesPage() {
       setError("Name is required");
       return;
     }
-    try {
-      JSON.parse(overridesText);
-    } catch {
-      setError("Overrides must be valid JSON");
-      return;
-    }
+
+    const overridesJson = JSON.stringify(overrides);
 
     if (editingId) {
       const res = await fetch(`/api/custom-profiles/${editingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, overrides: overridesText }),
+        body: JSON.stringify({ name, overrides: overridesJson }),
       });
       if (!res.ok) {
         setError("Failed to update profile");
@@ -87,7 +84,7 @@ export default function ProfilesPage() {
           name,
           profile_type: profileType,
           base_profile: baseProfile,
-          overrides: overridesText,
+          overrides: overridesJson,
         }),
       });
       if (!res.ok) {
@@ -106,11 +103,9 @@ export default function ProfilesPage() {
     setProfileType(p.profile_type);
     setBaseProfile(p.base_profile);
     try {
-      setOverridesText(
-        JSON.stringify(JSON.parse(p.overrides), null, 2),
-      );
+      setOverrides(JSON.parse(p.overrides));
     } catch {
-      setOverridesText(p.overrides);
+      setOverrides({});
     }
     setEditingId(p.id);
     setShowForm(true);
@@ -147,7 +142,7 @@ export default function ProfilesPage() {
       </div>
 
       {showForm && (
-        <div className="card" style={{ marginBottom: "1.5rem", maxWidth: 520 }}>
+        <div className="card" style={{ marginBottom: "1.5rem", maxWidth: 720 }}>
           <div className="printer-form">
             <label>
               Name
@@ -187,16 +182,12 @@ export default function ProfilesPage() {
               </>
             )}
 
-            <label>
-              Overrides (JSON)
-              <textarea
-                className="json-editor"
-                value={overridesText}
-                onChange={(e) => setOverridesText(e.target.value)}
-                rows={6}
-                spellCheck={false}
-              />
-            </label>
+            <ProfileEditor
+              baseProfile={baseProfile}
+              profileType={profileType}
+              overrides={overrides}
+              onChange={setOverrides}
+            />
 
             {error && (
               <p style={{ color: "var(--error)", fontSize: "0.85rem" }}>

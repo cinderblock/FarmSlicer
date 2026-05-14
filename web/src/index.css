@@ -752,3 +752,127 @@ body {
   font-size: 0.85rem;
   resize: vertical;
 }
+
+/* Profile Editor */
+.profile-editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.editor-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.editor-tab {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  background: var(--bg-surface);
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.editor-tab:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+
+.editor-tab:hover {
+  color: var(--text);
+  background: var(--bg-card);
+}
+
+.editor-tab.active {
+  color: var(--accent);
+  background: var(--bg-card);
+  border-bottom: 2px solid var(--accent);
+}
+
+.editor-settings {
+  padding: 0.75rem;
+  background: var(--bg-surface);
+}
+
+.editor-search {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.editor-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.editor-cat-btn {
+  padding: 0.3rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.editor-cat-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.editor-cat-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+}
+
+.editor-settings-list {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.editor-json {
+  padding: 0.75rem;
+  background: var(--bg-surface);
+}
+
+.editor-diff {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.diff-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: 0.8rem;
+}
+
+.diff-key {
+  flex: 1;
+  color: var(--accent);
+}
+
+.diff-val {
+  color: var(--text);
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 0.8rem;
+}
