@@ -5,14 +5,6 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
 import * as THREE from "three";
 
-// THREE.Clock deprecation comes from @react-three/fiber v9 internals.
-// Tracked upstream: https://github.com/pmndrs/react-three-fiber/issues/3153
-// Fixed in R3F v10 (not yet stable).
-console.info(
-  "[FarmSlicer] THREE.Clock deprecation warning below is from @react-three/fiber v9 internals.\n" +
-    "Tracked: https://github.com/pmndrs/react-three-fiber/issues/3153",
-);
-
 type ArrangeMode = "view" | "translate" | "rotate";
 
 const defaultMaterial = new THREE.MeshStandardMaterial({ color: "#4a9eff" });
@@ -165,7 +157,12 @@ function Scene({
         />
       )}
       {sceneObj && mode !== "view" && (
-        <TransformControls ref={tcRef} object={sceneObj} mode={mode} />
+        <TransformControls
+          ref={tcRef}
+          object={sceneObj}
+          mode={mode}
+          showY={mode === "rotate"}
+        />
       )}
       <OrbitControls ref={orbitRef} makeDefault />
     </>

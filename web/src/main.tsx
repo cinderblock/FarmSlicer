@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect } from "react";
+import { StrictMode, useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router";
 import Layout from "./components/Layout";
@@ -10,7 +10,30 @@ import ProfilesPage from "./pages/Profiles";
 import LoginPage from "./pages/Login";
 import "./index.css";
 
+declare const __BUILD_VERSION__: string;
+
+function useAutoRefresh(intervalMs = 30_000) {
+  const currentVersion = useRef(__BUILD_VERSION__);
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    const check = () => {
+      fetch("/version.json", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.version && data.version !== currentVersion.current) {
+            window.location.reload();
+          }
+        })
+        .catch(() => {});
+    };
+    const id = setInterval(check, intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+}
+
 function App() {
+  useAutoRefresh();
+
   const [authState, setAuthState] = useState<
     "loading" | "authenticated" | "login"
   >("loading");
