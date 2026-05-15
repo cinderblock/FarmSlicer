@@ -6,15 +6,21 @@ import { resolve } from "path";
 const buildVersion = Date.now().toString(36);
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      // three.js r183+ deprecated Clock; R3F v9 still uses it.
-      // Swap in a warning-free drop-in until R3F v10.
-      "three/src/core/Clock.js": resolve(__dirname, "src/lib/Clock.js"),
-    },
-  },
   plugins: [
     react(),
+    {
+      // three.js r183+ deprecated Clock; R3F v9 still uses it.
+      // The pre-built bundle inlines Clock, so resolve.alias can't intercept it.
+      // Strip the deprecation warn() from the bundled code until R3F v10.
+      name: "fix-three-clock-deprecation",
+      transform(code, id) {
+        if (!id.includes("three")) return;
+        const target =
+          "warn( 'Clock: This module has been deprecated. Please use THREE.Timer instead.' ); // @deprecated, r183";
+        if (!code.includes(target)) return;
+        return code.replace(target, "");
+      },
+    },
     {
       name: "version-file",
       writeBundle() {
