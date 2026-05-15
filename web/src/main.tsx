@@ -2,7 +2,6 @@ import { StrictMode, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router";
 import Layout from "./components/Layout";
-import Dashboard from "./pages/Dashboard";
 import SlicePage from "./pages/Slice";
 import JobsPage from "./pages/Jobs";
 import PrintersPage from "./pages/Printers";
@@ -55,7 +54,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<PrintersPage />} />
           <Route path="slice" element={<SlicePage />} />
           <Route path="jobs" element={<JobsPage />} />
           <Route path="printers" element={<PrintersPage />} />
