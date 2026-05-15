@@ -210,6 +210,28 @@ async fn resolve_profiles(
     Ok(Json(config))
 }
 
+#[derive(Deserialize)]
+struct ResolveSingleQuery {
+    name: String,
+}
+
+async fn resolve_single_profile(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ResolveSingleQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config_str = state
+        .profile_store
+        .resolve_single(&q.name)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Profile error: {e}")})),
+            )
+        })?;
+    let config: Value = serde_json::from_str(&config_str).unwrap_or(json!({}));
+    Ok(Json(config))
+}
+
 async fn list_processes(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProfileQuery>,
@@ -686,6 +708,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/profiles/processes", get(list_processes))
         .route("/api/profiles/filaments", get(list_filaments))
         .route("/api/profiles/resolve", get(resolve_profiles))
+        .route("/api/profiles/resolve-single", get(resolve_single_profile))
         .route("/api/discovery", get(list_discovered))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/{id}", delete(delete_printer))

@@ -34,12 +34,12 @@ export default function ProfileEditor({
   useEffect(() => {
     if (!baseProfile) return;
     fetch(
-      `/api/profiles/resolve?machine=&process=${encodeURIComponent(profileType === "process" ? baseProfile : "")}&filament=${encodeURIComponent(profileType === "filament" ? baseProfile : "")}`,
+      `/api/profiles/resolve-single?name=${encodeURIComponent(baseProfile)}`,
     )
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setBaseConfig(data))
       .catch(() => setBaseConfig(null));
-  }, [baseProfile, profileType]);
+  }, [baseProfile]);
 
   useEffect(() => {
     setJsonText(JSON.stringify(overrides, null, 2));
