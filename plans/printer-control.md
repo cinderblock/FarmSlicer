@@ -46,6 +46,12 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 - **Replicate the old print station's printer features** in FarmSlicer.
 - Nothing deployment-specific (host names, domains, IPs, league names) is
   committed here (public repo).
+- **Who may send where: no limits yet** (anyone who can see a job, any free
+  printer that fits). Revisit later.
+- **Approved (2026-10-12):** one real-printer test print; merging
+  `printer-control` into master and pushing.
+- **Wanted from the old station too:** its instructions page, the per-print
+  filament cost estimate, and thumbnails for prints started elsewhere.
 
 ## Design
 
