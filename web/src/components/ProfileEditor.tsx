@@ -17,7 +17,6 @@ type Tab = "settings" | "json";
 
 export default function ProfileEditor({
   baseProfile,
-  profileType,
   overrides,
   onChange,
   readOnly,

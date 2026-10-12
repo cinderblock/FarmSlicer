@@ -37,6 +37,13 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://localhost:9337",
+      "/wasm": "http://localhost:9337",
+    },
+    // Same cross-origin isolation the Rust server sends, so the multithreaded
+    // WebAssembly engine (SharedArrayBuffer) also works under `vite dev`.
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
   build: {
