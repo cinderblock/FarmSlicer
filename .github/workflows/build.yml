@@ -171,6 +171,20 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
+      # Boot the image that was just pushed and drive the account system with
+      # a software authenticator (tests/passkey-e2e.mjs). Runs after the push
+      # so the digest in the summary is the tested one; nothing deploys it.
+      - name: End-to-end test the pushed image (accounts)
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
+          docker run -d --name farmslicer-e2e -p 127.0.0.1:9337:9337 \
+            -e FARMSLICER_ORIGINS=http://localhost:9337 "$IMAGE"
+          for i in $(seq 1 60); do curl -sf http://localhost:9337/api/health >/dev/null && break; sleep 1; done
+          curl -sf http://localhost:9337/api/health
+          node tests/passkey-e2e.mjs http://localhost:9337
+          docker logs --tail 20 farmslicer-e2e
+          docker rm -f farmslicer-e2e
+
       - name: Summarize how to deploy this build
         run: |
           {

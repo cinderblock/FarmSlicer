@@ -262,6 +262,12 @@ Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocea
   is unchanged; 53 commits. All commit hashes quoted above from before this
   point no longer exist.
 
+- [x] 2026-10-12: **passkeys only** (`plans/auth.md` v2): passwords removed
+  entirely; WebAuthn via webauthn-rs, invite links, recovery codes, software-
+  authenticator e2e test (`tests/passkey-e2e.mjs`, 39 checks green against a
+  throwaway container on the build host, now also a CI gate on the pushed
+  image). `FARMSLICER_ORIGINS` names the HTTPS origin; ops sets it.
+
 ## Hand-off: what the maintainer has to do (none of it is mine to do)
 
 1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much

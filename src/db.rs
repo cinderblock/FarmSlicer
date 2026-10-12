@@ -72,6 +72,28 @@ pub struct User {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PasskeyRecord {
+    /// Credential id, hex.
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    /// webauthn-rs `Passkey`, serialised as JSON.
+    #[serde(skip_serializing)]
+    pub passkey_json: String,
+    pub created_at: String,
+    pub last_used: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Invite {
+    pub user_id: String,
+    pub created_by: Option<String>,
+    pub created_at: String,
+    pub expires_at: String,
+    pub used_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiKey {
     pub id: String,
     pub user_id: String,
@@ -174,16 +196,37 @@ impl Db {
             );"
         ).expect("failed to create custom_profiles table");
 
-        // Accounts (see src/auth.rs). Session tokens and API keys are stored
-        // as SHA-256 digests only.
+        // Accounts (see src/auth.rs): passkeys only. Session tokens, API keys,
+        // invite tokens and recovery codes are stored as SHA-256 digests.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 role TEXT NOT NULL DEFAULT 'user',
-                password_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 last_login TEXT
+            );
+            CREATE TABLE IF NOT EXISTS passkeys (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                passkey_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_used TEXT
+            );
+            CREATE TABLE IF NOT EXISTS invites (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS recovery_codes (
+                code_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                used_at TEXT
             );
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash TEXT PRIMARY KEY,
@@ -203,6 +246,11 @@ impl Db {
         ).expect("failed to create account tables");
         if conn.prepare("SELECT user_id FROM jobs LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE jobs ADD COLUMN user_id TEXT;").ok();
+        }
+        // A short-lived password-based schema existed before passkeys; drop
+        // the column so the NOT NULL constraint can't block inserts.
+        if conn.prepare("SELECT password_hash FROM users LIMIT 0").is_ok() {
+            conn.execute_batch("ALTER TABLE users DROP COLUMN password_hash;").ok();
         }
 
         Db { conn: Mutex::new(conn) }
@@ -247,23 +295,23 @@ impl Db {
         .ok()
     }
 
-    /// The user plus their password hash, for login.
-    pub fn get_user_credentials(&self, username: &str) -> Option<(User, String)> {
+    pub fn get_user_by_username(&self, username: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, password_hash FROM users WHERE username = ?1",
+            "SELECT id, username, role, created_at, last_login FROM users WHERE username = ?1",
             params![username.trim()],
-            |row| Ok((Self::user_from_row(row)?, row.get::<_, String>(5)?)),
+            Self::user_from_row,
         )
         .ok()
     }
 
-    pub fn create_user(&self, username: &str, role: &str, password_hash: &str) -> Result<User, String> {
-        let id = uuid::Uuid::new_v4().to_string();
+    /// Creates the account row. `id` is caller-chosen so a registration
+    /// ceremony can be bound to it before the row exists.
+    pub fn create_user(&self, id: &str, username: &str, role: &str) -> Result<User, String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO users (id, username, role, password_hash) VALUES (?1, ?2, ?3, ?4)",
-            params![id, username.trim(), role, password_hash],
+            "INSERT INTO users (id, username, role) VALUES (?1, ?2, ?3)",
+            params![id, username.trim(), role],
         )
         .map_err(|e| {
             if e.to_string().contains("UNIQUE") {
@@ -287,14 +335,186 @@ impl Db {
             > 0
     }
 
-    pub fn update_user_password(&self, id: &str, password_hash: &str) -> bool {
+    // -- Passkeys --
+
+    fn passkey_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PasskeyRecord> {
+        Ok(PasskeyRecord {
+            id: row.get(0)?,
+            user_id: row.get(1)?,
+            name: row.get(2)?,
+            passkey_json: row.get(3)?,
+            created_at: row.get(4)?,
+            last_used: row.get(5)?,
+        })
+    }
+
+    pub fn add_passkey(&self, id: &str, user_id: &str, name: &str, passkey_json: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE users SET password_hash = ?2 WHERE id = ?1",
-            params![id, password_hash],
+            "INSERT INTO passkeys (id, user_id, name, passkey_json) VALUES (?1, ?2, ?3, ?4)",
+            params![id, user_id, name.trim(), passkey_json],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn list_passkeys(&self, user_id: &str) -> Vec<PasskeyRecord> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, user_id, name, passkey_json, created_at, last_used FROM passkeys WHERE user_id = ?1 ORDER BY created_at")
+            .unwrap();
+        stmt.query_map(params![user_id], Self::passkey_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_passkey(&self, id: &str) -> Option<PasskeyRecord> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, user_id, name, passkey_json, created_at, last_used FROM passkeys WHERE id = ?1",
+            params![id],
+            Self::passkey_from_row,
+        )
+        .ok()
+    }
+
+    pub fn passkey_count(&self, user_id: &str) -> i64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM passkeys WHERE user_id = ?1",
+            params![user_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// Store the updated credential (sign counter / backup flags) after a login.
+    pub fn touch_passkey(&self, id: &str, passkey_json: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE passkeys SET passkey_json = ?2, last_used = datetime('now') WHERE id = ?1",
+            params![id, passkey_json],
+        )
+        .ok();
+    }
+
+    pub fn rename_passkey(&self, id: &str, user_id: &str, name: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE passkeys SET name = ?3 WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id, name.trim()],
         )
         .unwrap_or(0)
             > 0
+    }
+
+    pub fn delete_passkey(&self, id: &str, user_id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM passkeys WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    // -- Invites (enrolment links) --
+
+    pub fn create_invite(&self, token_hash: &str, user_id: &str, created_by: Option<&str>, ttl_hours: i64) {
+        let conn = self.conn.lock().unwrap();
+        // One live invite per user.
+        conn.execute("DELETE FROM invites WHERE user_id = ?1", params![user_id])
+            .ok();
+        conn.execute(
+            "INSERT INTO invites (token_hash, user_id, created_by, expires_at)
+             VALUES (?1, ?2, ?3, datetime('now', ?4 || ' hours'))",
+            params![token_hash, user_id, created_by, format!("+{ttl_hours}")],
+        )
+        .unwrap();
+    }
+
+    /// A valid (unused, unexpired) invite and its user.
+    pub fn get_invite(&self, token_hash: &str) -> Option<(Invite, User)> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT i.user_id, i.created_by, i.created_at, i.expires_at, i.used_at,
+                    u.id, u.username, u.role, u.created_at, u.last_login
+             FROM invites i JOIN users u ON u.id = i.user_id
+             WHERE i.token_hash = ?1 AND i.used_at IS NULL AND i.expires_at > datetime('now')",
+            params![token_hash],
+            |row| {
+                Ok((
+                    Invite {
+                        user_id: row.get(0)?,
+                        created_by: row.get(1)?,
+                        created_at: row.get(2)?,
+                        expires_at: row.get(3)?,
+                        used_at: row.get(4)?,
+                    },
+                    User {
+                        id: row.get(5)?,
+                        username: row.get(6)?,
+                        role: row.get(7)?,
+                        created_at: row.get(8)?,
+                        last_login: row.get(9)?,
+                    },
+                ))
+            },
+        )
+        .ok()
+    }
+
+    pub fn use_invite(&self, token_hash: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE invites SET used_at = datetime('now') WHERE token_hash = ?1",
+            params![token_hash],
+        )
+        .ok();
+    }
+
+    pub fn pending_invite_expiry(&self, user_id: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT expires_at FROM invites WHERE user_id = ?1 AND used_at IS NULL AND expires_at > datetime('now')",
+            params![user_id],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    // -- Recovery codes --
+
+    /// Replace the user's recovery code (one live code per user).
+    pub fn set_recovery_code(&self, user_id: &str, code_hash: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM recovery_codes WHERE user_id = ?1", params![user_id])
+            .ok();
+        conn.execute(
+            "INSERT INTO recovery_codes (code_hash, user_id) VALUES (?1, ?2)",
+            params![code_hash, user_id],
+        )
+        .unwrap();
+    }
+
+    pub fn recovery_code_valid(&self, user_id: &str, code_hash: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT 1 FROM recovery_codes WHERE user_id = ?1 AND code_hash = ?2 AND used_at IS NULL",
+            params![user_id, code_hash],
+            |_| Ok(()),
+        )
+        .is_ok()
+    }
+
+    pub fn use_recovery_code(&self, code_hash: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE recovery_codes SET used_at = datetime('now') WHERE code_hash = ?1",
+            params![code_hash],
+        )
+        .ok();
     }
 
     pub fn delete_user(&self, id: &str) -> bool {
@@ -339,12 +559,6 @@ impl Db {
     pub fn delete_session(&self, token_hash: &str) {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE token_hash = ?1", params![token_hash])
-            .ok();
-    }
-
-    pub fn delete_user_sessions(&self, user_id: &str) {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])
             .ok();
     }
 

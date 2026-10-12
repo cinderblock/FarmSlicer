@@ -116,13 +116,23 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - SPA fallback serves `dist/web/index.html`; every response carries
   `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
-- Accounts (`src/auth.rs`, `plans/auth.md`): no configured secrets. First run
-  → `POST /api/auth/setup` creates the owner; then username/password login,
-  30-day cookie sessions (tokens stored as SHA-256), per-user API keys
-  (`Authorization: Bearer fsk_…`), roles owner/admin/user. Every `/api` route
-  except health/auth goes through `auth::require_auth`, which attaches
-  `CurrentUser`; admin handlers call `auth::require_admin`.
-  `FARMSLICER_NO_AUTH=1` short-circuits all of it for local dev.
+- Accounts (`src/auth.rs` policy + WebAuthn RP, `src/auth_api.rs` handlers,
+  `plans/auth.md`): **passkeys only, no passwords**, no configured secrets.
+  Ceremonies are start/finish pairs with a server-held `flow_id` (5 min, in
+  memory): `/api/auth/setup/*` (first run, creates the owner),
+  `/api/auth/login/*` (by username, or discoverable without one),
+  `/api/auth/invite/{token}/*` (enrol through an admin-issued link),
+  `/api/auth/recover/*` (username + one-time recovery code),
+  `/api/me/passkeys/*` (add more). Credentials (`webauthn_rs::Passkey` JSON),
+  session tokens, API keys, invite tokens and recovery codes live in SQLite,
+  the secrets as SHA-256 only. RP ID = host of the first `FARMSLICER_ORIGINS`
+  entry (changing it orphans every passkey). Every `/api` route except
+  health/auth goes through `auth::require_auth` (attaches `CurrentUser`);
+  admin handlers call `auth::require_admin`. `FARMSLICER_NO_AUTH=1`
+  short-circuits all of it for local dev. `tests/passkey-e2e.mjs` is a
+  software-authenticator end-to-end test (webauthn-rs builds OpenSSL from
+  source via the `openssl` crate's `vendored` feature, which on Windows needs
+  Strawberry Perl; typecheck on Linux if that bites).
 
 ## Known Issues
 

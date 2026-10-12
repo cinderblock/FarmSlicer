@@ -37,10 +37,36 @@ other machines. Done 2026-10-12 (v1); teams/guest scoping are not implemented.
   management is role-gated. Guest teams (the original design's team-scoped
   visibility) are deferred until there is a need.
 
-## Next: passkeys + HTTPS for admin access (asked 2026-10-12)
+## v2 (2026-10-12): passkeys only, passwords removed
 
-Direction from the maintainer: secure admin access with **passkeys** (WebAuthn)
-on an **HTTPS domain** rather than passwords alone.
+The maintainer wants no passwords at all. Implemented:
+
+- `src/auth.rs`: WebAuthn relying party (`webauthn-rs` 0.5, `conditional-ui`
+  feature for discoverable login), in-memory start/finish flow store (5 min),
+  tokens, roles. `src/auth_api.rs`: setup, login (username or discoverable),
+  invite enrolment, recovery-code enrolment, own passkeys (add/rename/remove,
+  never the last one), recovery-code regeneration, API keys, admin users
+  (create = account + single-use 72 h invite link; re-issue invite; role;
+  delete).
+- Tables: `users` (no password column; a stray `password_hash` from the
+  short-lived v1 is dropped on start), `passkeys` (hex credential id,
+  `webauthn_rs::Passkey` JSON, counter updated on each login), `invites`,
+  `recovery_codes`, `sessions`, `api_keys`.
+- Frontend: `web/src/passkeys.ts` on `@simplewebauthn/browser`; pages Setup,
+  Login, Invite (`/invite/:token`), Recover (`/recover`), Users, Account;
+  `RecoveryCode` component shows a code once.
+- `FARMSLICER_ORIGINS` (first = canonical; RP ID = its host). ops sets it to
+  the HTTPS LAN name.
+- `tests/passkey-e2e.mjs`: software authenticator (ES256, none attestation,
+  minimal CBOR) driving every flow; run against a server whose origins include
+  the test origin.
+
+Original direction notes kept below.
+
+## Direction (asked 2026-10-12)
+
+Secure admin access with **passkeys** (WebAuthn) on an **HTTPS domain** rather
+than passwords.
 
 - WebAuthn requires a secure context and a stable RP ID = the domain the UI is
   served on. The LAN deployment is already HTTPS behind the reverse proxy, so

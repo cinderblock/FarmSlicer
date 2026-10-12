@@ -1,4 +1,5 @@
 mod auth;
+mod auth_api;
 mod db;
 mod discovery;
 mod profiles;
@@ -55,10 +56,21 @@ async fn main() {
         });
     }
 
+    let rp = match auth::Rp::from_env() {
+        Ok(rp) => rp,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    };
+    println!(
+        "Passkeys: relying party '{}', canonical origin {} (FARMSLICER_ORIGINS)",
+        rp.rp_id, rp.origin
+    );
     if auth::auth_disabled() {
         println!("Auth DISABLED (FARMSLICER_NO_AUTH is set): every request runs as owner");
     } else if db.user_count() == 0 {
-        println!("First run: no accounts yet. Open the web UI to create the owner account.");
+        println!("First run: no accounts yet. Open the web UI to create the owner account with a passkey.");
     } else {
         println!("Auth enabled: {} account(s)", db.user_count());
     }
@@ -69,6 +81,7 @@ async fn main() {
         slicer,
         profile_store,
         discovered,
+        rp,
     ));
 
     let app = server::router(state);

@@ -9,6 +9,8 @@ import LibraryPage from "./pages/Library";
 import ProfilesPage from "./pages/Profiles";
 import LoginPage from "./pages/Login";
 import SetupPage from "./pages/Setup";
+import InvitePage from "./pages/Invite";
+import RecoverPage from "./pages/Recover";
 import UsersPage from "./pages/Users";
 import AccountPage from "./pages/Account";
 import { AuthProvider, useAuth } from "./auth";
@@ -46,8 +48,8 @@ function Splash({ text }: { text: string }) {
   );
 }
 
-function App() {
-  useAutoRefresh();
+/** Everything except the invite and recovery pages: setup → login → the app. */
+function Gate() {
   const { status, offline, isAdmin } = useAuth();
 
   if (offline) return <Splash text="Cannot reach the server. Retrying…" />;
@@ -56,18 +58,30 @@ function App() {
   if (!status.authenticated) return <LoginPage />;
 
   return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route index element={<PrintersPage />} />
+        <Route path="slice" element={<SlicePage />} />
+        <Route path="jobs" element={<JobsPage />} />
+        <Route path="printers" element={<PrintersPage />} />
+        <Route path="profiles" element={<ProfilesPage />} />
+        <Route path="library" element={<LibraryPage />} />
+        <Route path="account" element={<AccountPage />} />
+        <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+
+function App() {
+  useAutoRefresh();
+  return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<PrintersPage />} />
-          <Route path="slice" element={<SlicePage />} />
-          <Route path="jobs" element={<JobsPage />} />
-          <Route path="printers" element={<PrintersPage />} />
-          <Route path="profiles" element={<ProfilesPage />} />
-          <Route path="library" element={<LibraryPage />} />
-          <Route path="account" element={<AccountPage />} />
-          <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
-        </Route>
+        <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/recover" element={<RecoverPage />} />
+        <Route path="/*" element={<Gate />} />
       </Routes>
     </BrowserRouter>
   );

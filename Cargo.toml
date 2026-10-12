@@ -13,8 +13,13 @@ tower-http = { version = "0.6", features = ["fs", "cors", "set-header"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 cxx = "1"
-# Accounts: argon2id password hashes, SHA-256 API-key digests, random tokens.
-argon2 = "0.5"
+# Accounts: passkeys (WebAuthn), SHA-256 digests for session/API-key/invite
+# tokens, random tokens.
+webauthn-rs = { version = "0.5", features = ["conditional-ui"] }
+# webauthn-rs uses OpenSSL; build it in so neither the Docker image nor a dev
+# machine needs a system OpenSSL.
+openssl = { version = "0.10", features = ["vendored"] }
+url = "2"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"

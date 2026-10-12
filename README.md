@@ -34,22 +34,41 @@ docker run -d --name farmslicer -p 9337:9337 \
 | --- | --- | --- |
 | `PORT` | `9337` | HTTP port |
 | `ORCA_RESOURCES_DIR` | `extern/OrcaSlicer/resources` | OrcaSlicer `resources/` tree (profiles, nozzle/flush tables) |
+| `FARMSLICER_ORIGINS` | `http://localhost:9337,http://localhost:5173` | Comma-separated origins the UI is served from. The first one is canonical: its host is the WebAuthn relying-party ID (never change it once users have enrolled) and it is used in invite links. Must be HTTPS except for `localhost`. |
 | `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner |
 | `RUST_LOG` | — | Log level |
 
 Data (SQLite db, uploaded models, G-code) lives in `/app/data`.
 
-### Accounts
+### Accounts: passkeys only
 
-There are no secrets to configure. On first run the web UI asks whoever opens
-it to create the **owner** account (so do that promptly after deploying). The
-owner and admins add further accounts on the Users page; roles are `owner`
-(fixed), `admin` (manage users and printers) and `user` (slice, view, own API
-keys). Passwords are stored as argon2id hashes; sessions are 30-day cookies.
+There are no passwords and no secrets to configure.
+
+- **First run**: the web UI asks whoever opens it to create the **owner**
+  account by registering a passkey (Windows Hello, Touch ID, a phone, a
+  security key). Do that promptly after deploying.
+- **Adding users**: the owner or an admin creates the account on the Users
+  page and gets a single-use **invite link** (valid 72 h); the invitee opens it
+  and enrols their own passkey. Roles: `owner` (fixed), `admin` (manage users
+  and printers), `user` (slice, view, manage own passkeys and API keys).
+- **Signing in**: "Sign in with a passkey" (any passkey for this site), or by
+  username to narrow it to that account's passkeys. Sessions are 30-day
+  cookies.
+- **More devices**: add passkeys on the Account page; the last one cannot be
+  removed.
+- **Lost everything**: every enrolment hands out a one-time **recovery code**
+  (shown once, stored hashed). `/recover` takes username + code and enrols a
+  new passkey. Without the code, an admin issues a new invite link for the
+  account (the owner can only be re-enrolled by the owner).
+
+Passkeys need a secure context: HTTPS, or `localhost` for development. The
+relying-party ID is the host of the first `FARMSLICER_ORIGINS` entry.
 
 Scripts and other machines authenticate with an **API key** created on the
 Account page (shown once), sent as `Authorization: Bearer fsk_…`. A key has the
 permissions of the account that created it; revoke it there.
+`tests/passkey-e2e.mjs` drives all of the above against a running server with
+a software authenticator.
 
 ## Building
 
