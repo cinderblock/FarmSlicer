@@ -163,6 +163,7 @@ export default function SlicePage() {
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
+  const [printersLoaded, setPrintersLoaded] = useState(false);
   const [processes, setProcesses] = useState<ProfileEntry[]>([]);
   const [filaments, setFilaments] = useState<ProfileEntry[]>([]);
   const [printerId, setPrinterId] = useState("");
@@ -200,8 +201,11 @@ export default function SlicePage() {
   useEffect(() => {
     fetch("/api/printers")
       .then((r) => r.json())
-      .then(setPrinters)
-      .catch(() => {});
+      .then((list: Printer[]) => {
+        setPrinters(list);
+        setPrintersLoaded(true);
+      })
+      .catch(() => setPrintersLoaded(true));
     fetch("/api/profiles/machine-models")
       .then((r) => r.json())
       .then(setMachineModels)
@@ -267,10 +271,11 @@ export default function SlicePage() {
   // Models to offer: those of the farm's printers, or every known model when
   // no printer is configured yet (slicing doesn't need a printer).
   const offeredModels = useMemo(() => {
+    if (!printersLoaded) return [];
     const farm = new Set(printers.map((p) => p.machine_profile));
     const ofFarm = machineModels.filter((m) => farm.has(m.name));
     return ofFarm.length > 0 ? ofFarm : machineModels;
-  }, [printers, machineModels]);
+  }, [printers, printersLoaded, machineModels]);
 
   const selectedPrinter = printers.find((p) => p.id === printerId);
   const model = selectedPrinter?.machine_profile ?? (modelChoice || offeredModels[0]?.name || "");
@@ -339,12 +344,12 @@ export default function SlicePage() {
     return filtered;
   }, [filaments, materialFilter, variantFilter]);
 
+  // Keep the process and filament: when the printer's machine differs, the
+  // profile reload below replaces choices that don't fit it. Clearing them
+  // here left them empty when the machine stayed the same (the reload never
+  // ran), and the job went out with no profiles.
   const handlePrinterChange = (id: string) => {
     setPrinterId(id);
-    setProcess("");
-    setFilament("");
-    setMaterialFilter("");
-    setVariantFilter("");
   };
 
   const handleMaterialChange = (type: string) => {
@@ -391,11 +396,15 @@ export default function SlicePage() {
       setFilaments([]);
       return;
     }
+    // A slower answer for a machine chosen before must not overwrite the
+    // current machine's profiles.
+    let stale = false;
     fetch(
       `/api/profiles/processes?machine=${encodeURIComponent(resolvedMachine)}`,
     )
       .then((r) => r.json())
       .then((data: ProfileEntry[]) => {
+        if (stale) return;
         setProcesses(data);
         if (data.length > 0 && !data.some((p) => p.name === process)) {
           const standard = data.find((p) => p.name.includes("0.20mm"));
@@ -408,6 +417,7 @@ export default function SlicePage() {
     )
       .then((r) => r.json())
       .then((data: ProfileEntry[]) => {
+        if (stale) return;
         setFilaments(data);
         // Default to PLA material filter
         const types = [...new Set(data.map((f) => materialType(f.name)))];
@@ -437,6 +447,9 @@ export default function SlicePage() {
         }
       })
       .catch(() => {});
+    return () => {
+      stale = true;
+    };
   }, [resolvedMachine]);
 
   // Fetch resolved config when profile selections change
