@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+// End-to-end test of the printers API: admin-only management, the access
+// code never leaving the server, and live status for a printer that can't be
+// reached (nothing listens on 127.0.0.1:8883 in CI).
+//
+//   node tests/printers-e2e.mjs http://localhost:9337
+//
+// Needs a fresh server (it performs first-run setup). Exit code 0 iff all
+// checks pass. No dependencies beyond Node 22.
+import { BASE, check, Client, SoftAuthenticator, register, finish } from "./lib.mjs";
+
+console.log(`printers e2e against ${BASE}`);
+
+const json = (r) => JSON.stringify(r.json);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const owner = new Client();
+let r = await register(owner, new SoftAuthenticator(), "/api/auth/setup/start", { username: "owner" }, "/api/auth/setup/finish", "k");
+check(r.status === 200, "owner set up", json(r));
+
+r = await owner.post("/api/users", { username: "ursula", role: "user" });
+check(r.status === 201, "admin creates a user", json(r));
+const token = r.json.invite_url.split("/invite/")[1];
+const user = new Client();
+r = await register(user, new SoftAuthenticator(), `/api/auth/invite/${token}/start`, {}, `/api/auth/invite/${token}/finish`, "k");
+check(r.status === 200, "user enrols", json(r));
+
+// ---- management is admin-only ------------------------------------------------------
+r = await user.post("/api/printers", { name: "nope" });
+check(r.status === 403, "users can't add printers", json(r));
+
+r = await owner.post("/api/printers", { name: "  " });
+check(r.status === 400, "a printer needs a name", json(r));
+
+r = await owner.post("/api/printers", {
+  name: "Bench X1C",
+  machine_profile: "Bambu Lab X1 Carbon",
+  nozzle_diameter: "0.4",
+  protocol: "bambu",
+  address: " 127.0.0.1 ",
+  serial_number: "00M00A000000000",
+  access_code: "12345678",
+});
+check(r.status === 201, "admin adds a printer", json(r));
+const id = r.json.id;
+check(r.json.access_code === undefined && r.json.access_code_set === true, "the access code is write-only", json(r));
+check(r.json.address === "127.0.0.1", "fields are trimmed", json(r));
+
+r = await owner.get("/api/printers");
+check(!JSON.stringify(r.json).includes("12345678"), "no listing carries the access code", json(r));
+check(r.json[0]?.serial_number === "00M00A000000000", "admins see the serial number", json(r));
+
+r = await user.get("/api/printers");
+check(r.status === 200 && r.json.length === 1, "users see the printer", json(r));
+check(r.json[0].serial_number === null && !JSON.stringify(r.json).includes("12345678"), "users see neither serial nor code", json(r));
+
+r = await user.patch(`/api/printers/${id}`, { name: "mine" });
+check(r.status === 403, "users can't edit printers", json(r));
+r = await user.del(`/api/printers/${id}`);
+check(r.status === 403, "users can't remove printers", json(r));
+
+r = await owner.patch(`/api/printers/${id}`, { name: "Bench X1 Carbon" });
+check(r.status === 200 && r.json.name === "Bench X1 Carbon" && r.json.access_code_set, "edit keeps unspecified fields", json(r));
+r = await owner.patch(`/api/printers/nope`, { name: "x" });
+check(r.status === 404, "editing an unknown printer is 404", json(r));
+
+// ---- live status ---------------------------------------------------------------------
+let status;
+for (let i = 0; i < 20; i++) {
+  r = await user.get("/api/printers/status");
+  status = r.json?.find((s) => s.printer_id === id);
+  if (status?.connection_error) break;
+  await sleep(250);
+}
+check(status && status.online === false && /8883/.test(status.connection_error ?? ""), "an unreachable printer reports why", JSON.stringify(status));
+
+r = await user.get(`/api/printers/${id}/report`);
+check(r.status === 403, "raw reports are admin-only", json(r));
+
+// The event stream starts with a snapshot of every connected printer.
+const ctl = new AbortController();
+const res = await fetch(`${BASE}/api/printers/events`, { headers: { cookie: user.cookie }, signal: ctl.signal });
+check(res.headers.get("content-type")?.startsWith("text/event-stream"), "events are server-sent", res.headers.get("content-type"));
+const reader = res.body.getReader();
+let text = "";
+while (!text.includes("\n\n")) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  text += new TextDecoder().decode(value);
+}
+ctl.abort();
+check(text.startsWith("event: status") && text.includes(id), "the stream opens with each printer's status", text.slice(0, 200));
+
+// Clearing the access code disconnects the printer.
+r = await owner.patch(`/api/printers/${id}`, { access_code: "" });
+check(r.status === 200 && r.json.access_code_set === false, "admin clears the access code", json(r));
+r = await user.get("/api/printers/status");
+check(!r.json.some((s) => s.printer_id === id), "a printer without an access code isn't connected", json(r));
+
+r = await owner.del(`/api/printers/${id}`);
+check(r.status === 204, "admin removes the printer", String(r.status));
+
+finish();

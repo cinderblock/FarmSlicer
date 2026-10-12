@@ -88,7 +88,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   calls back without user data, so jobs are looked up by id)
 - `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, model, config_json, out)`;
   `extern "Rust"` `slice_progress` / `slice_cancelled`
-- `src/discovery.rs` — Bambu SSDP listener
+- `src/discovery.rs` — Bambu SSDP listener (shared port, logs sightings)
+- `src/bambu/` — Bambu LAN link: `hub.rs` (one MQTT/TLS connection per
+  printer, reconnect, request/response by `sequence_id`, `sync()` after any
+  printer change), `status.rs` (merging P1/A1 delta reports, the UI summary),
+  `tls.rs` (accept the printer's Bambu-CA cert, ring provider)
+- `src/printers_api.rs` — printer CRUD (admins), status + SSE events
 - `src/groups.rs` — group tree, inherited settings, permissions
   (`can_manage`, `can_govern`), job visibility, seasons; `src/groups_api.rs`
   (groups, members, links, library, usage, site settings);

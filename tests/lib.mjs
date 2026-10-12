@@ -174,6 +174,7 @@ export class Client {
   get(p) { return this.call("GET", p); }
   post(p, b) { return this.call("POST", p, b ?? {}); }
   put(p, b) { return this.call("PUT", p, b); }
+  patch(p, b) { return this.call("PATCH", p, b); }
   del(p) { return this.call("DELETE", p); }
   /** POST multipart/form-data built from a plain object (Blobs stay files). */
   form(p, fields) {

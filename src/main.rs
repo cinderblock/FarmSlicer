@@ -1,10 +1,12 @@
 mod auth;
 mod auth_api;
+mod bambu;
 mod db;
 mod discovery;
 mod groups;
 mod groups_api;
 mod join_api;
+mod printers_api;
 mod profiles;
 mod progress;
 mod quota;
@@ -81,12 +83,17 @@ async fn main() {
         println!("Auth enabled: {} account(s)", db.user_count());
     }
 
+    // Connect to every Bambu printer with an address, serial and access code.
+    let printers = bambu::PrinterHub::new();
+    printers.sync(&db.list_printers());
+
     let state = Arc::new(server::AppState::new(
         db,
         data_dir,
         slicer,
         profile_store,
         discovered,
+        printers,
         rp,
     ));
 

@@ -1,17 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-
-interface Printer {
-  id: string;
-  name: string;
-  machine_profile: string;
-  nozzle_diameter: string;
-  status: string;
-  protocol: string;
-  address: string;
-  serial_number: string;
-  access_code: string;
-  current_job: string | null;
-}
+import { useState, useEffect, useMemo } from "react";
+import { useAuth } from "../auth";
+import { useJson } from "../api";
+import PrinterCard from "../components/PrinterCard";
+import { usePrinterStatuses, type Printer } from "../printers";
 
 interface MachineModel {
   name: string;
@@ -30,32 +21,49 @@ interface DiscoveredPrinter {
   signal: string;
 }
 
+/** The add/edit form's fields. `accessCode` empty on edit = keep the old one. */
+interface Draft {
+  id: string | null;
+  name: string;
+  vendor: string;
+  model: string;
+  nozzle: string;
+  protocol: string;
+  address: string;
+  serial: string;
+  accessCode: string;
+  accessCodeSet: boolean;
+}
+
+const EMPTY: Draft = {
+  id: null,
+  name: "",
+  vendor: "",
+  model: "",
+  nozzle: "",
+  protocol: "",
+  address: "",
+  serial: "",
+  accessCode: "",
+  accessCodeSet: false,
+};
+
+function defaultNozzle(m: MachineModel | undefined): string {
+  if (!m) return "";
+  return m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0] ?? "";
+}
+
 export default function PrintersPage() {
-  const [printers, setPrinters] = useState<Printer[]>([]);
+  const { isAdmin } = useAuth();
+  const [rev, setRev] = useState(0);
+  const printersQuery = useJson<Printer[]>("/api/printers", rev);
+  const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
+  const modelsData = useJson<MachineModel[]>("/api/profiles/machine-models").data;
+  const models = useMemo(() => modelsData ?? [], [modelsData]);
+  const statuses = usePrinterStatuses();
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
-  const [models, setModels] = useState<MachineModel[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [selectedVendor, setSelectedVendor] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [selectedNozzle, setSelectedNozzle] = useState("");
-  const [protocol, setProtocol] = useState("");
-  const [address, setAddress] = useState("");
-  const [serialNumber, setSerialNumber] = useState("");
-  const [accessCode, setAccessCode] = useState("");
-
-  const fetchPrinters = useCallback(async () => {
-    const res = await fetch("/api/printers");
-    setPrinters(await res.json());
-  }, []);
-
-  useEffect(() => {
-    fetchPrinters();
-    fetch("/api/profiles/machine-models")
-      .then((r) => r.json())
-      .then(setModels)
-      .catch(() => {});
-  }, [fetchPrinters]);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [error, setError] = useState("");
 
   // Poll for discovered printers
   useEffect(() => {
@@ -76,148 +84,151 @@ export default function PrintersPage() {
     return v;
   }, [models]);
 
-  const vendorModels = useMemo(
-    () => models.filter((m) => m.vendor_display === selectedVendor),
-    [models, selectedVendor],
-  );
+  const set = (patch: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...patch } : d));
 
-  const vendorCode = useMemo(() => {
-    return models.find((m) => m.vendor_display === selectedVendor)?.vendor ?? "";
-  }, [models, selectedVendor]);
-
-  const isBambuVendor = vendorCode === "BBL";
-
-  const currentModel = models.find((m) => m.name === selectedModel);
-  const nozzleOptions = currentModel?.nozzle_diameters ?? [];
+  const vendorModels = models.filter((m) => m.vendor_display === draft?.vendor);
+  const isBambuVendor = vendorModels[0]?.vendor === "BBL";
+  const nozzleOptions = models.find((m) => m.name === draft?.model)?.nozzle_diameters ?? [];
 
   const handleVendorChange = (vendor: string) => {
-    setSelectedVendor(vendor);
-    setSelectedModel("");
-    setSelectedNozzle("");
     const code = models.find((m) => m.vendor_display === vendor)?.vendor;
-    if (code === "BBL") {
-      setProtocol("bambu");
-    } else if (code) {
-      setProtocol((prev) => (prev === "bambu" || !prev) ? "octoprint" : prev);
-    }
+    setDraft((d) =>
+      d && {
+        ...d,
+        vendor,
+        model: "",
+        nozzle: "",
+        protocol:
+          code === "BBL" ? "bambu" : code ? (d.protocol === "bambu" || !d.protocol ? "octoprint" : d.protocol) : d.protocol,
+      },
+    );
   };
 
-  const handleModelChange = (modelName: string) => {
-    setSelectedModel(modelName);
-    const m = models.find((x) => x.name === modelName);
-    if (m && m.nozzle_diameters.length > 0) {
-      const defaultNozzle =
-        m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0];
-      setSelectedNozzle(defaultNozzle);
-    } else {
-      setSelectedNozzle("");
-    }
+  const handleModelChange = (model: string) => {
+    set({ model, nozzle: defaultNozzle(models.find((m) => m.name === model)) });
   };
 
-  const resetForm = () => {
-    setName("");
-    setSelectedVendor("");
-    setSelectedModel("");
-    setSelectedNozzle("");
-    setProtocol("");
-    setAddress("");
-    setSerialNumber("");
-    setAccessCode("");
-    setShowForm(false);
-  };
-
-  const handleAdd = async () => {
-    if (!name.trim()) return;
-    await fetch("/api/printers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        machine_profile: selectedModel,
-        nozzle_diameter: selectedNozzle,
-        protocol,
-        address,
-        serial_number: serialNumber,
-        access_code: accessCode,
-      }),
+  const startEdit = (p: Printer) => {
+    setError("");
+    setDraft({
+      id: p.id,
+      name: p.name,
+      vendor: models.find((m) => m.name === p.machine_profile)?.vendor_display ?? "",
+      model: p.machine_profile,
+      nozzle: p.nozzle_diameter,
+      protocol: p.protocol,
+      address: p.address,
+      serial: p.serial_number ?? "",
+      accessCode: "",
+      accessCodeSet: p.access_code_set,
     });
-    resetForm();
-    fetchPrinters();
   };
 
-  const handleDelete = async (id: string) => {
-    await fetch(`/api/printers/${id}`, { method: "DELETE" });
-    fetchPrinters();
+  const handleSave = async () => {
+    if (!draft || !draft.name.trim()) return;
+    const body: Record<string, string> = {
+      name: draft.name,
+      machine_profile: draft.model,
+      nozzle_diameter: draft.nozzle,
+      protocol: draft.protocol,
+      address: draft.address,
+      serial_number: draft.serial,
+    };
+    // Write-only: an empty field on edit keeps the stored code.
+    if (draft.accessCode || !draft.id) body.access_code = draft.accessCode;
+    const res = await fetch(draft.id ? `/api/printers/${draft.id}` : "/api/printers", {
+      method: draft.id ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => null);
+      setError(b?.error ?? `HTTP ${res.status}`);
+      return;
+    }
+    setDraft(null);
+    setError("");
+    setRev((r) => r + 1);
+  };
+
+  const handleDelete = async (p: Printer) => {
+    if (!confirm(`Remove ${p.name} from the farm?`)) return;
+    await fetch(`/api/printers/${p.id}`, { method: "DELETE" });
+    setRev((r) => r + 1);
+  };
+
+  const handleUpdateAddress = async (p: Printer, ip: string) => {
+    await fetch(`/api/printers/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: ip }),
+    });
+    setRev((r) => r + 1);
   };
 
   const handleAddDiscovered = (d: DiscoveredPrinter) => {
-    setName(d.name);
     // Discovery provides the full profile name (e.g., "Bambu Lab A1 0.4 nozzle").
     // Find the matching model and extract vendor + nozzle.
-    const matchedModel = models.find((m) =>
-      d.machine_profile.startsWith(m.name),
-    );
-    if (matchedModel) {
-      setSelectedVendor(matchedModel.vendor_display);
-      setSelectedModel(matchedModel.name);
-      const suffix = d.machine_profile.slice(matchedModel.name.length).trim();
-      const nozzleMatch = suffix.match(/^([\d.]+)\s*nozzle/);
-      if (
-        nozzleMatch &&
-        matchedModel.nozzle_diameters.includes(nozzleMatch[1])
-      ) {
-        setSelectedNozzle(nozzleMatch[1]);
-      } else {
-        setSelectedNozzle(
-          matchedModel.nozzle_diameters.find((n) => n === "0.4") ??
-            matchedModel.nozzle_diameters[0] ??
-            "",
-        );
-      }
-    } else {
-      setSelectedVendor("");
-      setSelectedModel(d.machine_profile);
-      setSelectedNozzle("");
-    }
-    setProtocol("bambu");
-    setAddress(d.ip);
-    setSerialNumber(d.serial);
-    setAccessCode("");
-    setShowForm(true);
+    const matchedModel = models.find((m) => d.machine_profile.startsWith(m.name));
+    const nozzleMatch = matchedModel
+      ? d.machine_profile.slice(matchedModel.name.length).trim().match(/^([\d.]+)\s*nozzle/)
+      : null;
+    setError("");
+    setDraft({
+      ...EMPTY,
+      name: d.name,
+      vendor: matchedModel?.vendor_display ?? "",
+      model: matchedModel?.name ?? d.machine_profile,
+      nozzle:
+        nozzleMatch && matchedModel?.nozzle_diameters.includes(nozzleMatch[1])
+          ? nozzleMatch[1]
+          : defaultNozzle(matchedModel),
+      protocol: "bambu",
+      address: d.ip,
+      serial: d.serial,
+    });
   };
 
-  const isBambuProtocol = protocol === "bambu";
+  const isBambuProtocol = draft?.protocol === "bambu";
 
-  // Filter out already-configured printers from discovered list
-  const configuredSerials = new Set(
-    printers.map((p) => p.serial_number).filter(Boolean),
+  // Discovered printers not in the farm yet, and farm printers whose address
+  // changed (DHCP) since they were added.
+  const bySerial = new Map(
+    printers.filter((p) => p.serial_number).map((p) => [p.serial_number as string, p]),
   );
-  const newDiscovered = discovered.filter(
-    (d) => !configuredSerials.has(d.serial),
-  );
+  const newDiscovered = discovered.filter((d) => !bySerial.has(d.serial));
+  const moved = discovered
+    .map((d) => ({ d, p: bySerial.get(d.serial) }))
+    .filter((x): x is { d: DiscoveredPrinter; p: Printer } => !!x.p && x.p.address !== x.d.ip);
 
   return (
     <div className="page">
       <h2>Printers</h2>
-      <div className="page-actions">
-        <button
-          className="btn-primary"
-          style={{ width: "auto" }}
-          onClick={() => setShowForm(!showForm)}
-        >
-          {showForm ? "Cancel" : "Add Printer"}
-        </button>
-      </div>
+      {isAdmin && (
+        <div className="page-actions">
+          <button
+            className="btn-primary"
+            style={{ width: "auto" }}
+            onClick={() => {
+              setError("");
+              setDraft(draft ? null : { ...EMPTY });
+            }}
+          >
+            {draft ? "Cancel" : "Add Printer"}
+          </button>
+        </div>
+      )}
 
-      {showForm && (
+      {draft && (
         <div className="card" style={{ marginBottom: "1.5rem", maxWidth: 480 }}>
           <div className="printer-form">
+            <h3>{draft.id ? `Edit ${draft.name}` : "Add a printer"}</h3>
             <label>
               Name
               <input
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={draft.name}
+                onChange={(e) => set({ name: e.target.value })}
                 placeholder="Bambu X1C #1"
               />
             </label>
@@ -227,7 +238,7 @@ export default function PrintersPage() {
               <input
                 type="text"
                 list="vendor-list"
-                value={selectedVendor}
+                value={draft.vendor}
                 onChange={(e) => handleVendorChange(e.target.value)}
                 placeholder="Type to search..."
               />
@@ -241,10 +252,7 @@ export default function PrintersPage() {
             {vendorModels.length > 0 && (
               <label>
                 Printer Model
-                <select
-                  value={selectedModel}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                >
+                <select value={draft.model} onChange={(e) => handleModelChange(e.target.value)}>
                   <option value="">Select model...</option>
                   {vendorModels.map((m) => (
                     <option key={m.name} value={m.name}>
@@ -258,10 +266,7 @@ export default function PrintersPage() {
             {nozzleOptions.length > 0 && (
               <label>
                 Nozzle Size
-                <select
-                  value={selectedNozzle}
-                  onChange={(e) => setSelectedNozzle(e.target.value)}
-                >
+                <select value={draft.nozzle} onChange={(e) => set({ nozzle: e.target.value })}>
                   {nozzleOptions.map((n) => (
                     <option key={n} value={n}>
                       {n}mm
@@ -273,12 +278,9 @@ export default function PrintersPage() {
 
             <label>
               Protocol
-              <select
-                value={protocol}
-                onChange={(e) => setProtocol(e.target.value)}
-              >
-                {!protocol && <option value="">Select protocol...</option>}
-                {isBambuVendor && (
+              <select value={draft.protocol} onChange={(e) => set({ protocol: e.target.value })}>
+                {!draft.protocol && <option value="">Select protocol...</option>}
+                {(isBambuVendor || draft.protocol === "bambu") && (
                   <option value="bambu">Bambu Lab (LAN)</option>
                 )}
                 <option value="octoprint">OctoPrint</option>
@@ -290,8 +292,8 @@ export default function PrintersPage() {
               IP Address
               <input
                 type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                value={draft.address}
+                onChange={(e) => set({ address: e.target.value })}
                 placeholder="192.168.1.100"
               />
             </label>
@@ -302,35 +304,58 @@ export default function PrintersPage() {
                   Serial Number
                   <input
                     type="text"
-                    value={serialNumber}
-                    onChange={(e) => setSerialNumber(e.target.value)}
+                    value={draft.serial}
+                    onChange={(e) => set({ serial: e.target.value })}
                     placeholder="01P00A000000000"
                   />
                 </label>
                 <label>
                   Access Code
                   <input
-                    type="text"
-                    value={accessCode}
-                    onChange={(e) => setAccessCode(e.target.value)}
-                    placeholder="8-digit code from printer"
+                    type="password"
+                    autoComplete="off"
+                    value={draft.accessCode}
+                    onChange={(e) => set({ accessCode: e.target.value })}
+                    placeholder={
+                      draft.accessCodeSet ? "Set (leave empty to keep it)" : "8-character code from the printer's screen"
+                    }
                   />
                 </label>
+                <p className="hint">
+                  The access code is on the printer's screen, in its network / LAN-only settings.
+                  LAN mode and Developer Mode must be on for FarmSlicer to connect.
+                </p>
               </>
             )}
 
-            <button
-              className="btn-primary"
-              onClick={handleAdd}
-              style={{ marginTop: "0.5rem" }}
-            >
-              Add Printer
+            {error && <p className="printer-error">{error}</p>}
+            <button className="btn-primary" onClick={handleSave} style={{ marginTop: "0.5rem" }}>
+              {draft.id ? "Save" : "Add Printer"}
             </button>
           </div>
         </div>
       )}
 
-      {newDiscovered.length > 0 && (
+      {isAdmin && moved.length > 0 && (
+        <div className="discovered-section">
+          <h3>Address Changed</h3>
+          <div className="card-grid">
+            {moved.map(({ d, p }) => (
+              <div key={d.serial} className="card discovered-card">
+                <h3>{p.name}</h3>
+                <p className="hint">
+                  Configured at {p.address || "no address"}, now announcing from {d.ip}.
+                </p>
+                <button className="btn-sm" style={{ marginTop: "0.5rem" }} onClick={() => handleUpdateAddress(p, d.ip)}>
+                  Use {d.ip}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isAdmin && newDiscovered.length > 0 && (
         <div className="discovered-section">
           <h3>Detected on Network</h3>
           <div className="card-grid">
@@ -356,42 +381,28 @@ export default function PrintersPage() {
         </div>
       )}
 
-      {printers.length === 0 && newDiscovered.length === 0 ? (
+      {printersQuery.data && printers.length === 0 && (!isAdmin || newDiscovered.length === 0) ? (
         <p className="empty-state">No printers configured yet.</p>
-      ) : printers.length === 0 ? null : (
-        <div className="card-grid">
+      ) : (
+        <div className="card-grid printer-grid">
           {printers.map((printer) => (
-            <div key={printer.id} className="card printer-card">
-              <div className="printer-header">
-                <h3>{printer.name}</h3>
-                <span className={`status-dot status-${printer.status}`} />
-              </div>
-              {printer.machine_profile && (
-                <p className="hint">
-                  {printer.machine_profile}
-                  {printer.nozzle_diameter &&
-                    ` (${printer.nozzle_diameter}mm nozzle)`}
-                </p>
-              )}
-              <p className="hint">
-                {printer.protocol === "bambu"
-                  ? "Bambu Lab (LAN)"
-                  : printer.protocol}
-              </p>
-              {printer.address && <p className="hint">{printer.address}</p>}
-              {printer.current_job ? (
-                <p>Printing: {printer.current_job}</p>
-              ) : (
-                <p className="hint">Idle</p>
-              )}
-              <button
-                className="btn-sm btn-danger"
-                style={{ marginTop: "0.5rem" }}
-                onClick={() => handleDelete(printer.id)}
-              >
-                Remove
-              </button>
-            </div>
+            <PrinterCard
+              key={printer.id}
+              printer={printer}
+              status={statuses[printer.id]}
+              actions={
+                isAdmin && (
+                  <>
+                    <button className="btn-sm" onClick={() => startEdit(printer)}>
+                      Edit
+                    </button>
+                    <button className="btn-sm btn-danger" onClick={() => handleDelete(printer)}>
+                      Remove
+                    </button>
+                  </>
+                )
+              }
+            />
           ))}
         </div>
       )}

@@ -3,7 +3,7 @@ use axum::{
     http::{header, StatusCode},
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{get, post},
     Extension, Json, Router,
 };
 use serde::Deserialize;
@@ -14,11 +14,13 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::auth::{self, CurrentUser};
 use crate::auth_api;
+use crate::bambu::PrinterHub;
 use crate::db::{Db, Job, JobFilter, User};
 use crate::discovery;
 use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
+use crate::printers_api;
 use crate::profiles::ProfileStore;
 use crate::progress;
 use crate::quota;
@@ -35,6 +37,8 @@ pub struct AppState {
     slicer: Mutex<SlicerHandle>,
     pub profile_store: ProfileStore,
     pub discovered: Arc<discovery::DiscoveryMap>,
+    /// MQTT links to the farm's Bambu printers (src/bambu/).
+    pub printers: PrinterHub,
     /// WebAuthn relying party + in-flight ceremonies (src/auth.rs).
     pub rp: auth::Rp,
 }
@@ -46,6 +50,7 @@ impl AppState {
         slicer: slicer::SlicerBox,
         profile_store: ProfileStore,
         discovered: Arc<discovery::DiscoveryMap>,
+        printers: PrinterHub,
         rp: auth::Rp,
     ) -> Self {
         Self {
@@ -54,6 +59,7 @@ impl AppState {
             slicer: Mutex::new(SlicerHandle(slicer)),
             profile_store,
             discovered,
+            printers,
             rp,
         }
     }
@@ -229,57 +235,6 @@ async fn list_discovered(State(state): State<Arc<AppState>>) -> Json<Value> {
         })
         .collect();
     Json(json!(printers))
-}
-
-// -- Printers --
-
-async fn list_printers(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let printers = state.db.list_printers();
-    Json(json!(printers))
-}
-
-#[derive(Deserialize)]
-struct CreatePrinter {
-    name: String,
-    machine_profile: Option<String>,
-    nozzle_diameter: Option<String>,
-    protocol: Option<String>,
-    address: Option<String>,
-    serial_number: Option<String>,
-    access_code: Option<String>,
-}
-
-async fn create_printer(
-    State(state): State<Arc<AppState>>,
-    Extension(CurrentUser(user)): Extension<CurrentUser>,
-    Json(body): Json<CreatePrinter>,
-) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
-    auth::require_full(&user)?;
-    let printer = state.db.create_printer(
-        &body.name,
-        body.machine_profile.as_deref().unwrap_or(""),
-        body.nozzle_diameter.as_deref().unwrap_or(""),
-        body.protocol.as_deref().unwrap_or("bambu"),
-        body.address.as_deref().unwrap_or(""),
-        body.serial_number.as_deref().unwrap_or(""),
-        body.access_code.as_deref().unwrap_or(""),
-    );
-    Ok((StatusCode::CREATED, Json(json!(printer))))
-}
-
-async fn delete_printer(
-    State(state): State<Arc<AppState>>,
-    Extension(CurrentUser(user)): Extension<CurrentUser>,
-    Path(id): Path<String>,
-) -> StatusCode {
-    if auth::require_full(&user).is_err() {
-        return StatusCode::FORBIDDEN;
-    }
-    if state.db.delete_printer(&id) {
-        StatusCode::NO_CONTENT
-    } else {
-        StatusCode::NOT_FOUND
-    }
 }
 
 // -- Custom Profiles --
@@ -1082,8 +1037,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/profiles/resolve", get(resolve_profiles))
         .route("/api/profiles/resolve-single", get(resolve_single_profile))
         .route("/api/discovery", get(list_discovered))
-        .route("/api/printers", get(list_printers).post(create_printer))
-        .route("/api/printers/{id}", delete(delete_printer))
+        .merge(printers_api::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),

@@ -28,6 +28,11 @@ chrono = { version = "0.4", default-features = false, features = ["now", "std"] 
 regex = "1"
 # Discovery: share the SSDP port with other listeners (SO_REUSEADDR/PORT).
 socket2 = { version = "0.6", features = ["all"] }
+# Bambu printers: MQTT over TLS (status, commands) and FTPS (uploads). rustls
+# on the ring provider: no C toolchain beyond what ring needs.
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+futures-util = "0.3"
 
 [build-dependencies]
 cxx-build = "1"

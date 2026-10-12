@@ -14,7 +14,10 @@ can run in the user's browser.
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
   isolated). Browser slicing uploads only the resulting G-code, unless the
   job's group is set to keep models.
-- **Printers:** Bambu Lab SSDP discovery; machine model + nozzle size per printer.
+- **Printers:** Bambu Lab SSDP discovery; machine model + nozzle size per printer;
+  live status over the printers' LAN MQTT interface (state, progress,
+  temperatures, AMS trays, errors). Needs the printer's IP, serial number and
+  LAN access code, with LAN mode and Developer Mode on.
 - **People:** passkey accounts, nested groups with shared libraries and
   seasons, quotas, self-service joining through links, guest accounts.
 
@@ -193,7 +196,9 @@ summary prints the `pin.json` to paste there.
 | `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue |
 | `GET /api/profiles/resolve?machine=&process=&filament=` | merged config JSON (what the engines slice with) |
 | `GET /api/profiles/resolve-single?name=` | one profile with inheritance resolved |
-| `GET/POST /api/printers`, `DELETE /api/printers/{id}` | printer CRUD |
+| `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set` |
+| `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
+| `GET /api/printers/{id}/report` | the printer's merged raw MQTT report (admins) |
 | `GET /api/discovery` | Bambu printers seen on the LAN |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |

@@ -808,6 +808,46 @@ impl Db {
         }
     }
 
+    pub fn get_printer(&self, id: &str) -> Option<Printer> {
+        self.list_printers().into_iter().find(|p| p.id == id)
+    }
+
+    /// Change the fields that are `Some`; returns the updated printer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_printer(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        machine_profile: Option<&str>,
+        nozzle_diameter: Option<&str>,
+        protocol: Option<&str>,
+        address: Option<&str>,
+        serial_number: Option<&str>,
+        access_code: Option<&str>,
+    ) -> Option<Printer> {
+        {
+            let conn = self.conn.lock().unwrap();
+            let n = conn
+                .execute(
+                    "UPDATE printers SET
+                        name = COALESCE(?2, name),
+                        machine_profile = COALESCE(?3, machine_profile),
+                        nozzle_diameter = COALESCE(?4, nozzle_diameter),
+                        protocol = COALESCE(?5, protocol),
+                        address = COALESCE(?6, address),
+                        serial_number = COALESCE(?7, serial_number),
+                        access_code = COALESCE(?8, access_code)
+                     WHERE id = ?1",
+                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code],
+                )
+                .unwrap();
+            if n == 0 {
+                return None;
+            }
+        }
+        self.get_printer(id)
+    }
+
     pub fn delete_printer(&self, id: &str) -> bool {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM printers WHERE id = ?1", params![id])
