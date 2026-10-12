@@ -268,6 +268,14 @@ Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocea
   throwaway container on the build host, now also a CI gate on the pushed
   image). `FARMSLICER_ORIGINS` names the HTTPS origin; ops sets it.
 
+- [x] 2026-10-12: passkey build deployed through ops (ops `39784dc`, run
+  38296852081); repo flipped **public** (package stays private; ops has read
+  access). Live status then showed `setup_required: false` with 1 account:
+  someone had claimed the owner through the password build in between, and
+  that account has no passkey, so nobody could sign in. Fix: an installation
+  where no account can sign in (no passkeys, no live invite, no unused
+  recovery code) offers first-run setup again and replaces those accounts.
+
 ## Hand-off: what the maintainer has to do (none of it is mine to do)
 
 1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much
