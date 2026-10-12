@@ -61,6 +61,13 @@ export default function PrinterCard({
   const [report, setReport] = useState("");
   const [note, setNote] = useState("");
   const [heatSlot, setHeatSlot] = useState("");
+  // The current or last job's picture (hidden when there is none).
+  const job = status?.subtask_name && status.subtask_name !== "project_file" ? status.subtask_name : null;
+  const [missingPicture, setMissingPicture] = useState<string | null>(null);
+  const picture =
+    status?.online && job && job !== missingPicture && status.state !== "IDLE"
+      ? `/api/printers/${printer.id}/thumbnail?job=${encodeURIComponent(job)}`
+      : null;
 
   const sendReport = async () => {
     try {
@@ -122,6 +129,15 @@ export default function PrinterCard({
 
       {status?.online && (
         <>
+          {picture && (
+            <img
+              className="printer-picture"
+              src={picture}
+              alt=""
+              title={status.job_name ?? undefined}
+              onError={() => setMissingPicture(job)}
+            />
+          )}
           {busy && (
             <div className="printer-job">
               <div className="printer-job-name" title={status.gcode_file ?? undefined}>

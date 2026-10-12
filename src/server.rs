@@ -43,6 +43,8 @@ pub struct AppState {
     pub printers: PrinterHub,
     /// Camera feeds, started while someone watches.
     pub cameras: crate::bambu::camera::CameraHub,
+    /// Pictures of prints started outside FarmSlicer, fetched from printers.
+    pub printer_thumbs: crate::printer_thumbs::PrinterThumbs,
     /// WebAuthn relying party + in-flight ceremonies (src/auth.rs).
     pub rp: auth::Rp,
 }
@@ -65,6 +67,7 @@ impl AppState {
             discovered,
             printers,
             cameras: Default::default(),
+            printer_thumbs: Default::default(),
             rp,
         }
     }
@@ -1144,6 +1147,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(prints_api::routes())
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())
+        .merge(crate::printer_thumbs::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),

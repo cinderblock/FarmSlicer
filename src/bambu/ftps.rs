@@ -135,6 +135,149 @@ async fn tls_connect(
     .await
 }
 
+/// A logged-in FTPS session with a printer.
+pub struct Session {
+    host: String,
+    addr: SocketAddr,
+    config: Arc<ClientConfig>,
+    name: ServerName<'static>,
+    control: Control<TlsStream<TcpStream>>,
+}
+
+impl Session {
+    pub async fn open(host: &str, port: u16, access_code: &str) -> Result<Session> {
+        let config = tls::ftps_config();
+        let name = server_name(host)?;
+        let addr: SocketAddr = step(&format!("resolving {host}"), tokio::net::lookup_host((host, port)))
+            .await?
+            .next()
+            .ok_or_else(|| err(format!("{host} has no address")))?;
+        let stream = tls_connect(&config, &name, addr, "control").await?;
+        let mut control = Control { stream: BufReader::new(stream) };
+        let (code, text) = control.reply().await?;
+        if code != 220 {
+            return Err(err(format!("unexpected greeting: {text}")));
+        }
+        control.expect("USER bblp", "USER", &[331, 230]).await?;
+        control
+            .expect(&format!("PASS {access_code}"), "the access code", &[230, 202])
+            .await
+            .map_err(|e| err(format!("{e} (is the access code current?)")))?;
+        control.expect("PBSZ 0", "PBSZ", &[200]).await?;
+        control.expect("PROT P", "PROT P", &[200]).await?;
+        control.expect("TYPE I", "TYPE I", &[200]).await?;
+        Ok(Session { host: host.to_string(), addr, config, name, control })
+    }
+
+    /// PASV, connect, send `command`; the data connection once the server
+    /// accepted it, or the refusal `(code, text)`.
+    async fn data(&mut self, command: &str) -> Result<std::result::Result<TlsStream<TcpStream>, (u16, String)>> {
+        let pasv = self.control.expect("PASV", "PASV", &[227]).await?;
+        let data_port = passive_port(&pasv).ok_or_else(|| err(format!("can't read the PASV reply: {pasv}")))?;
+        // Connect to the control connection's address: the one in the reply
+        // can be wrong behind NAT.
+        let data_addr = SocketAddr::new(self.addr.ip(), data_port);
+        let data_tcp = step(&format!("connecting to {data_addr} (data)"), TcpStream::connect(data_addr)).await?;
+        self.control.send(command).await?;
+        let (code, text) = self.control.reply().await?;
+        if code != 150 && code != 125 {
+            return Ok(Err((code, text)));
+        }
+        let stream = step(
+            &format!("TLS handshake with {data_addr} (data)"),
+            TlsConnector::from(self.config.clone()).connect(self.name.clone(), data_tcp),
+        )
+        .await?;
+        if stream.get_ref().1.handshake_kind() != Some(tokio_rustls::rustls::HandshakeKind::Resumed) {
+            eprintln!(
+                "FTPS {}: the data connection did not resume the TLS session; the printer may refuse it",
+                self.host
+            );
+        }
+        Ok(Ok(stream))
+    }
+
+    /// Store `data` as `remote_path`; `progress(sent, total)` as bytes go out.
+    pub async fn store(&mut self, remote_path: &str, data: &[u8], mut progress: impl FnMut(u64, u64)) -> Result<()> {
+        check_path(remote_path)?;
+        let mut data_stream = self
+            .data(&format!("STOR {remote_path}"))
+            .await?
+            .map_err(|(_, text)| err(format!("STOR {remote_path} was refused: {text}")))?;
+        let total = data.len() as u64;
+        let mut sent = 0u64;
+        for chunk in data.chunks(CHUNK) {
+            step("sending the file", data_stream.write_all(chunk)).await?;
+            sent += chunk.len() as u64;
+            progress(sent, total);
+        }
+        step("finishing the upload", data_stream.flush()).await?;
+        // close_notify + FIN: the server's end-of-file.
+        step("finishing the upload", data_stream.shutdown()).await?;
+        // Then read until the server closes too. It may have sent TLS 1.3
+        // session tickets we never read, and closing a socket with unread
+        // input resets the connection, which can cut off the end of the file.
+        let mut rest = Vec::new();
+        let _ = timeout(STEP_TIMEOUT, data_stream.read_to_end(&mut rest)).await;
+        drop(data_stream);
+        let (code, text) = self.control.reply().await?;
+        if code != 226 && code != 250 {
+            return Err(err(format!("the upload of {remote_path} failed: {text}")));
+        }
+        Ok(())
+    }
+
+    /// Fetch `remote_path`, at most `max_bytes` of it. `Ok(None)` when the
+    /// file doesn't exist (or is bigger than that).
+    pub async fn retrieve(&mut self, remote_path: &str, max_bytes: usize) -> Result<Option<Vec<u8>>> {
+        check_path(remote_path)?;
+        let mut data_stream = match self.data(&format!("RETR {remote_path}")).await? {
+            Ok(s) => s,
+            Err((550, _)) => return Ok(None),
+            Err((_, text)) => return Err(err(format!("RETR {remote_path} was refused: {text}"))),
+        };
+        let mut out = Vec::new();
+        let mut chunk = vec![0u8; CHUNK];
+        let mut too_big = false;
+        loop {
+            let n = step("receiving the file", data_stream.read(&mut chunk)).await?;
+            if n == 0 {
+                break;
+            }
+            if out.len() + n > max_bytes {
+                too_big = true;
+                break;
+            }
+            out.extend_from_slice(&chunk[..n]);
+        }
+        drop(data_stream);
+        // 226 after a complete transfer; 426/451 when we hung up early.
+        let (code, text) = self.control.reply().await?;
+        if too_big {
+            return Ok(None);
+        }
+        if code != 226 && code != 250 {
+            return Err(err(format!("the download of {remote_path} failed: {text}")));
+        }
+        Ok(Some(out))
+    }
+
+    /// Log out (best effort).
+    pub async fn quit(mut self) {
+        if self.control.send("QUIT").await.is_ok() {
+            let _ = self.control.reply().await;
+        }
+        let _ = timeout(STEP_TIMEOUT, self.control.stream.get_mut().shutdown()).await;
+    }
+}
+
+fn check_path(path: &str) -> Result<()> {
+    if path.contains(['\r', '\n']) {
+        return Err(err("file names can't contain line breaks"));
+    }
+    Ok(())
+}
+
 /// Upload `data` as `remote_path` (e.g. `/Bracket-1a2b3c4d.gcode.3mf`).
 /// `progress(sent, total)` is called as bytes go out.
 pub async fn upload(
@@ -143,86 +286,12 @@ pub async fn upload(
     access_code: &str,
     remote_path: &str,
     data: &[u8],
-    mut progress: impl FnMut(u64, u64),
+    progress: impl FnMut(u64, u64),
 ) -> Result<()> {
-    if remote_path.contains(['\r', '\n']) {
-        return Err(err("file names can't contain line breaks"));
-    }
-    let config = tls::ftps_config();
-    let name = server_name(host)?;
-    let addr: SocketAddr = step(
-        &format!("resolving {host}"),
-        tokio::net::lookup_host((host, port)),
-    )
-    .await?
-    .next()
-    .ok_or_else(|| err(format!("{host} has no address")))?;
-
-    let stream = tls_connect(&config, &name, addr, "control").await?;
-    let mut control = Control { stream: BufReader::new(stream) };
-
-    let (code, text) = control.reply().await?;
-    if code != 220 {
-        return Err(err(format!("unexpected greeting: {text}")));
-    }
-    control.expect("USER bblp", "USER", &[331, 230]).await?;
-    control
-        .expect(&format!("PASS {access_code}"), "the access code", &[230, 202])
-        .await
-        .map_err(|e| err(format!("{e} (is the access code current?)")))?;
-    control.expect("PBSZ 0", "PBSZ", &[200]).await?;
-    control.expect("PROT P", "PROT P", &[200]).await?;
-    control.expect("TYPE I", "TYPE I", &[200]).await?;
-    let pasv = control.expect("PASV", "PASV", &[227]).await?;
-    let data_port = passive_port(&pasv).ok_or_else(|| err(format!("can't read the PASV reply: {pasv}")))?;
-    // Connect to the control connection's address: the one in the reply can
-    // be wrong behind NAT.
-    let data_addr = SocketAddr::new(addr.ip(), data_port);
-    let data_tcp = step(&format!("connecting to {data_addr} (data)"), TcpStream::connect(data_addr)).await?;
-
-    control.send(&format!("STOR {remote_path}")).await?;
-    let (code, text) = control.reply().await?;
-    if code != 150 && code != 125 {
-        return Err(err(format!("STOR {remote_path} was refused: {text}")));
-    }
-
-    let mut data_stream = step(
-        &format!("TLS handshake with {data_addr} (data)"),
-        TlsConnector::from(config.clone()).connect(name.clone(), data_tcp),
-    )
-    .await?;
-    let resumed = data_stream.get_ref().1.handshake_kind()
-        == Some(tokio_rustls::rustls::HandshakeKind::Resumed);
-    if !resumed {
-        eprintln!("FTPS {host}: the data connection did not resume the TLS session; the printer may refuse it");
-    }
-
-    let total = data.len() as u64;
-    let mut sent = 0u64;
-    for chunk in data.chunks(CHUNK) {
-        step("sending the file", data_stream.write_all(chunk)).await?;
-        sent += chunk.len() as u64;
-        progress(sent, total);
-    }
-    step("finishing the upload", data_stream.flush()).await?;
-    // close_notify + FIN: the server's end-of-file.
-    step("finishing the upload", data_stream.shutdown()).await?;
-    // Then read until the server closes too. It may have sent TLS 1.3
-    // session tickets we never read, and closing a socket with unread input
-    // resets the connection, which can cut off the end of the file.
-    let mut rest = Vec::new();
-    let _ = timeout(STEP_TIMEOUT, data_stream.read_to_end(&mut rest)).await;
-    drop(data_stream);
-
-    let (code, text) = control.reply().await?;
-    if code != 226 && code != 250 {
-        return Err(err(format!("the upload of {remote_path} failed: {text}")));
-    }
-    // Best effort from here on; the file is stored.
-    if control.send("QUIT").await.is_ok() {
-        let _ = control.reply().await;
-    }
-    let _ = timeout(STEP_TIMEOUT, control.stream.get_mut().shutdown()).await;
+    check_path(remote_path)?;
+    let mut session = Session::open(host, port, access_code).await?;
+    session.store(remote_path, data, progress).await?;
+    session.quit().await;
     Ok(())
 }
 
@@ -275,8 +344,8 @@ mod tests {
             let tls = acceptor.accept(tcp).await.unwrap();
             let mut s = BufReader::new(tls);
             s.get_mut().write_all(b"220-Welcome\r\n220 ready\r\n").await.unwrap();
-            let data_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let data_port = data_listener.local_addr().unwrap().port();
+            // Like vsftpd: a fresh passive port per PASV.
+            let mut data_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             loop {
                 let mut line = String::new();
                 if s.read_line(&mut line).await.unwrap() == 0 {
@@ -288,11 +357,11 @@ mod tests {
                     ("PASS", p) if p == code => "230 Login successful.".to_string(),
                     ("PASS", _) => "530 Login incorrect.".to_string(),
                     ("PBSZ", _) | ("PROT", _) | ("TYPE", _) => "200 OK.".to_string(),
-                    ("PASV", _) => format!(
-                        "227 Entering Passive Mode (10,9,8,7,{},{}).",
-                        data_port / 256,
-                        data_port % 256
-                    ),
+                    ("PASV", _) => {
+                        data_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                        let data_port = data_listener.local_addr().unwrap().port();
+                        format!("227 Entering Passive Mode (10,9,8,7,{},{}).", data_port / 256, data_port % 256)
+                    }
                     ("STOR", path) => {
                         let path = path.to_string();
                         let (tcp, _) = data_listener.accept().await.unwrap();
@@ -311,6 +380,20 @@ mod tests {
                         data.read_to_end(&mut buf).await.unwrap();
                         seen.lock().unwrap().stored = Some((path, buf));
                         "226 Transfer complete.".to_string()
+                    }
+                    ("RETR", path) => {
+                        let stored = seen.lock().unwrap().stored.clone();
+                        match stored.filter(|(p, _)| p == path) {
+                            None => "550 Failed to open file.".to_string(),
+                            Some((_, bytes)) => {
+                                let (tcp, _) = data_listener.accept().await.unwrap();
+                                s.get_mut().write_all(b"150 Opening BINARY mode data connection.\r\n").await.unwrap();
+                                let mut data = acceptor.accept(tcp).await.unwrap();
+                                data.write_all(&bytes).await.unwrap();
+                                data.shutdown().await.unwrap();
+                                "226 Transfer complete.".to_string()
+                            }
+                        }
                     }
                     ("QUIT", _) => {
                         let _ = s.get_mut().write_all(b"221 Goodbye.\r\n").await;
@@ -352,6 +435,17 @@ mod tests {
         upload(host, port.parse().unwrap(), code, "/farmslicer-live-test.bin", &data, |_, _| {})
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_session_stores_and_retrieves() {
+        let (port, _) = fake_server("12345678").await;
+        let mut session = Session::open("127.0.0.1", port, "12345678").await.unwrap();
+        session.store("/a.gcode.3mf", b"hello", |_, _| {}).await.unwrap();
+        assert_eq!(session.retrieve("/missing.3mf", 1 << 20).await.unwrap(), None);
+        assert_eq!(session.retrieve("/a.gcode.3mf", 1 << 20).await.unwrap().as_deref(), Some(&b"hello"[..]));
+        assert_eq!(session.retrieve("/a.gcode.3mf", 3).await.unwrap(), None, "over the size cap");
+        session.quit().await;
     }
 
     #[tokio::test]

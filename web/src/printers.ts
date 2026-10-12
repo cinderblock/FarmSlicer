@@ -65,6 +65,8 @@ export interface PrinterStatus {
   layer: number | null;
   total_layers: number | null;
   job_name: string | null;
+  /** As reported; "project_file" or null when the printer doesn't name the job. */
+  subtask_name: string | null;
   gcode_file: string | null;
   print_error: number | null;
   hms: { attr: number; code: number }[];

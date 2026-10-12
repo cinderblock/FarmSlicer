@@ -130,6 +130,12 @@ fn thumbnail_entry(index: u32) -> String {
     format!("Metadata/plate_{index}.png")
 }
 
+/// The plate's preview image (PNG) from a package in memory.
+pub fn thumbnail_from_bytes(bytes: &[u8], index: u32) -> Option<Vec<u8>> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    read_entry_from(&mut zip, &thumbnail_entry(index))
+}
+
 /// The plate's preview image (PNG), if the package has one.
 pub fn thumbnail(path: &Path, index: u32) -> Option<Vec<u8>> {
     let file = std::fs::File::open(path).ok()?;
