@@ -22,6 +22,9 @@ can run in the user's browser.
   Developer Mode on. Server slices for Bambu printers come out as a
   `.gcode.3mf` with a rendered thumbnail; sliced projects from Bambu Studio /
   OrcaSlicer can be uploaded and sent too.
+- **Cameras:** live view on demand; X1/H2-class (RTSPS) passed through as
+  H.264 for the browser to decode, A1/P1 (JPEG over TLS) as frames. No
+  ffmpeg, and the access code never leaves the server process.
 - **Thumbnails:** rendered in software (no GPU), optionally with a group's
   label (e.g. a team number, from the `thumbnail_label` group setting) and
   logo.
@@ -206,6 +209,7 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set` |
 | `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
 | `GET /api/printers/{id}/report` | the printer's merged raw MQTT report (admins) |
+| `GET /api/printers/{id}/camera` (WebSocket) | live camera: H.264 access units for X1/H2-class printers (decoded in the browser with WebCodecs), JPEG frames for A1/P1 |
 | `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level}` on whatever the printer runs (admins) |
 | `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay`, `GET /api/groups/{id}/overlay/logo` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |

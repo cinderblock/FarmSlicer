@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import CameraView from "./CameraView";
 import PrintControls from "./PrintControls";
 import {
   describeState,
@@ -49,6 +50,7 @@ export default function PrinterCard({
   actions?: ReactNode;
 }) {
   const { label, tone } = describeState(status);
+  const [camera, setCamera] = useState(false);
   const configured = printer.protocol !== "bambu" || (printer.address && printer.access_code_set);
   const busy = status?.online && ["RUNNING", "PREPARE", "PAUSE"].includes(status.state ?? "");
 
@@ -171,7 +173,28 @@ export default function PrinterCard({
         </>
       )}
 
-      {actions && <div className="printer-actions">{actions}</div>}
+      <div className="printer-actions">
+        {printer.protocol === "bambu" && printer.address && printer.access_code_set && (
+          <button className="btn-sm" onClick={() => setCamera(true)}>
+            Camera
+          </button>
+        )}
+        {actions}
+      </div>
+
+      {camera && (
+        <div className="modal-backdrop" onClick={() => setCamera(false)}>
+          <div className="modal camera-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{printer.name}</h3>
+              <button className="btn-sm" onClick={() => setCamera(false)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <CameraView printerId={printer.id} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

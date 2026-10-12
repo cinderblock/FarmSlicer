@@ -6,7 +6,10 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
+use axum::response::{IntoResponse, Response};
+use base64::Engine;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::get;
@@ -17,6 +20,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::auth::{self, CurrentUser};
+use crate::bambu::camera::{CameraKind, CameraSource, Frame};
 use crate::db::{Printer, User};
 use crate::server::AppState;
 
@@ -185,6 +189,111 @@ async fn raw_report(
     Ok(Json(state.printers.report(&id).unwrap_or(Value::Null)))
 }
 
+/// What kind of camera a printer has, from its model.
+pub fn camera_kind(state: &AppState, p: &Printer) -> CameraKind {
+    let model_id = state
+        .profile_store
+        .machine_model(&p.machine_profile)
+        .and_then(|m| m.model_id.clone())
+        .or_else(|| crate::bambu::models::id_for(&p.machine_profile).map(String::from));
+    CameraKind::for_model_id(model_id.as_deref())
+}
+
+/// `GET /api/printers/{id}/camera` (WebSocket): the live camera. First a
+/// text message `{"type":"hello","kind":"h264"|"jpeg"}`; then, for H.264, a
+/// text `{"type":"h264-init",codec,description(base64 avcC),width,height}`
+/// and binary access units `[key u8][timestamp µs i64 LE][AVC data]`; for
+/// JPEG, binary JPEG frames. `{"type":"error",message}` ends the stream.
+async fn camera(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    let p = state.db.get_printer(&id).ok_or_else(not_found)?;
+    if p.protocol != "bambu" || p.address.trim().is_empty() || p.access_code.trim().is_empty() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"error": "the printer has no address or access code set"})),
+        ));
+    }
+    let source = CameraSource {
+        printer_id: p.id.clone(),
+        name: p.name.clone(),
+        address: p.address.trim().to_string(),
+        access_code: p.access_code.trim().to_string(),
+        kind: camera_kind(&state, &p),
+    };
+    Ok(ws.on_upgrade(move |socket| serve_camera(state, source, socket)).into_response())
+}
+
+fn text(v: Value) -> Message {
+    Message::Text(v.to_string().into())
+}
+
+/// One frame as a message; None = drop it.
+fn encode(frame: &Frame) -> Message {
+    match frame {
+        Frame::H264Init { codec, description, width, height } => text(json!({
+            "type": "h264-init",
+            "codec": codec,
+            "description": base64::engine::general_purpose::STANDARD.encode(description),
+            "width": width,
+            "height": height,
+        })),
+        Frame::H264 { key, timestamp_us, data } => {
+            let mut buf = Vec::with_capacity(9 + data.len());
+            buf.push(u8::from(*key));
+            buf.extend_from_slice(&timestamp_us.to_le_bytes());
+            buf.extend_from_slice(data);
+            Message::Binary(buf.into())
+        }
+        Frame::Jpeg(data) => Message::Binary(data.clone()),
+        Frame::Error(message) => text(json!({"type": "error", "message": message})),
+    }
+}
+
+async fn serve_camera(state: Arc<AppState>, source: CameraSource, mut socket: WebSocket) {
+    let kind = match source.kind {
+        CameraKind::Rtsp => "h264",
+        CameraKind::Jpeg => "jpeg",
+    };
+    if socket.send(text(json!({"type": "hello", "kind": kind}))).await.is_err() {
+        return;
+    }
+    let mut sub = state.cameras.watch(source);
+    for frame in &sub.backlog {
+        if socket.send(encode(frame)).await.is_err() {
+            return;
+        }
+    }
+    // After falling behind, H.264 deltas are useless until the next key frame.
+    let mut need_key = false;
+    loop {
+        tokio::select! {
+            frame = sub.frames.recv() => match frame {
+                Ok(frame) => {
+                    match &*frame {
+                        Frame::H264 { key: false, .. } if need_key => continue,
+                        Frame::H264 { key: true, .. } => need_key = false,
+                        _ => {}
+                    }
+                    let last = matches!(*frame, Frame::Error(_));
+                    if socket.send(encode(&frame)).await.is_err() || last {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => need_key = true,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            incoming = socket.recv() => match incoming {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                Some(Ok(_)) => {}
+            },
+        }
+    }
+    let _ = socket.send(Message::Close(None)).await;
+}
+
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/printers", get(list_printers).post(create_printer))
@@ -192,4 +301,5 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/printers/events", get(status_events))
         .route("/api/printers/{id}", axum::routing::patch(update_printer).delete(delete_printer))
         .route("/api/printers/{id}/report", get(raw_report))
+        .route("/api/printers/{id}/camera", get(camera))
 }

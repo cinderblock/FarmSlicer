@@ -8,3 +8,5 @@ Dockerfile  text eol=lf
 .dockerignore text eol=lf
 # The fake printer image copies these config files in verbatim.
 tests/fake-printer/*.conf text eol=lf
+tests/fake-printer/*.yml text eol=lf
+tests/fake-printer/*.py text eol=lf

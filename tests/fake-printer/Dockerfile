@@ -3,7 +3,7 @@
 # user bblp, access code 12345678, serial FAKE00000000001.
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      mosquitto mosquitto-clients vsftpd openssl ca-certificates procps \
+      mosquitto mosquitto-clients vsftpd openssl ca-certificates procps python3 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -d /sdcard -s /bin/sh bblp && echo 'bblp:12345678' | chpasswd \
     && mkdir -p /etc/fake /var/run/vsftpd/empty \
@@ -14,6 +14,6 @@ RUN useradd -m -d /sdcard -s /bin/sh bblp && echo 'bblp:12345678' | chpasswd \
     && chmod 644 /etc/fake/passwd
 COPY vsftpd.conf /etc/vsftpd.conf
 COPY mosquitto.conf /etc/fake/mosquitto.conf
-COPY responder.sh start.sh /etc/fake/
+COPY responder.sh start.sh jpeg6000.py /etc/fake/
 RUN chmod 755 /etc/fake/*.sh
 CMD ["/etc/fake/start.sh"]

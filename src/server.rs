@@ -41,6 +41,8 @@ pub struct AppState {
     pub discovered: Arc<discovery::DiscoveryMap>,
     /// MQTT links to the farm's Bambu printers (src/bambu/).
     pub printers: PrinterHub,
+    /// Camera feeds, started while someone watches.
+    pub cameras: crate::bambu::camera::CameraHub,
     /// WebAuthn relying party + in-flight ceremonies (src/auth.rs).
     pub rp: auth::Rp,
 }
@@ -62,6 +64,7 @@ impl AppState {
             profile_store,
             discovered,
             printers,
+            cameras: Default::default(),
             rp,
         }
     }

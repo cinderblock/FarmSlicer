@@ -12,10 +12,13 @@ developing and testing FarmSlicer's printer link without real hardware:
 - Implicit FTPS on 990 (vsftpd with `require_ssl_reuse=YES`, chrooted to
   `/sdcard`), the same quirk the printers have.
 
+- Cameras on the same address: the A1/P1 kind (JPEG over TLS on 6000,
+  `jpeg6000.py`) and the X1/H2 kind (H.264 over RTSPS on 322, a mediamtx
+  sidecar in the fake printer's network namespace, `mediamtx.yml`), both
+  showing ffmpeg's test pattern.
+
 ```sh
-docker build -t fake-bambu tests/fake-printer
-docker run -d --name fake-printer fake-bambu
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' fake-printer
+tests/fake-printer/run.sh      # builds, starts both containers, prints the IP
 ```
 
 Add a printer in FarmSlicer with that address, the serial and the access

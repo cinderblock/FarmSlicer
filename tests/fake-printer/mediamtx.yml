@@ -1,0 +1,27 @@
+# Fake X1/H2 camera: RTSPS on 322, user bblp / access code 12345678, path
+# streaming/live/1, fed with ffmpeg's test pattern. Runs as a sidecar in the
+# fake printer's network namespace (see README.md).
+logLevel: warn
+rtsp: yes
+rtspTransports: [tcp]
+rtspEncryption: "strict"
+rtspsAddress: :322
+rtspServerKey: /certs/server.key
+rtspServerCert: /certs/server.crt
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+authInternalUsers:
+  - user: bblp
+    pass: "12345678"
+    permissions:
+      - action: read
+      - action: publish
+paths:
+  streaming/live/1:
+    runOnInit: >-
+      ffmpeg -loglevel error -re -f lavfi -i testsrc=size=1280x720:rate=15
+      -c:v libx264 -preset ultrafast -tune zerolatency -g 30 -pix_fmt yuv420p
+      -f rtsp -rtsp_transport tcp rtsps://bblp:12345678@localhost:322/streaming/live/1
+    runOnInitRestart: yes

@@ -94,7 +94,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   printer change), `status.rs` (merging P1/A1 delta reports, the UI summary),
   `tls.rs` (accept the printer's Bambu-CA cert, ring provider),
   `ftps.rs` (implicit FTPS upload; the data channel must resume the control
-  channel's TLS session), `package.rs` (reading `.gcode.3mf`), `models.rs`
+  channel's TLS session), `package.rs` (reading `.gcode.3mf`), `models.rs`,
+  `camera.rs` (on-demand feeds: RTSPS via `retina` behind a local TLS
+  proxy → H.264 to the browser's WebCodecs; A1/P1 JPEG on port 6000)
 - `src/printers_api.rs` — printer CRUD (admins), status + SSE events
 - `src/overlay.rs` — thumbnail label (inherited group setting
   `thumbnail_label`, `{key}`/`{group}` template) and per-group logos
