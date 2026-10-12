@@ -38,6 +38,11 @@ pub struct GroupSettings {
     /// manager. Links with `bypass_approval` to this very group skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join_policy: Option<String>,
+    /// Label drawn on the thumbnails of jobs charged here: `{key}` = the
+    /// identifier the nearest group was created under (e.g. a team number),
+    /// `{group}` = the group's name. "" = no label. See src/overlay.rs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_label: Option<String>,
     /// Not inherited. Offer this group on the sign-in page (admins only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listed: Option<bool>,
@@ -121,6 +126,9 @@ impl GroupSettings {
         if let Some(sub) = &self.subgroups {
             sub.validate()?;
         }
+        if self.thumbnail_label.as_ref().is_some_and(|l| l.chars().count() > 64) {
+            return Err("thumbnail_label is limited to 64 characters".into());
+        }
         Ok(())
     }
 }
@@ -148,6 +156,7 @@ pub struct Effective {
     pub allow_guests: bool,
     pub allow_registration: bool,
     pub join_policy: String,
+    pub thumbnail_label: String,
     pub sources: HashMap<&'static str, Option<String>>,
 }
 
@@ -275,6 +284,7 @@ impl Tree {
             allow_guests: inherit!(allow_guests, false),
             allow_registration: inherit!(allow_registration, false),
             join_policy: inherit!(join_policy, "approval".to_string()),
+            thumbnail_label: inherit!(thumbnail_label, String::new()),
             sources,
         }
     }

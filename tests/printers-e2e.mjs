@@ -7,6 +7,7 @@
 //
 // Needs a fresh server (it performs first-run setup). Exit code 0 iff all
 // checks pass. No dependencies beyond Node 22.
+import { deflateSync } from "node:zlib";
 import { BASE, check, Client, SoftAuthenticator, register, finish, zip } from "./lib.mjs";
 
 console.log(`printers e2e against ${BASE}`);
@@ -143,6 +144,63 @@ r = await user.form("/api/jobs", { source: "browser", model_name: "tagged.stl", 
 check(r.status === 201, "a job tagged with a printer", json(r));
 r = await owner.del(`/api/printers/${mini}`);
 check(r.status === 204, "removing a printer that jobs reference works", String(r.status));
+
+// ---- thumbnail overlays ------------------------------------------------------------
+function png(w, h) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (b) => {
+    let c = 0xffffffff;
+    for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, "ascii");
+    data.copy(out, 8);
+    out.writeUInt32BE(crc(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6; // RGBA
+  const raw = Buffer.alloc((w * 4 + 1) * h, 0x80);
+  for (let y = 0; y < h; y++) raw[y * (w * 4 + 1)] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+r = await owner.post("/api/groups", { name: "Team 42", settings: { thumbnail_label: "#{group}" } });
+check(r.status === 201, "a group with a thumbnail label", json(r));
+const team = r.json.id;
+r = await owner.get(`/api/groups/${team}/overlay`);
+check(r.json?.label === "#Team 42" && r.json.logo_group === null, "the label template is filled in", json(r));
+r = await owner.post("/api/groups", { name: "Too long", settings: { thumbnail_label: "x".repeat(65) } });
+check(r.status === 400, "labels are limited", json(r));
+const logoForm = (bytes) => {
+  const f = new FormData();
+  f.append("file", new Blob([bytes]), "logo.png");
+  return f;
+};
+r = await user.call("PUT", `/api/groups/${team}/logo`, logoForm(png(600, 300)));
+check(r.status === 403, "only managers set a group's logo", json(r));
+r = await owner.call("PUT", `/api/groups/${team}/logo`, logoForm(Buffer.from("not an image")));
+check(r.status === 400, "a non-image logo is refused", json(r));
+r = await owner.call("PUT", `/api/groups/${team}/logo`, logoForm(png(600, 300)));
+check(r.status === 200, "a manager sets the logo", json(r));
+r = await owner.post("/api/groups", { name: "Sub", parent_id: team });
+const sub = r.json.id;
+r = await owner.get(`/api/groups/${sub}/overlay`);
+check(r.json?.label === "#Sub" && r.json.logo_group === team, "subgroups inherit the label and the logo", json(r));
+const logo = await fetch(`${BASE}/api/groups/${team}/logo`, { headers: { cookie: user.cookie } });
+const logoBytes = Buffer.from(await logo.arrayBuffer());
+check(logo.status === 200 && logoBytes.readUInt32BE(16) === 256 && logoBytes.readUInt32BE(20) === 128, "logos are stored shrunk to 256 px", `${logo.status} ${logoBytes.length}`);
+r = await owner.del(`/api/groups/${team}/logo`);
+check(r.status === 204, "a manager removes the logo", String(r.status));
 
 // Clearing the access code disconnects the printer.
 r = await owner.patch(`/api/printers/${id}`, { access_code: "" });

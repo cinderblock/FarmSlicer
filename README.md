@@ -19,8 +19,12 @@ can run in the user's browser.
   temperatures, AMS trays, errors); sending prints (FTPS upload, start with an
   AMS mapping, pause/resume/stop) and following them to the end. Needs the
   printer's IP, serial number and LAN access code, with LAN mode and
-  Developer Mode on. Sliced projects from Bambu Studio / OrcaSlicer
-  (`.gcode.3mf`) can be uploaded and sent too.
+  Developer Mode on. Server slices for Bambu printers come out as a
+  `.gcode.3mf` with a rendered thumbnail; sliced projects from Bambu Studio /
+  OrcaSlicer can be uploaded and sent too.
+- **Thumbnails:** rendered in software (no GPU), optionally with a group's
+  label (e.g. a team number, from the `thumbnail_label` group setting) and
+  logo.
 - **People:** passkey accounts, nested groups with shared libraries and
   seasons, quotas, self-service joining through links, guest accounts.
 
@@ -203,6 +207,7 @@ summary prints the `pin.json` to paste there.
 | `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
 | `GET /api/printers/{id}/report` | the printer's merged raw MQTT report (admins) |
 | `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level}` on whatever the printer runs (admins) |
+| `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems}`: upload and start |

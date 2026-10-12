@@ -120,6 +120,8 @@ COPY --from=web /app/dist/web /app/dist/web
 COPY extern/OrcaSlicer/resources/profiles /app/extern/OrcaSlicer/resources/profiles
 COPY extern/OrcaSlicer/resources/info /app/extern/OrcaSlicer/resources/info
 COPY extern/OrcaSlicer/resources/flush /app/extern/OrcaSlicer/resources/flush
+# The thumbnail label font (SIL OFL).
+COPY resources/fonts /app/resources/fonts
 RUN mkdir -p /app/data && chown -R ubuntu:ubuntu /app/data
 USER ubuntu
 VOLUME ["/app/data"]

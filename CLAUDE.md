@@ -96,6 +96,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `ftps.rs` (implicit FTPS upload; the data channel must resume the control
   channel's TLS session), `package.rs` (reading `.gcode.3mf`), `models.rs`
 - `src/printers_api.rs` — printer CRUD (admins), status + SSE events
+- `src/overlay.rs` — thumbnail label (inherited group setting
+  `thumbnail_label`, `{key}`/`{group}` template) and per-group logos
+  (`data/logos/<group>.png`); `resources/fonts/` — the label font (OFL)
 - `src/printing.rs` — sending: compatibility, AMS mapping (`ams_mapping` +
   `ams_mapping2`), upload → `project_file` → ack/retry, and `track()` moving
   prints along from printer reports; `src/prints_api.rs` — uploads, targets,
@@ -111,6 +114,11 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   config from JSON via temp file on top of `FullPrintConfig::defaults()` →
   place on bed → Print::apply/validate/process/export_gcode → stats). Shared by
   the cxx bridge and the wasm bridge; no Rust or Emscripten includes allowed.
+- `cxx/thumbnail.{hpp,cpp}` — software rasteriser for plate thumbnails (no
+  GL anywhere) and the label/logo overlay (stb_truetype from libslic3r's
+  Emboss.cpp; logo arrives as RGBA). slice_core passes it to
+  `export_gcode` as the thumbnail callback and writes the Bambu
+  `.gcode.3mf` with libslic3r's `store_bbs_3mf` (Options::package_path)
 - `cxx/slicer_bridge.{h,cpp}` — thin cxx glue around slice_core
 - `cxx/nanosvg_impl.cpp` — NanoSVG implementation shim (lives in GUI code upstream)
 - `wasm/` — Emscripten superbuild (`CMakeLists.txt`), C bridge
@@ -180,9 +188,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   differ from the browser's. CI smoke-tests `st` only.
 - libslic3r's GCodeProcessor logs `Invalid T command (T1000)` for Bambu start
   G-code on every slice; harmless.
-- Thumbnails are not embedded in G-code yet (Bambu printers show a blank preview).
-- FarmSlicer-sliced jobs have no `.gcode.3mf` package yet, so only uploaded
-  sliced projects can be sent (plans/printer-control.md, phase 3).
+- Browser (WebAssembly) slices don't produce thumbnails or a `.gcode.3mf`
+  yet, so only server slices and uploaded projects can be sent
+  (plans/printer-control.md, phase 3).
 - Jobs tagged `printer_id` at slicing time are not sent automatically;
   sending is an explicit `POST /api/jobs/{id}/print`.
 

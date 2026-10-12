@@ -24,7 +24,8 @@ SliceResult Slicer::slice(
     rust::Str job_id,
     rust::Str model_path,
     rust::Str config_json,
-    rust::Str output_path
+    rust::Str output_path,
+    const SliceOptions& options
 ) const {
     const std::string job = to_std(job_id);
 
@@ -34,13 +35,24 @@ SliceResult Slicer::slice(
     };
     cb.cancelled = [&job]() { return slice_cancelled(job); };
 
+    core::Options opts;
+    opts.package_path = std::string(options.package_path);
+    opts.printer_model_id = std::string(options.printer_model_id);
+    opts.overlay.label = std::string(options.label);
+    opts.overlay.logo_rgba.assign(options.logo_rgba.begin(), options.logo_rgba.end());
+    opts.overlay.logo_width = options.logo_width;
+    opts.overlay.logo_height = options.logo_height;
+    opts.overlay.font_path = std::string(options.font_path);
+    opts.model_name = std::string(options.model_name);
+
     const core::Outcome out = core::slice_file(
-        to_std(model_path), to_std(config_json), to_std(output_path), cb);
+        to_std(model_path), to_std(config_json), to_std(output_path), cb, opts);
 
     SliceResult result;
     result.success = out.ok;
     result.cancelled = out.cancelled;
     result.gcode_path = rust::String(out.gcode_path);
+    result.package_path = rust::String(out.package_path);
     result.error = rust::String(out.error);
     for (const std::string& w : out.warnings) result.warnings.push_back(rust::String(w));
     result.print_time_sec = out.print_time_sec;

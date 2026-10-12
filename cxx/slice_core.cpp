@@ -19,6 +19,9 @@
 #include <libslic3r/Config.hpp>
 #include <libslic3r/Exception.hpp>
 #include <libslic3r/GCode/GCodeProcessor.hpp>
+#include <libslic3r/GCode/ThumbnailData.hpp>
+#include <libslic3r/Format/bbs_3mf.hpp>
+#include <libslic3r/ProjectTask.hpp>
 
 #include <atomic>
 #include <cmath>
@@ -39,6 +42,10 @@ namespace farmslicer::core {
 namespace {
 
 std::string g_temp_dir;
+std::string g_resources_dir;
+
+/// Plate thumbnail size in sliced projects (Bambu Studio's THUMBNAIL_SIZE_3MF).
+constexpr unsigned PACKAGE_THUMBNAIL = 512;
 
 // libslic3r only reads configs from files. Write the merged JSON to the
 // scratch dir and hand it the path.
@@ -161,6 +168,7 @@ void report(const Callbacks& cb, int percent, const std::string& message)
 void init_runtime(const std::string& resources_dir, const std::string& temp_dir)
 {
     g_temp_dir = temp_dir;
+    g_resources_dir = resources_dir;
     Slic3r::set_resources_dir(resources_dir);
     Slic3r::set_temporary_dir(temp_dir);
     Slic3r::set_logging_level(2); // errors + warnings
@@ -169,7 +177,8 @@ void init_runtime(const std::string& resources_dir, const std::string& temp_dir)
 Outcome slice_file(const std::string& model_path,
                    const std::string& config_json,
                    const std::string& output_path,
-                   const Callbacks& cb)
+                   const Callbacks& cb,
+                   const Options& options)
 {
     using namespace Slic3r;
     Outcome out;
@@ -179,6 +188,8 @@ Outcome slice_file(const std::string& model_path,
         Model model = Model::read_from_file(model_path);
         if (model.objects.empty())
             throw std::runtime_error("model file contains no objects");
+        if (!options.model_name.empty() && model.objects.size() == 1)
+            model.objects.front()->name = options.model_name;
 
         report(cb, 2, "Loading configuration");
         DynamicPrintConfig config;
@@ -224,9 +235,31 @@ Outcome slice_file(const std::string& model_path,
         if (std::string conflict = print.get_conflict_string(); !conflict.empty())
             out.warnings.push_back(conflict);
 
+        // Thumbnails: the G-code exporter asks for the sizes the printer
+        // profile lists (none for Bambu printers, which read the package's).
+        ThumbnailOverlay overlay = options.overlay;
+        if (overlay.font_path.empty())
+            overlay.font_path = (std::filesystem::path(g_resources_dir) / "fonts" / "Sarabun-SemiBold.ttf").string();
+        std::vector<std::string> colors;
+        if (const auto* c = config.option<ConfigOptionStrings>("filament_colour")) colors = c->values;
+        std::set<std::string> overlay_warnings;
+        auto make_thumbnail = [&](unsigned w, unsigned h) {
+            ThumbnailData t;
+            render_thumbnail(model, colors, w, h, t);
+            if (!overlay.empty())
+                for (std::string& w : apply_overlay(t, overlay)) overlay_warnings.insert(std::move(w));
+            return t;
+        };
+        ThumbnailsGeneratorCallback thumbnails = [&](const ThumbnailsParams& params) {
+            ThumbnailsList list;
+            for (const Vec2d& size : params.sizes)
+                list.push_back(make_thumbnail(unsigned(size.x()), unsigned(size.y())));
+            return list;
+        };
+
         report(cb, 90, "Exporting G-code");
         GCodeProcessorResult gcode_result;
-        std::string written = print.export_gcode(output_path, &gcode_result, nullptr);
+        std::string written = print.export_gcode(output_path, &gcode_result, thumbnails);
         if (written.empty()) written = output_path;
         if (!std::filesystem::exists(written))
             throw std::runtime_error("G-code export produced no file");
@@ -251,6 +284,51 @@ Outcome slice_file(const std::string& model_path,
         out.layer_count = unsigned(layer_zs.size());
 
         out.gcode_path = written;
+
+        if (!options.package_path.empty()) {
+            report(cb, 96, "Packaging");
+            ThumbnailData plate_thumbnail = make_thumbnail(PACKAGE_THUMBNAIL, PACKAGE_THUMBNAIL);
+
+            // What OrcaSlicer's "send to printer" records for one plate
+            // (PartPlateList::store_to_3mf_structure + Plater::export_3mf).
+            auto plate = std::make_unique<PlateData>();
+            plate->plate_index = 0;
+            for (size_t oi = 0; oi < model.objects.size(); ++oi)
+                for (size_t ii = 0; ii < model.objects[oi]->instances.size(); ++ii)
+                    plate->objects_and_instances.emplace_back(int(oi), int(ii));
+            plate->printer_model_id = options.printer_model_id;
+            if (const ConfigOption* nd = config.option("nozzle_diameter")) plate->nozzle_diameters = nd->serialize();
+            plate->gcode_file = written;
+            plate->is_sliced_valid = true;
+            plate->gcode_prediction = std::to_string(int(std::lround(out.print_time_sec)));
+            char weight[32];
+            std::snprintf(weight, sizeof weight, "%.2f", out.filament_used_g);
+            plate->gcode_weight = weight;
+            plate->is_support_used = print.is_support_used();
+            plate->parse_filament_info(&gcode_result);
+            const auto* filament_ids = config.option<ConfigOptionStrings>("filament_ids");
+            for (FilamentInfo& f : plate->slice_filaments_info) {
+                std::string displayed;
+                f.type = config.get_filament_type(displayed, f.id);
+                f.filament_id = filament_ids && size_t(f.id) < filament_ids->values.size() ? filament_ids->get_at(f.id) : "";
+                f.color = size_t(f.id) < colors.size() ? colors[f.id] : "#FFFFFF";
+            }
+
+            StoreParams params;
+            params.path = options.package_path.c_str();
+            params.model = &model;
+            params.plate_data_list = {plate.get()};
+            params.export_plate_idx = 0;
+            params.config = &config;
+            params.thumbnail_data = {&plate_thumbnail};
+            params.strategy = SaveStrategy::Silence | SaveStrategy::SkipModel | SaveStrategy::WithGcode |
+                              SaveStrategy::SkipAuxiliary | SaveStrategy::Zip64;
+            if (!store_bbs_3mf(params) || !std::filesystem::exists(options.package_path))
+                throw std::runtime_error("could not write the sliced project " + options.package_path);
+            out.package_path = options.package_path;
+        }
+
+        for (const std::string& w : overlay_warnings) out.warnings.push_back(w);
         out.ok = true;
         report(cb, 100, "Done");
     } catch (const CanceledException&) {

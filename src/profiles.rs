@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -328,6 +328,28 @@ impl ProfileStore {
         merged.remove("compatible_printers_condition");
         merged.remove("compatible_prints");
         merged.remove("compatible_prints_condition");
+
+        // What the desktop app records about the chosen presets: the Bambu
+        // filament id ends up in slice_info's tray_info_idx (printers use it
+        // to match AMS trays), the preset names in the G-code header.
+        if let Some(id) = merged.get("filament_id").and_then(Value::as_str).map(String::from) {
+            merged.entry("filament_ids").or_insert_with(|| json!([id]));
+        }
+        let empty = |v: Option<&Value>| match v {
+            None | Some(Value::Null) => true,
+            Some(Value::String(s)) => s.is_empty(),
+            Some(Value::Array(a)) => a.iter().all(|x| x.as_str().is_some_and(str::is_empty)),
+            _ => false,
+        };
+        if empty(merged.get("printer_settings_id")) {
+            merged.insert("printer_settings_id".into(), json!(machine));
+        }
+        if empty(merged.get("print_settings_id")) {
+            merged.insert("print_settings_id".into(), json!(process));
+        }
+        if empty(merged.get("filament_settings_id")) {
+            merged.insert("filament_settings_id".into(), json!([filament]));
+        }
 
         Ok(serde_json::to_string(&Value::Object(merged)).unwrap())
     }

@@ -23,6 +23,7 @@ fn main() {
     build
         .file("cxx/slicer_bridge.cpp")
         .file("cxx/slice_core.cpp")
+        .file("cxx/thumbnail.cpp")
         .file("cxx/nanosvg_impl.cpp")
         .std("c++17")
         .include(".")
@@ -122,6 +123,8 @@ fn main() {
     println!("cargo:rerun-if-changed=cxx/slice_core.hpp");
     println!("cargo:rerun-if-changed=cxx/slice_core.cpp");
     println!("cargo:rerun-if-changed=cxx/slicer_bridge.cpp");
+    println!("cargo:rerun-if-changed=cxx/thumbnail.hpp");
+    println!("cargo:rerun-if-changed=cxx/thumbnail.cpp");
     println!("cargo:rerun-if-changed=src/slicer.rs");
 }
 

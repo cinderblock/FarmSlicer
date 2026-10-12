@@ -6,6 +6,7 @@ mod discovery;
 mod groups;
 mod groups_api;
 mod join_api;
+mod overlay;
 mod printers_api;
 mod printing;
 mod prints_api;

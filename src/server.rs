@@ -20,6 +20,7 @@ use crate::discovery;
 use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
+use crate::overlay;
 use crate::printers_api;
 use crate::prints_api;
 use crate::profiles::ProfileStore;
@@ -734,6 +735,64 @@ pub(crate) fn finish_job(
     }
 }
 
+/// The vendor model id for a merged config's `printer_model`.
+pub(crate) fn printer_model_id(state: &AppState, config_json: &str) -> Option<String> {
+    let config: Value = serde_json::from_str(config_json).ok()?;
+    let model = config.get("printer_model")?.as_str()?;
+    state
+        .profile_store
+        .machine_model(model)
+        .and_then(|m| m.model_id.clone())
+        .or_else(|| crate::bambu::models::id_for(model).map(String::from))
+}
+
+/// A job's printable package path, next to its G-code.
+pub(crate) fn package_output_path(state: &AppState, job_id: &str) -> String {
+    let dir = state.data_dir.join("gcode");
+    std::fs::create_dir_all(&dir).ok();
+    dir.join(format!("{job_id}.gcode.3mf")).to_string_lossy().to_string()
+}
+
+/// Package (Bambu printers only: the format is theirs) and thumbnail
+/// overlay for a server slice.
+fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::SliceOptions {
+    let mut options = slicer::SliceOptions::default();
+    let bambu = serde_json::from_str::<Value>(config_json)
+        .ok()
+        .and_then(|c| c.get("printer_model")?.as_str().map(|m| m.starts_with("Bambu Lab")))
+        .unwrap_or(false);
+    if bambu {
+        options.package_path = package_output_path(state, job_id);
+        options.printer_model_id = printer_model_id(state, config_json).unwrap_or_default();
+    }
+    if let Some(job) = state.db.get_job(job_id) {
+        let overlay = crate::overlay::overlay_for_job(state, &job);
+        options.font_path = crate::overlay::font_path();
+        options.model_name = job.model_name.clone();
+        options.label = overlay.label;
+        if let Some((rgba, w, h)) = overlay.logo {
+            options.logo_rgba = rgba;
+            options.logo_width = w;
+            options.logo_height = h;
+        }
+    }
+    options
+}
+
+/// Read a freshly written package and attach it to the job (sendable now).
+pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str) {
+    match crate::bambu::package::inspect(std::path::Path::new(path)) {
+        Ok(pkg) => {
+            let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
+            state
+                .db
+                .set_job_package(job_id, path, &serde_json::to_string(&pkg).expect("packages serialize"));
+            state.db.add_job_stored_bytes(job_id, size);
+        }
+        Err(e) => eprintln!("job {job_id}: the sliced project {path} is unreadable: {e}"),
+    }
+}
+
 fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json: &str) {
     // One slice at a time: wait for the engine before leaving "queued".
     let handle = state.slicer.lock().unwrap();
@@ -749,7 +808,8 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json:
     state.db.update_job_status(job_id, "slicing", 0);
 
     let output_path = gcode_output_path(state, job_id);
-    let result = handle.0.slice(job_id, model_path, config_json, &output_path);
+    let options = slice_options(state, job_id, config_json);
+    let result = handle.0.slice(job_id, model_path, config_json, &output_path, &options);
     drop(handle);
     progress::clear(job_id);
 
@@ -767,6 +827,9 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json:
             result.filament_used_g,
             &warnings,
         );
+        if !result.package_path.is_empty() {
+            record_package(state, job_id, &result.package_path);
+        }
         println!(
             "job {job_id}: sliced OK ({} layers, {:.0} s, {:.1} g)",
             result.layer_count, result.print_time_sec, result.filament_used_g
@@ -1041,6 +1104,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())
         .merge(prints_api::routes())
+        .merge(overlay::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),
