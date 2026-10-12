@@ -341,6 +341,17 @@ body {
   font-size: 0.9rem;
 }
 
+/* Model and nozzle side by side; the nozzle list is short. */
+.settings-panel .machine-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.settings-panel .machine-row select {
+  width: 100%;
+}
+
 .model-info {
   padding: 0.75rem;
   background: var(--bg-card);

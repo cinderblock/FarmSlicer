@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +32,10 @@ pub struct MachineModel {
     pub vendor: String,
     pub vendor_display: String,
     pub nozzle_diameters: Vec<String>,
+    /// Nozzle size → the instantiable machine profile for it (what slicing
+    /// takes), e.g. "0.4" → "Bambu Lab A1 0.4 nozzle". Sizes a model's
+    /// `machine_model` JSON lists without a matching profile are absent.
+    pub variants: BTreeMap<String, String>,
 }
 
 pub struct ProfileStore {
@@ -110,6 +114,7 @@ impl ProfileStore {
 
         // Build machine_models: merge nozzle sizes from machine_model entries and
         // instantiable machine variants into a single list per base model.
+        let mut model_variants: HashMap<String, BTreeMap<String, String>> = HashMap::new();
         for m in &machines {
             if !m.instantiable {
                 continue;
@@ -121,6 +126,10 @@ impl ProfileStore {
                 if !entry.1.contains(variant) {
                     entry.1.push(variant.clone());
                 }
+                model_variants
+                    .entry(model_name.clone())
+                    .or_default()
+                    .insert(variant.clone(), m.name.clone());
             }
         }
 
@@ -161,6 +170,7 @@ impl ProfileStore {
                     .cloned()
                     .unwrap_or_else(|| vendor.clone());
                 MachineModel {
+                    variants: model_variants.remove(&name).unwrap_or_default(),
                     name,
                     vendor,
                     vendor_display,

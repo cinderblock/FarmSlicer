@@ -50,6 +50,23 @@ interface Printer {
   nozzle_diameter: string;
 }
 
+interface MachineModel {
+  name: string;
+  vendor_display: string;
+  nozzle_diameters: string[];
+  /** Nozzle size → the machine profile slicing uses for it. */
+  variants: Record<string, string>;
+}
+
+/** The machine profile a printer slices with: its model at its nozzle size. */
+function printerProfile(p: Printer, models: MachineModel[]): string {
+  if (!p.nozzle_diameter) return p.machine_profile;
+  return (
+    models.find((m) => m.name === p.machine_profile)?.variants[p.nozzle_diameter] ??
+    `${p.machine_profile} ${p.nozzle_diameter} nozzle`
+  );
+}
+
 interface ProfileEntry {
   name: string;
   vendor: string;
@@ -130,7 +147,9 @@ export default function SlicePage() {
   const [processes, setProcesses] = useState<ProfileEntry[]>([]);
   const [filaments, setFilaments] = useState<ProfileEntry[]>([]);
   const [printerId, setPrinterId] = useState("");
-  const [selectedMachine, setSelectedMachine] = useState("");
+  const [machineModels, setMachineModels] = useState<MachineModel[]>([]);
+  const [modelChoice, setModelChoice] = useState("");
+  const [nozzleChoice, setNozzleChoice] = useState("");
   const [process, setProcess] = useState("");
   const [filament, setFilament] = useState("");
   const [materialFilter, setMaterialFilter] = useState("");
@@ -163,6 +182,10 @@ export default function SlicePage() {
     fetch("/api/printers")
       .then((r) => r.json())
       .then(setPrinters)
+      .catch(() => {});
+    fetch("/api/profiles/machine-models")
+      .then((r) => r.json())
+      .then(setMachineModels)
       .catch(() => {});
   }, []);
 
@@ -222,30 +245,50 @@ export default function SlicePage() {
     return "server";
   }, [compute, browserAvailable, serverStatus]);
 
-  // Unique machine profiles derived from configured printers
-  const availableMachines = useMemo(() => {
-    const machines = new Set<string>();
-    for (const p of printers) {
-      const resolved = p.nozzle_diameter
-        ? `${p.machine_profile} ${p.nozzle_diameter} nozzle`
-        : p.machine_profile;
-      if (resolved) machines.add(resolved);
-    }
-    return [...machines].sort();
-  }, [printers]);
+  // Models to offer: those of the farm's printers, or every known model when
+  // no printer is configured yet (slicing doesn't need a printer).
+  const offeredModels = useMemo(() => {
+    const farm = new Set(printers.map((p) => p.machine_profile));
+    const ofFarm = machineModels.filter((m) => farm.has(m.name));
+    return ofFarm.length > 0 ? ofFarm : machineModels;
+  }, [printers, machineModels]);
 
-  // Resolve machine profile from the selected printer or manual selection
-  const resolvedMachine = useMemo(() => {
-    if (printerId) {
-      const p = printers.find((pr) => pr.id === printerId);
-      if (p) {
-        return p.nozzle_diameter
-          ? `${p.machine_profile} ${p.nozzle_diameter} nozzle`
-          : p.machine_profile;
+  const selectedPrinter = printers.find((p) => p.id === printerId);
+  const model = selectedPrinter?.machine_profile ?? (modelChoice || offeredModels[0]?.name || "");
+  const modelInfo = machineModels.find((m) => m.name === model);
+  const nozzleOptions = useMemo(
+    () => (modelInfo ? modelInfo.nozzle_diameters.filter((n) => n in modelInfo.variants) : []),
+    [modelInfo],
+  );
+
+  // Default nozzle for a model: what most of the farm's printers of that model
+  // carry, else 0.4 mm, else the first size the model comes in.
+  const defaultNozzle = useCallback(
+    (name: string): string => {
+      const info = machineModels.find((m) => m.name === name);
+      const sizes = info ? info.nozzle_diameters.filter((n) => n in info.variants) : [];
+      const counts = new Map<string, number>();
+      for (const p of printers) {
+        if (p.machine_profile === name && sizes.includes(p.nozzle_diameter)) {
+          counts.set(p.nozzle_diameter, (counts.get(p.nozzle_diameter) ?? 0) + 1);
+        }
       }
-    }
-    return selectedMachine || availableMachines[0] || "";
-  }, [printerId, printers, selectedMachine, availableMachines]);
+      const common = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+      return common ?? (sizes.includes("0.4") ? "0.4" : sizes[0] ?? "");
+    },
+    [machineModels, printers],
+  );
+
+  const nozzle = selectedPrinter
+    ? selectedPrinter.nozzle_diameter
+    : nozzleOptions.includes(nozzleChoice)
+      ? nozzleChoice
+      : defaultNozzle(model);
+
+  // The machine profile to slice with
+  const resolvedMachine = selectedPrinter
+    ? printerProfile(selectedPrinter, machineModels)
+    : (modelInfo?.variants[nozzle] ?? "");
 
   // Material types available for the current filament list
   const materialTypes = useMemo(() => {
@@ -552,20 +595,56 @@ export default function SlicePage() {
             </select>
           </label>
 
-          {!printerId && availableMachines.length > 1 && (
+          <div className="machine-row">
             <label>
-              Machine Profile
+              Model
               <select
-                value={selectedMachine || availableMachines[0] || ""}
-                onChange={(e) => setSelectedMachine(e.target.value)}
+                value={model}
+                disabled={!!selectedPrinter}
+                onChange={(e) => {
+                  setModelChoice(e.target.value);
+                  setNozzleChoice("");
+                }}
               >
-                {availableMachines.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                {selectedPrinter &&
+                  !offeredModels.some((m) => m.name === selectedPrinter.machine_profile) && (
+                    <option value={selectedPrinter.machine_profile}>
+                      {selectedPrinter.machine_profile}
+                    </option>
+                  )}
+                {[...new Set(offeredModels.map((m) => m.vendor_display))].map((vendor) => (
+                  <optgroup key={vendor} label={vendor}>
+                    {offeredModels
+                      .filter((m) => m.vendor_display === vendor)
+                      .map((m) => (
+                        <option key={m.name} value={m.name}>
+                          {m.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <label>
+              Nozzle
+              <select
+                value={nozzle}
+                disabled={!!selectedPrinter || nozzleOptions.length < 2}
+                onChange={(e) => setNozzleChoice(e.target.value)}
+              >
+                {selectedPrinter && !nozzleOptions.includes(nozzle) && (
+                  <option value={nozzle}>{nozzle ? `${nozzle} mm` : "—"}</option>
+                )}
+                {nozzleOptions.map((n) => (
+                  <option key={n} value={n}>
+                    {n} mm
                   </option>
                 ))}
               </select>
             </label>
+          </div>
+          {selectedPrinter && (
+            <p className="hint">Model and nozzle come from the selected printer.</p>
           )}
 
           <label>
