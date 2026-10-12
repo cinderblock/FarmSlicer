@@ -1,0 +1,23 @@
+# Issues
+
+Known problems not being worked on right now. Claim one by marking it
+`in progress — <thread/branch>` (and committing that) before starting.
+
+## Frontend lint errors (`cd web && bun run lint`)
+
+20 errors + 1 warning from before the groups work, so `bun run lint` exits 1
+(CI doesn't run it; `bun run build` passes). By rule:
+
+- `react-hooks/set-state-in-effect`: `auth.tsx:60`, `components/ProfileEditor.tsx`
+  (44, 58), `components/SearchSelect.tsx:62`, `pages/Printers.tsx:53`,
+  `pages/Profiles.tsx` (59, 109), `pages/Slice.tsx` (328, 383). The pattern
+  `useJson(url, rev)` in `web/src/api.ts` is the lint-clean replacement for
+  "load() in useEffect".
+- `react-hooks/immutability`: `components/ModelViewer.tsx` (124, 129).
+- `@typescript-eslint/no-explicit-any`: `components/ModelViewer.tsx`.
+- `react-refresh/only-export-components`: `auth.tsx`, `main.tsx`.
+- `no-useless-assignment`: `auth.tsx`.
+- `react-hooks/exhaustive-deps` (warning): `pages/Slice.tsx:378`.
+
+Why it matters: lint can't gate CI until it is clean, and the
+set-state-in-effect cases cause extra renders.
