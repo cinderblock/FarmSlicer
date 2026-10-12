@@ -155,6 +155,8 @@ check(r.status === 404, "a disabled link is dead", json(r));
 // public link to the league
 r = await owner.post(`/api/groups/${league}/links`, { public: true, code: "Bad Code" });
 check(r.status === 400, "public codes must be slugs", json(r));
+r = await owner.post(`/api/groups/${league}/links`, { public: true, code: "group" });
+check(r.status === 400, "the code 'group' is reserved for the UI's routes", json(r));
 r = await owner.post(`/api/groups/${league}/links`, { public: true, code: "league-join" });
 check(r.status === 201 && r.json.bypass_approval === false, "public link created", json(r));
 r = await anon.post("/api/join/resolve", { entry: { code: "LEAGUE-JOIN" }, selection: [] });
@@ -286,6 +288,11 @@ check(!r.json.some((j) => j.id === teamJob), "after leaving, team jobs are hidde
 
 r = await owner.get("/api/users");
 check(r.json.find((u) => u.username === "kid1")?.groups?.[0]?.role === "manager", "admin user list shows groups", json(r));
+const outsiderId = r.json.find((u) => u.username === "outsider").id;
+r = await owner.post(`/api/users/${outsiderId}/invite`);
+const outsiderInvite = r.json.invite_url.split("/invite/")[1];
+r = await register(new Client(), new SoftAuthenticator(), `/api/auth/invite/${outsiderInvite}/start`, {}, `/api/auth/invite/${outsiderInvite}/finish`, "k");
+check(r.status === 200 && r.json.user?.kind === "full", "a guest who enrols through an admin's invite becomes full", json(r));
 r = await owner.del(`/api/groups/${programA}`);
 check(r.status === 409, "groups with subgroups can't be deleted", json(r));
 r = await kid1.del(`/api/groups/${team}`);

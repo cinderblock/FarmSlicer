@@ -21,6 +21,11 @@ if [ ${#tests[@]} -eq 0 ]; then
   tests=(tests/*-e2e.mjs)
 fi
 
+if curl -s -o /dev/null "http://localhost:$PORT/"; then
+  echo "port $PORT is already in use; set PORT to a free one" >&2
+  exit 2
+fi
+
 fail=0
 for t in "${tests[@]}"; do
   run="$(mktemp -d)"

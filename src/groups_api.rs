@@ -504,7 +504,8 @@ async fn group_usage(
         return Err(not_found());
     }
     let lines = quota::group_lines(&state.db, &tree, &user, &id);
-    // Managers also get each member's usage of this group's per-member rules.
+    // Managers also get each member's usage of the per-member rules that
+    // apply here (this group's and its ancestors').
     let members: Vec<Value> = if viewer.can_manage(&tree, &id) {
         state
             .db
@@ -514,7 +515,7 @@ async fn group_usage(
             .map(|u| {
                 let lines: Vec<quota::Line> = quota::group_lines(&state.db, &tree, &u, &id)
                     .into_iter()
-                    .filter(|l| l.scope == "member" && l.group_id.as_deref() == Some(id.as_str()))
+                    .filter(|l| l.scope == "member")
                     .collect();
                 json!({"user_id": u.id, "username": u.username, "lines": lines})
             })
@@ -558,8 +559,10 @@ struct CreateLink {
     expires_hours: Option<i64>,
 }
 
+/// "group" is taken by the web UI's /join/group/<id> route.
 fn valid_public_code(code: &str) -> bool {
-    (3..=40).contains(&code.len())
+    code != "group"
+        && (3..=40).contains(&code.len())
         && code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
         && !code.starts_with('-')
         && !code.ends_with('-')

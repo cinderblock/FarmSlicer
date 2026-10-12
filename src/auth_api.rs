@@ -389,6 +389,8 @@ async fn invite_finish(
         .add_passkey(&cred_id, &user_id, &key_name(&body.key_name), &passkey_json)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     state.db.use_invite(&token_hash);
+    // An admin can send a guest an invite to enrol a passkey: full account.
+    state.db.set_user_kind(&user_id, "full");
     let user = state.db.get_user(&user_id).ok_or_else(|| err(StatusCode::NOT_FOUND, "user vanished"))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
     println!("invite accepted: '{}' enrolled a passkey", user.username);
