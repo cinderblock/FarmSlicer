@@ -157,19 +157,28 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 - [ ] On hardware: LAN liveview must be on for X1 RTSPS; check P1/A1 frame
       rate and the H2D's stream.
 
-**Phase 5 — farm workflow** ← current
-- [ ] Printer areas: `printers.area`, cards grouped by area.
-- [ ] Equipment reports: `printer_reports` table; anyone reports from a
-      printer card, admins see open ones and resolve them.
-- [ ] Preheat / cool down from a chosen tray (nozzle = tray max temp, bed by
-      material), only on an idle printer with no active print.
-- [ ] Speed control in the print controls.
-- [ ] Print rules (inherited group setting `print_rules`: max minutes,
-      allowed materials; site default for personal jobs). A send that breaks
-      them becomes a print in `pending_approval` with the reason; admins and
-      the group's managers approve (which really sends, with the stored plate,
-      mapping and options) or reject. Admins and the group's managers aren't
-      held to the rules.
+**Phase 5 — farm workflow** (done)
+- [x] Areas, problem reports (+ admin panel), preheat/cooldown, speed
+      (`0353076`, `a5d2ef6`, `a5b8c72`).
+- [x] Print rules + approval: inherited `print_rules`, site default;
+      `pending_approval` → approve (re-checks printer + trays, really sends)
+      / reject with note / withdraw. Covered by `tests/printers-e2e.mjs`.
+- [x] Fixed on the way: `?active=1`/`?mine=1` query flags were rejected
+      (`src/query.rs`; Library "My jobs", `e0a1f16`).
+
+**Not replicated from the old station (ask before doing):**
+- Its step-by-step "Instructions" page (installing Bambu Studio, exporting,
+  plate handling) — content, not code.
+- Estimated filament cost per print ($/kg table).
+- Thumbnails for prints started outside FarmSlicer (it downloaded the
+  running project from the printer over FTPS).
+
+**Next (needs the user):**
+- [ ] Hardware check on one real printer, one print, at a time the user
+      picks (see the per-phase "On hardware" items).
+- [ ] Merge `printer-control` into master (master has moved; the Slice and
+      Group pages were touched on both sides) and push; CI builds the image;
+      ops pins it.
 
 ## Findings / gotchas
 
@@ -280,6 +289,9 @@ which we must not copy):
       reference no longer panics (`7b0c4d6`).
 - Phase 2 sending committed (`793a6d3`, `f72a80f`); all unit + e2e tests
   pass (`tests/printers-e2e.mjs` covers uploads, targets, refused sends).
+- Phases 3-5 committed; all unit tests (29), the three e2e suites and the
+  libslic3r end-to-end (slice → package with overlay → print on the fake
+  printer) pass as of `a5b8c72`.
 - Dev setup: stub server on buildhost `127.0.0.1:9340`
   (`~/farmslicer-printer-control/pc-dev.sh`, auth off), reached with
   `ssh -L 9340:127.0.0.1:9340`; fake printer = Docker `fake-printer`
