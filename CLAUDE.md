@@ -92,8 +92,16 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `src/bambu/` — Bambu LAN link: `hub.rs` (one MQTT/TLS connection per
   printer, reconnect, request/response by `sequence_id`, `sync()` after any
   printer change), `status.rs` (merging P1/A1 delta reports, the UI summary),
-  `tls.rs` (accept the printer's Bambu-CA cert, ring provider)
+  `tls.rs` (accept the printer's Bambu-CA cert, ring provider),
+  `ftps.rs` (implicit FTPS upload; the data channel must resume the control
+  channel's TLS session), `package.rs` (reading `.gcode.3mf`), `models.rs`
 - `src/printers_api.rs` — printer CRUD (admins), status + SSE events
+- `src/printing.rs` — sending: compatibility, AMS mapping (`ams_mapping` +
+  `ams_mapping2`), upload → `project_file` → ack/retry, and `track()` moving
+  prints along from printer reports; `src/prints_api.rs` — uploads, targets,
+  send, prints, control
+- `tests/fake-printer/` — Docker fake printer (mosquitto TLS + vsftpd with
+  `require_ssl_reuse`) for developing without hardware
 - `src/groups.rs` — group tree, inherited settings, permissions
   (`can_manage`, `can_govern`), job visibility, seasons; `src/groups_api.rs`
   (groups, members, links, library, usage, site settings);
@@ -173,7 +181,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - libslic3r's GCodeProcessor logs `Invalid T command (T1000)` for Bambu start
   G-code on every slice; harmless.
 - Thumbnails are not embedded in G-code yet (Bambu printers show a blank preview).
-- Jobs tagged `printer_id` are not sent to printers; "routing" is bookkeeping only.
+- FarmSlicer-sliced jobs have no `.gcode.3mf` package yet, so only uploaded
+  sliced projects can be sent (plans/printer-control.md, phase 3).
+- Jobs tagged `printer_id` at slicing time are not sent automatically;
+  sending is an explicit `POST /api/jobs/{id}/print`.
 
 ## Key Conventions
 

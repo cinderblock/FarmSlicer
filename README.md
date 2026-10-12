@@ -16,8 +16,11 @@ can run in the user's browser.
   job's group is set to keep models.
 - **Printers:** Bambu Lab SSDP discovery; machine model + nozzle size per printer;
   live status over the printers' LAN MQTT interface (state, progress,
-  temperatures, AMS trays, errors). Needs the printer's IP, serial number and
-  LAN access code, with LAN mode and Developer Mode on.
+  temperatures, AMS trays, errors); sending prints (FTPS upload, start with an
+  AMS mapping, pause/resume/stop) and following them to the end. Needs the
+  printer's IP, serial number and LAN access code, with LAN mode and
+  Developer Mode on. Sliced projects from Bambu Studio / OrcaSlicer
+  (`.gcode.3mf`) can be uploaded and sent too.
 - **People:** passkey accounts, nested groups with shared libraries and
   seasons, quotas, self-service joining through links, guest accounts.
 
@@ -199,6 +202,11 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set` |
 | `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
 | `GET /api/printers/{id}/report` | the printer's merged raw MQTT report (admins) |
+| `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level}` on whatever the printer runs (admins) |
+| `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |
+| `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping |
+| `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems}`: upload and start |
+| `GET /api/prints?printer=&active=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed (sender, group managers, admins) |
 | `GET /api/discovery` | Bambu printers seen on the LAN |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |

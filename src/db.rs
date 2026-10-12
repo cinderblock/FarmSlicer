@@ -55,6 +55,53 @@ pub struct Job {
     pub group_name: Option<String>,
     /// Bytes kept on the server for this job: model (if stored) + G-code.
     pub stored_bytes: i64,
+    /// The printable package (`.gcode.3mf`) on the server, when there is one.
+    #[serde(skip)]
+    pub package_path: Option<String>,
+    /// What the package holds (src/bambu/package.rs `Package`, JSON); its
+    /// presence means the job can be sent to a printer.
+    pub package_json: Option<String>,
+}
+
+/// A job sent to a printer.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PrintRecord {
+    pub id: String,
+    pub job_id: Option<String>,
+    pub plate: i64,
+    pub printer_id: Option<String>,
+    /// Kept so history survives the printer's removal.
+    pub printer_name: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub group_id: Option<String>,
+    /// The file's name on the printer.
+    pub file_name: String,
+    /// What the printer shows as the job name.
+    pub name: String,
+    /// JSON: the `ams_mapping` sent (tray slot per project filament, -1 unused).
+    pub ams_mapping: Option<String>,
+    /// uploading | starting | printing | paused | finished | failed | cancelled
+    pub status: String,
+    /// Upload percent while uploading, then print percent.
+    pub progress: i64,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub updated_at: String,
+}
+
+/// Print statuses that still need the printer.
+pub const ACTIVE_PRINT_STATUSES: &[&str] = &["uploading", "starting", "printing", "paused"];
+
+/// `ACTIVE_PRINT_STATUSES` as an SQL list: `'uploading', 'starting', ...`.
+fn active_print_sql() -> String {
+    ACTIVE_PRINT_STATUSES
+        .iter()
+        .map(|s| format!("'{s}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -337,6 +384,34 @@ impl Db {
         if conn.prepare("SELECT stored_bytes FROM jobs LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE jobs ADD COLUMN stored_bytes INTEGER NOT NULL DEFAULT 0;").ok();
         }
+        for col in &["package_path", "package_json"] {
+            if conn.prepare(&format!("SELECT {col} FROM jobs LIMIT 0")).is_err() {
+                conn.execute_batch(&format!("ALTER TABLE jobs ADD COLUMN {col} TEXT;")).ok();
+            }
+        }
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS prints (
+                id TEXT PRIMARY KEY,
+                job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+                plate INTEGER NOT NULL DEFAULT 1,
+                printer_id TEXT REFERENCES printers(id) ON DELETE SET NULL,
+                printer_name TEXT NOT NULL,
+                user_id TEXT, -- no FK, like jobs.user_id: FARMSLICER_NO_AUTH runs as a stand-in owner with no users row
+                group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
+                file_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                ams_mapping TEXT,
+                status TEXT NOT NULL,
+                progress INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                started_at TEXT,
+                finished_at TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS prints_printer ON prints(printer_id, status);
+            CREATE INDEX IF NOT EXISTS prints_job ON prints(job_id);"
+        ).expect("failed to create prints table");
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
              CREATE INDEX IF NOT EXISTS jobs_user ON jobs(user_id);"
@@ -868,7 +943,8 @@ impl Db {
                 j.config_json, j.overrides_json,
                 j.progress_message, j.warnings, j.source,
                 j.created_at, j.updated_at,
-                j.user_id, u.username, j.group_id, g.name, j.stored_bytes
+                j.user_id, u.username, j.group_id, g.name, j.stored_bytes,
+                j.package_path, j.package_json
          FROM jobs j
          LEFT JOIN printers p ON j.printer_id = p.id
          LEFT JOIN users u ON j.user_id = u.id
@@ -900,6 +976,8 @@ impl Db {
             group_id: row.get(21)?,
             group_name: row.get(22)?,
             stored_bytes: row.get(23)?,
+            package_path: row.get(24)?,
+            package_json: row.get(25)?,
         })
     }
 
@@ -1053,6 +1131,120 @@ impl Db {
             params![id, gcode_path, print_time_sec, filament_used_g, warnings],
         )
         .unwrap();
+    }
+
+    pub fn set_job_package(&self, id: &str, package_path: &str, package_json: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET package_path = ?2, package_json = ?3, updated_at = datetime('now') WHERE id = ?1",
+            params![id, package_path, package_json],
+        )
+        .unwrap();
+    }
+
+    // -- Prints --
+
+    const PRINT_SELECT: &'static str =
+        "SELECT p.id, p.job_id, p.plate, p.printer_id, p.printer_name, p.user_id, u.username,
+                p.group_id, p.file_name, p.name, p.ams_mapping, p.status, p.progress, p.error,
+                p.created_at, p.started_at, p.finished_at, p.updated_at
+         FROM prints p LEFT JOIN users u ON p.user_id = u.id";
+
+    fn print_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintRecord> {
+        Ok(PrintRecord {
+            id: row.get(0)?,
+            job_id: row.get(1)?,
+            plate: row.get(2)?,
+            printer_id: row.get(3)?,
+            printer_name: row.get(4)?,
+            user_id: row.get(5)?,
+            username: row.get(6)?,
+            group_id: row.get(7)?,
+            file_name: row.get(8)?,
+            name: row.get(9)?,
+            ams_mapping: row.get(10)?,
+            status: row.get(11)?,
+            progress: row.get(12)?,
+            error: row.get(13)?,
+            created_at: row.get(14)?,
+            started_at: row.get(15)?,
+            finished_at: row.get(16)?,
+            updated_at: row.get(17)?,
+        })
+    }
+
+    /// A new print, in status `uploading`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_print(
+        &self,
+        id: &str,
+        job_id: &str,
+        plate: i64,
+        printer: &Printer,
+        user_id: Option<&str>,
+        group_id: Option<&str>,
+        file_name: &str,
+        name: &str,
+        ams_mapping: &str,
+    ) -> PrintRecord {
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO prints (id, job_id, plate, printer_id, printer_name, user_id, group_id, file_name, name, ams_mapping, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'uploading')",
+                params![id, job_id, plate, printer.id, printer.name, user_id, group_id, file_name, name, ams_mapping],
+            )
+            .unwrap();
+        }
+        self.get_print(id).expect("print just inserted")
+    }
+
+    pub fn get_print(&self, id: &str) -> Option<PrintRecord> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(&format!("{} WHERE p.id = ?1", Self::PRINT_SELECT), params![id], Self::print_from_row)
+            .ok()
+    }
+
+    /// Newest first. `printer_id` narrows to one printer, `active` to prints
+    /// still using their printer.
+    pub fn list_prints(&self, printer_id: Option<&str>, active: bool, limit: i64) -> Vec<PrintRecord> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "{} WHERE (?1 IS NULL OR p.printer_id = ?1) AND (?2 = 0 OR p.status IN ({}))
+             ORDER BY p.created_at DESC, p.rowid DESC LIMIT ?3",
+            Self::PRINT_SELECT,
+            active_print_sql()
+        );
+        let mut stmt = conn.prepare(&sql).unwrap();
+        stmt.query_map(params![printer_id, active as i64, limit], Self::print_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// Move an active print to `status`; final statuses are never left.
+    /// Stamps started_at on the first `printing`/`paused` and finished_at on
+    /// a final status. Returns whether the print changed.
+    pub fn update_print(&self, id: &str, status: &str, progress: Option<i64>, error: Option<&str>) -> bool {
+        let finished = !ACTIVE_PRINT_STATUSES.contains(&status);
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            &format!(
+                "UPDATE prints SET status = ?2,
+                    progress = COALESCE(?3, progress),
+                    error = COALESCE(?4, error),
+                    started_at = CASE WHEN ?2 IN ('printing', 'paused') AND started_at IS NULL
+                                      THEN datetime('now') ELSE started_at END,
+                    finished_at = CASE WHEN ?5 THEN datetime('now') ELSE finished_at END,
+                    updated_at = datetime('now')
+                 WHERE id = ?1 AND status IN ({})
+                   AND (status != ?2 OR progress != COALESCE(?3, progress) OR ?4 IS NOT NULL)",
+                active_print_sql()
+            ),
+            params![id, status, progress, error, finished],
+        )
+        .unwrap()
+            > 0
     }
 
     pub fn fail_job(&self, id: &str, error: &str) {

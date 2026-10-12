@@ -36,6 +36,9 @@ pub struct MachineModel {
     /// takes), e.g. "0.4" → "Bambu Lab A1 0.4 nozzle". Sizes a model's
     /// `machine_model` JSON lists without a matching profile are absent.
     pub variants: BTreeMap<String, String>,
+    /// The vendor's id for the model, which sliced files and printers report
+    /// (Bambu: "BL-P001" = X1 Carbon, "C12" = P1S, "N1" = A1 mini, ...).
+    pub model_id: Option<String>,
 }
 
 pub struct ProfileStore {
@@ -58,6 +61,8 @@ impl ProfileStore {
         let mut by_name: HashMap<String, Vec<(String, PathBuf)>> = HashMap::new();
         // Collect machine_model entries: model_name → (vendor, nozzle_diameters)
         let mut model_nozzles: HashMap<String, (String, Vec<String>)> = HashMap::new();
+        // Model name → vendor model id (Bambu: "BL-P001", "C12", "N1", ...).
+        let mut model_ids: HashMap<String, String> = HashMap::new();
 
         let Ok(vendors) = std::fs::read_dir(profiles_dir) else {
             return Self {
@@ -96,7 +101,10 @@ impl ProfileStore {
 
                     // Check for machine_model entries (base models with nozzle lists)
                     if subdir == "machine" {
-                        if let Some((name, nozzles)) = load_machine_model_nozzles(&path) {
+                        if let Some((name, nozzles, model_id)) = load_machine_model_nozzles(&path) {
+                            if let Some(id) = model_id {
+                                model_ids.insert(name.clone(), id);
+                            }
                             model_nozzles.insert(name, (vendor.clone(), nozzles));
                         }
                     }
@@ -171,6 +179,7 @@ impl ProfileStore {
                     .unwrap_or_else(|| vendor.clone());
                 MachineModel {
                     variants: model_variants.remove(&name).unwrap_or_default(),
+                    model_id: model_ids.remove(&name),
                     name,
                     vendor,
                     vendor_display,
@@ -204,6 +213,18 @@ impl ProfileStore {
 
     pub fn machine_models(&self) -> &[MachineModel] {
         &self.machine_models
+    }
+
+    pub fn machine_model(&self, name: &str) -> Option<&MachineModel> {
+        self.machine_models.iter().find(|m| m.name == name)
+    }
+
+    /// The model a vendor model id belongs to (several vendors could reuse an
+    /// id; the first match wins, so prefer checking the vendor too).
+    pub fn machine_model_by_id(&self, model_id: &str) -> Option<&MachineModel> {
+        self.machine_models
+            .iter()
+            .find(|m| m.model_id.as_deref() == Some(model_id))
     }
 
     pub fn machines(&self) -> &[ProfileEntry] {
@@ -376,7 +397,8 @@ fn merge_into(base: &mut Map<String, Value>, overlay: &Map<String, Value>) {
 
 /// Extract nozzle diameters from a machine_model JSON file.
 /// Returns (model_name, nozzle_diameters) if the file is a machine_model type.
-fn load_machine_model_nozzles(path: &Path) -> Option<(String, Vec<String>)> {
+/// A `machine_model` file: (name, nozzle sizes, vendor model id).
+fn load_machine_model_nozzles(path: &Path) -> Option<(String, Vec<String>, Option<String>)> {
     let content = std::fs::read_to_string(path).ok()?;
     let obj: Map<String, Value> = serde_json::from_str(&content).ok()?;
 
@@ -394,7 +416,14 @@ fn load_machine_model_nozzles(path: &Path) -> Option<(String, Vec<String>)> {
         .map(|s| s.split(';').map(|n| n.trim().to_string()).collect())
         .unwrap_or_default();
 
-    Some((name, nozzles))
+    let model_id = obj
+        .get("model_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    Some((name, nozzles, model_id))
 }
 
 fn load_profile_entry(path: &Path, vendor: &str, profile_type: &str) -> Option<ProfileEntry> {

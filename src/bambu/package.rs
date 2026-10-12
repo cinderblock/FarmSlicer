@@ -22,9 +22,9 @@ use std::path::Path;
 
 use md5::{Digest, Md5};
 use quick_xml::events::{BytesStart, Event};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FilamentUse {
     /// 1-based filament number in the project (`ams_mapping` index + 1).
     pub id: u32,
@@ -37,7 +37,7 @@ pub struct FilamentUse {
     pub used_m: f64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Plate {
     /// 1-based, as in `Metadata/plate_N.gcode`.
     pub index: u32,
@@ -52,7 +52,7 @@ pub struct Plate {
     pub gcode_md5: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Package {
     /// Only plates that carry G-code, in index order.
     pub plates: Vec<Plate>,

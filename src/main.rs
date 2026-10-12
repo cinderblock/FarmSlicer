@@ -7,6 +7,8 @@ mod groups;
 mod groups_api;
 mod join_api;
 mod printers_api;
+mod printing;
+mod prints_api;
 mod profiles;
 mod progress;
 mod quota;
@@ -96,6 +98,9 @@ async fn main() {
         printers,
         rp,
     ));
+
+    // Follow sent prints through their printers' reports.
+    tokio::spawn(printing::track(state.clone()));
 
     let app = server::router(state);
 

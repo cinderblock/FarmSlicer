@@ -7,7 +7,7 @@
 //
 // Needs a fresh server (it performs first-run setup). Exit code 0 iff all
 // checks pass. No dependencies beyond Node 22.
-import { BASE, check, Client, SoftAuthenticator, register, finish } from "./lib.mjs";
+import { BASE, check, Client, SoftAuthenticator, register, finish, zip } from "./lib.mjs";
 
 console.log(`printers e2e against ${BASE}`);
 
@@ -90,6 +90,59 @@ while (!text.includes("\n\n")) {
 }
 ctl.abort();
 check(text.startsWith("event: status") && text.includes(id), "the stream opens with each printer's status", text.slice(0, 200));
+
+// ---- sliced projects and sending ------------------------------------------------------
+const sliceInfo = `<?xml version="1.0" encoding="UTF-8"?>
+<config><plate>
+  <metadata key="index" value="1"/>
+  <metadata key="printer_model_id" value="BL-P001"/>
+  <metadata key="nozzle_diameters" value="0.4"/>
+  <metadata key="prediction" value="3600"/>
+  <metadata key="weight" value="12.5"/>
+  <filament id="1" tray_info_idx="GFA00" type="PLA" color="#FF6A13" used_m="4.1" used_g="12.5"/>
+</plate></config>`;
+const pkg = zip({
+  "Metadata/plate_1.gcode": "G28\n",
+  "Metadata/slice_info.config": sliceInfo,
+  "Metadata/plate_1.png": new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+});
+r = await user.form("/api/uploads", { file: [new Blob([pkg]), "Bracket v2.gcode.3mf"] });
+check(r.status === 201 && r.json.source === "upload" && r.json.status === "done", "a sliced project uploads as a finished job", json(r));
+const jobId = r.json.id;
+const plates = JSON.parse(r.json.package_json ?? "null")?.plates;
+check(plates?.[0]?.printer_model_id === "BL-P001" && plates[0].filaments[0].material === "PLA", "the job knows what the plate needs", r.json.package_json);
+check(r.json.filament_used_g === 12.5 && r.json.print_time_sec === 3600, "time and weight come from the project", json(r));
+
+r = await user.form("/api/uploads", { file: [new Blob([zip({ "3D/3dmodel.model": "<model/>" })]), "raw.3mf"] });
+check(r.status === 400 && /no G-code/.test(r.json.error), "an unsliced project is refused with advice", json(r));
+
+const thumb = await fetch(`${BASE}/api/jobs/${jobId}/thumbnail`, { headers: { cookie: user.cookie } });
+check(thumb.status === 200 && thumb.headers.get("content-type") === "image/png", "the plate thumbnail is served", String(thumb.status));
+
+r = await owner.post("/api/printers", { name: "Bench A1 mini", machine_profile: "Bambu Lab A1 mini", nozzle_diameter: "0.4", protocol: "bambu" });
+const mini = r.json.id;
+r = await user.get(`/api/jobs/${jobId}/targets`);
+const byName = Object.fromEntries((r.json?.targets ?? []).map((t) => [t.name, t]));
+check(/X1 Carbon/.test(byName["Bench A1 mini"]?.incompatible ?? ""), "a plate for an X1 Carbon doesn't fit an A1 mini", json(r));
+check(byName["Bench X1 Carbon"]?.incompatible === null && /offline|connected/.test(byName["Bench X1 Carbon"]?.busy ?? ""), "the X1 Carbon fits but is unreachable", json(r));
+
+r = await user.post(`/api/jobs/${jobId}/print`, { printer_id: mini });
+check(r.status === 409 && /sliced for/.test(r.json.error), "sending to an incompatible printer is refused", json(r));
+r = await user.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+check(r.status === 409 && /offline/.test(r.json.error), "sending to an offline printer is refused", json(r));
+r = await user.get("/api/prints");
+check(r.status === 200 && r.json.length === 0, "refused sends leave no prints", json(r));
+
+r = await owner.post(`/api/printers/${id}/control`, { action: "pause" });
+check(r.status === 409, "controlling an offline printer fails cleanly", json(r));
+r = await user.post(`/api/printers/${id}/control`, { action: "pause" });
+check(r.status === 403, "printer-level control is admin-only", json(r));
+
+// A printer that jobs were tagged with can still be removed.
+r = await user.form("/api/jobs", { source: "browser", model_name: "tagged.stl", printer_id: mini });
+check(r.status === 201, "a job tagged with a printer", json(r));
+r = await owner.del(`/api/printers/${mini}`);
+check(r.status === 204, "removing a printer that jobs reference works", String(r.status));
 
 // Clearing the access code disconnects the printer.
 r = await owner.patch(`/api/printers/${id}`, { access_code: "" });

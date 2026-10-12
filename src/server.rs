@@ -21,6 +21,7 @@ use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
 use crate::printers_api;
+use crate::prints_api;
 use crate::profiles::ProfileStore;
 use crate::progress;
 use crate::quota;
@@ -101,6 +102,7 @@ async fn list_machine_models(State(state): State<Arc<AppState>>) -> Json<Value> 
                 "vendor_display": m.vendor_display,
                 "nozzle_diameters": m.nozzle_diameters,
                 "variants": m.variants,
+                "model_id": m.model_id,
             })
         })
         .collect();
@@ -696,7 +698,7 @@ fn gcode_output_path(state: &AppState, job_id: &str) -> String {
 }
 
 /// Record a finished slice: job row, slice-library row.
-fn finish_job(
+pub(crate) fn finish_job(
     state: &AppState,
     job_id: &str,
     gcode_path: &str,
@@ -1038,6 +1040,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/profiles/resolve-single", get(resolve_single_profile))
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())
+        .merge(prints_api::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),
