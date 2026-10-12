@@ -188,8 +188,13 @@ and `keep_models` on the teams. Exact names live outside this repo.
 6. ~~Deploy~~: pushed `ccfee49`, CI green (unit + e2e on GitHub's runner),
    image `sha256:6016040e…`, ops pin commit `9f50b22`, Server Deploys run
    succeeded; the live container runs `ccfee49` with the existing account.
-7. **[current]** Configure the league on the live instance (needs the
-   owner's session: the maintainer, in the UI).
+7. ~~Configure the league on the live instance~~ (2026-10-12, through the
+   owner's browser session): a listed top-level league group (new accounts
+   and guests allowed, approval to join, choose a program), two program
+   subgroups with self-service team numbers (`[0-9]{1,5}`, creator manages,
+   keep models, season starts 01-01 and 09-01), a public join link. The
+   join flow was checked with `/api/join/resolve` (preview only; nothing
+   created). No quotas set yet.
 
 ## Findings / gotchas
 
@@ -243,7 +248,7 @@ and `keep_models` on the teams. Exact names live outside this repo.
       username. Username-less sign-in fails for non-discoverable
       credentials: pre-existing, logged in `ISSUES.md`.
 - [x] Pushed and deployed (`ccfee49`, ops `9f50b22`)
-- [ ] League configured on the deployed instance
+- [x] League configured on the deployed instance
 
 ## Open questions for the user
 
