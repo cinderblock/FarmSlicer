@@ -248,6 +248,12 @@ Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocea
 - [x] 2026-10-12: personal details scrubbed from the current tree (names, local
   path, old passphrase value). History still has them (see hand-off).
 
+- [x] 2026-10-12: **deployed through ops.** `OWNER/ops` got read access
+  on the (still private) GHCR package via Manage Actions access; ops commit
+  `ca4dd79` pins the accounts image (`sha256:f835a027…`); the Server Deploys
+  re-run (38288007672) brought up container `farmslicer` on buildhost with
+  host networking. The old SSH-started test containers are gone.
+
 ## Hand-off: what the maintainer has to do (none of it is mine to do)
 
 1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much
