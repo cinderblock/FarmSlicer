@@ -254,6 +254,14 @@ Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocea
   re-run (38288007672) brought up container `farmslicer` on buildhost with
   host networking. The old SSH-started test containers are gone.
 
+- [x] 2026-10-12: **history rewritten for going public** (git filter-repo in a
+  fresh clone, force-pushed with the maintainer's explicit OK): every blob and
+  commit message had the build host, LAN domain, proxy host, ops repo name,
+  the other tenant's name, SSH user, local path and the retired passphrase
+  replaced by placeholders. Verified zero matches afterwards; the final tree
+  is unchanged; 53 commits. All commit hashes quoted above from before this
+  point no longer exist.
+
 ## Hand-off: what the maintainer has to do (none of it is mine to do)
 
 1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much
