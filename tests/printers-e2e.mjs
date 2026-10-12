@@ -152,6 +152,56 @@ r = await user.form(`/api/jobs/${browserJob}/result`, {
 check(r.status === 200 && r.json.status === "done", "the browser result is filed", json(r));
 check(JSON.parse(r.json.package_json ?? "null")?.plates?.length === 1, "the uploaded package makes the job sendable", r.json.package_json);
 
+// ---- areas, equipment reports, pre-heating --------------------------------------------
+r = await owner.patch(`/api/printers/${id}`, { area: " Bay 1 " });
+check(r.status === 200 && r.json.area === "Bay 1", "printers have an area", json(r));
+r = await user.post(`/api/printers/${id}/reports`, { description: "  " });
+check(r.status === 400, "a report needs a description", json(r));
+r = await user.post(`/api/printers/${id}/reports`, { description: "Nozzle clogged" });
+check(r.status === 201, "anyone reports a problem", json(r));
+const reportId = r.json.id;
+r = await user.get("/api/printer-reports");
+check(r.json.length === 1 && r.json[0].username === "ursula", "users see their own reports", json(r));
+r = await user.post(`/api/printer-reports/${reportId}/resolve`);
+check(r.status === 403, "only admins resolve reports", json(r));
+r = await owner.post(`/api/printer-reports/${reportId}/resolve`);
+check(r.status === 204, "an admin resolves the report", String(r.status));
+r = await owner.get("/api/printer-reports?open=1");
+check(r.json.length === 0, "no open reports left", json(r));
+r = await user.post(`/api/printers/${id}/preheat`, { slot: 0 });
+check(r.status === 409, "pre-heating needs a connected, idle printer", json(r));
+r = await user.post(`/api/printers/${id}/cooldown`);
+check(r.status === 409, "so does cooling down", json(r));
+
+// ---- print rules and approval ----------------------------------------------------------
+r = await owner.call("PUT", "/api/settings", { print_rules: { max_minutes: 30, materials: ["PETG"] } });
+check(r.status === 200 && r.json.print_rules?.max_minutes === 30, "site print rules", json(r));
+r = await user.get(`/api/jobs/${jobId}/targets`);
+check(r.json?.needs_approval?.length === 2, "the dialog learns the plate needs approval", json(r));
+r = await owner.get(`/api/jobs/${jobId}/targets`);
+check(r.json?.needs_approval?.length === 0, "admins aren't held to the rules", json(r));
+r = await user.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+check(r.status === 202 && r.json.status === "pending_approval" && /takes 1 h; the limit is 30 min/.test(r.json.approval_reason), "a send that breaks the rules waits for approval", json(r));
+const pending = r.json.id;
+r = await user.get("/api/prints?pending=1");
+check(r.json.length === 1 && r.json[0].can_approve === false, "the requester sees it, can't approve it", json(r));
+r = await user.post(`/api/prints/${pending}/approve`);
+check(r.status === 403, "users can't approve", json(r));
+r = await owner.get("/api/prints?pending=1");
+check(r.json[0]?.can_approve === true, "admins can approve", json(r));
+r = await owner.post(`/api/prints/${pending}/approve`);
+check(r.status === 409 && /offline/.test(r.json.error), "approval checks the printer is free", json(r));
+r = await owner.post(`/api/prints/${pending}/reject`, { note: "too long for a weekday" });
+check(r.status === 200 && r.json.status === "rejected" && r.json.error === "rejected by owner: too long for a weekday", "an admin rejects it with a note", json(r));
+r = await owner.post(`/api/prints/${pending}/approve`);
+check(r.status === 409, "a decided request stays decided", json(r));
+r = await user.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+const second = r.json.id;
+r = await user.post(`/api/prints/${second}/reject`);
+check(r.status === 200 && r.json.error === "withdrawn by ursula", "the requester withdraws their own request", json(r));
+r = await owner.call("PUT", "/api/settings", { print_rules: {} });
+check(r.status === 200, "site rules cleared", json(r));
+
 // A printer that jobs were tagged with can still be removed.
 r = await user.form("/api/jobs", { source: "browser", model_name: "tagged.stl", printer_id: mini });
 check(r.status === 201, "a job tagged with a printer", json(r));

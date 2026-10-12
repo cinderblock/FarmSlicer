@@ -22,6 +22,10 @@ can run in the user's browser.
   Developer Mode on. Server slices for Bambu printers come out as a
   `.gcode.3mf` with a rendered thumbnail; sliced projects from Bambu Studio /
   OrcaSlicer can be uploaded and sent too.
+- **Farm floor:** printer areas; print rules per group (max time, allowed
+  materials; inherited, with a site default) whose violations wait for an
+  admin or group manager to approve; equipment problem reports; pre-heating
+  an idle printer for a loaded filament.
 - **Cameras:** live view on demand; X1/H2-class (RTSPS) passed through as
   H.264 for the browser to decode, A1/P1 (JPEG over TLS) as frames. No
   ffmpeg, and the access code never leaves the server process.
@@ -215,7 +219,10 @@ summary prints the `pin.json` to paste there.
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems}`: upload and start |
-| `GET /api/prints?printer=&active=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed (sender, group managers, admins) |
+| `GET /api/prints?printer=&active=1&pending=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed (sender, group managers, admins) |
+| `POST /api/prints/{id}/approve`, `POST /api/prints/{id}/reject` | decide a print that broke the print rules (admins, the group's managers; the requester may withdraw) |
+| `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
+| `POST /api/printers/{id}/preheat` (`{slot}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament, or cool it |
 | `GET /api/discovery` | Bambu printers seen on the LAN |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |

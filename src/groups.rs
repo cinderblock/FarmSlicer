@@ -43,12 +43,48 @@ pub struct GroupSettings {
     /// `{group}` = the group's name. "" = no label. See src/overlay.rs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail_label: Option<String>,
+    /// What a print may be without approval (inherited as a whole; the site
+    /// default applies to personal jobs). See src/printing.rs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_rules: Option<PrintRules>,
     /// Not inherited. Offer this group on the sign-in page (admins only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listed: Option<bool>,
     /// Not inherited. How joiners pick a subgroup of this group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subgroups: Option<SubgroupPolicy>,
+}
+
+/// Limits on prints sent without approval. Missing = no limit.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PrintRules {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_minutes: Option<u32>,
+    /// Allowed materials as printers name them ("PLA", "PLA-CF", "PETG"...),
+    /// compared case-insensitively.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub materials: Option<Vec<String>>,
+}
+
+impl PrintRules {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_minutes == Some(0) {
+            return Err("print_rules.max_minutes must be positive".into());
+        }
+        if let Some(m) = &self.materials {
+            if m.iter().any(|x| x.trim().is_empty() || x.len() > 32) || m.len() > 64 {
+                return Err("print_rules.materials: up to 64 names of 1-32 characters".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// The site default (setting `print_rules`).
+    pub fn site_default(db: &Db) -> PrintRules {
+        db.get_setting("print_rules")
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -129,6 +165,9 @@ impl GroupSettings {
         if self.thumbnail_label.as_ref().is_some_and(|l| l.chars().count() > 64) {
             return Err("thumbnail_label is limited to 64 characters".into());
         }
+        if let Some(r) = &self.print_rules {
+            r.validate()?;
+        }
         Ok(())
     }
 }
@@ -157,6 +196,7 @@ pub struct Effective {
     pub allow_registration: bool,
     pub join_policy: String,
     pub thumbnail_label: String,
+    pub print_rules: PrintRules,
     pub sources: HashMap<&'static str, Option<String>>,
 }
 
@@ -166,6 +206,7 @@ pub struct Tree {
     settings: HashMap<String, GroupSettings>,
     children: HashMap<String, Vec<String>>,
     site_season_start: String,
+    site_print_rules: PrintRules,
 }
 
 impl Tree {
@@ -189,6 +230,7 @@ impl Tree {
             settings,
             children,
             site_season_start,
+            site_print_rules: PrintRules::site_default(db),
         }
     }
 
@@ -202,6 +244,10 @@ impl Tree {
 
     pub fn site_season_start(&self) -> &str {
         &self.site_season_start
+    }
+
+    pub fn site_print_rules(&self) -> &PrintRules {
+        &self.site_print_rules
     }
 
     /// `id` first, then its parent, ... up to the root. Stops on a cycle.
@@ -285,6 +331,7 @@ impl Tree {
             allow_registration: inherit!(allow_registration, false),
             join_policy: inherit!(join_policy, "approval".to_string()),
             thumbnail_label: inherit!(thumbnail_label, String::new()),
+            print_rules: inherit!(print_rules, self.site_print_rules.clone()),
             sources,
         }
     }

@@ -42,6 +42,7 @@ fn view(p: &Printer, user: &User) -> Value {
         "serial_number": if admin { Some(&p.serial_number) } else { None },
         "access_code_set": !p.access_code.is_empty(),
         "current_job": p.current_job,
+        "area": p.area,
     })
 }
 
@@ -67,6 +68,7 @@ struct CreatePrinter {
     address: Option<String>,
     serial_number: Option<String>,
     access_code: Option<String>,
+    area: Option<String>,
 }
 
 async fn create_printer(
@@ -87,6 +89,7 @@ async fn create_printer(
         body.address.as_deref().unwrap_or("").trim(),
         body.serial_number.as_deref().unwrap_or("").trim(),
         body.access_code.as_deref().unwrap_or("").trim(),
+        body.area.as_deref().unwrap_or("").trim(),
     );
     resync(&state);
     Ok((StatusCode::CREATED, Json(view(&printer, &user))))
@@ -102,6 +105,7 @@ struct UpdatePrinter {
     address: Option<String>,
     serial_number: Option<String>,
     access_code: Option<String>,
+    area: Option<String>,
 }
 
 async fn update_printer(
@@ -126,6 +130,7 @@ async fn update_printer(
             trimmed(&body.address).as_deref(),
             trimmed(&body.serial_number).as_deref(),
             trimmed(&body.access_code).as_deref(),
+            trimmed(&body.area).as_deref(),
         )
         .ok_or_else(not_found)?;
     resync(&state);

@@ -1143,6 +1143,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(printers_api::routes())
         .merge(prints_api::routes())
         .merge(overlay::routes())
+        .merge(crate::farm_api::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),

@@ -103,6 +103,40 @@ pub fn incompatibility(store: &ProfileStore, printer: &Printer, plate: &Plate) -
     None
 }
 
+// -- Rules -----------------------------------------------------------------------
+
+fn minutes_text(m: u32) -> String {
+    match (m / 60, m % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+
+/// Why `plate` breaks `rules` (empty = it doesn't).
+pub fn rule_violations(rules: &crate::groups::PrintRules, plate: &Plate) -> Vec<String> {
+    let mut out = Vec::new();
+    if let (Some(max), Some(secs)) = (rules.max_minutes, plate.print_time_sec) {
+        let minutes = (secs / 60.0).ceil() as u32;
+        if minutes > max {
+            out.push(format!(
+                "takes {}; the limit is {}",
+                minutes_text(minutes),
+                minutes_text(max)
+            ));
+        }
+    }
+    if let Some(allowed) = &rules.materials {
+        for f in &plate.filaments {
+            if !allowed.iter().any(|a| a.trim().eq_ignore_ascii_case(f.material.trim())) {
+                out.push(format!("{} isn't allowed (allowed: {})", f.material, allowed.join(", ")));
+            }
+        }
+    }
+    out.dedup();
+    out
+}
+
 // -- AMS mapping -----------------------------------------------------------------
 
 fn rgb(hex: &str) -> Option<(f64, f64, f64)> {
@@ -596,6 +630,9 @@ mod tests {
             file_name: "Bracket-1a2b3c4d.gcode.3mf".into(),
             name: "Bracket".into(),
             ams_mapping: None,
+            options: None,
+            approval_reason: None,
+            decided_by: None,
             status: status.into(),
             progress: 0,
             error: None,
@@ -630,6 +667,20 @@ mod tests {
         let failed = transition(&printing, &report("FAILED", ours, Some(0x0500_4038))).unwrap();
         assert_eq!((failed.0, failed.2.as_deref()), ("failed", Some("printer error 0500_4038")));
         assert_eq!(transition(&printing, &report("RUNNING", "/sdcard/Other.gcode.3mf", None)).unwrap().0, "failed");
+    }
+
+    #[test]
+    fn rules_name_what_they_break() {
+        use crate::groups::PrintRules;
+        let mut p = plate(vec![(1, "PLA", "#FFFFFF"), (2, "PETG", "#000000")]);
+        p.print_time_sec = Some(4.0 * 3600.0 + 61.0);
+        let rules = PrintRules { max_minutes: Some(240), materials: Some(vec!["pla".into(), "PLA-CF".into()]) };
+        let v = rule_violations(&rules, &p);
+        assert_eq!(v, vec![
+            "takes 4 h 2 min; the limit is 4 h".to_string(),
+            "PETG isn't allowed (allowed: pla, PLA-CF)".to_string(),
+        ]);
+        assert!(rule_violations(&PrintRules::default(), &p).is_empty());
     }
 
     #[test]

@@ -660,6 +660,7 @@ fn settings_json(state: &AppState) -> Value {
         "default_user_quotas": quota::site_default_rules(&state.db, "full"),
         "default_guest_quotas": quota::site_default_rules(&state.db, "guest"),
         "guest_session_days": guest_session_days(state),
+        "print_rules": groups::PrintRules::site_default(&state.db),
     })
 }
 
@@ -681,6 +682,9 @@ struct UpdateSettings {
     default_guest_quotas: Option<Vec<Rule>>,
     #[serde(default)]
     guest_session_days: Option<i64>,
+    /// Rules for personal jobs and groups that set none.
+    #[serde(default)]
+    print_rules: Option<groups::PrintRules>,
 }
 
 async fn update_settings(
@@ -711,6 +715,10 @@ async fn update_settings(
     }
     if let Some(d) = body.guest_session_days {
         state.db.set_setting("guest_session_days", Some(&d.to_string()));
+    }
+    if let Some(r) = &body.print_rules {
+        r.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+        state.db.set_setting("print_rules", Some(&serde_json::to_string(r).unwrap()));
     }
     Ok(Json(settings_json(&state)))
 }

@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::auth::{self, CurrentUser};
 use crate::bambu::package;
 use crate::db::{Job, PrintRecord, Printer, User};
-use crate::groups::{Tree, Viewer};
+use crate::groups::{PrintRules, Tree, Viewer};
 use crate::printing::{self, PrintOptions};
 use crate::server::{AppState, finish_job};
 use crate::{groups_api, quota};
@@ -156,6 +156,23 @@ async fn job_thumbnail(
 
 // -- Where a job can print -------------------------------------------------------
 
+/// The rules a job is held to, unless the viewer is exempt (admins, and the
+/// managers of the job's group).
+fn rules_for(tree: &Tree, viewer: &Viewer, job: &Job) -> Option<PrintRules> {
+    if viewer.admin || job.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)) {
+        return None;
+    }
+    Some(match job.group_id.as_deref() {
+        Some(g) if tree.get(g).is_some() => tree.effective(g).print_rules,
+        _ => tree_site_rules(tree),
+    })
+}
+
+fn tree_site_rules(tree: &Tree) -> PrintRules {
+    // A personal job: the site default (what a group without rules inherits).
+    tree.site_print_rules().clone()
+}
+
 fn active_print_on(state: &AppState, printer_id: &str) -> Option<PrintRecord> {
     state.db.list_prints(Some(printer_id), true, 1).into_iter().next()
 }
@@ -193,13 +210,16 @@ async fn job_targets(
     Path(id): Path<String>,
     Query(q): Query<PlateQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let (job, _, _) = visible_job(&state, &user, &id)?;
+    let (job, tree, viewer) = visible_job(&state, &user, &id)?;
     let pkg = printing::package_of(&job).ok_or_else(|| {
         api_err(StatusCode::CONFLICT, "this job has no printable package (re-slice it, or upload a .gcode.3mf)")
     })?;
     let plate = pkg
         .plate(q.plate.unwrap_or(pkg.plates[0].index))
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "no such plate"))?;
+    let needs_approval = rules_for(&tree, &viewer, &job)
+        .map(|r| printing::rule_violations(&r, plate))
+        .unwrap_or_default();
     let targets: Vec<Value> = state
         .db
         .list_printers()
@@ -220,7 +240,7 @@ async fn job_targets(
             })
         })
         .collect();
-    Ok(Json(json!({"plates": pkg.plates, "targets": targets})))
+    Ok(Json(json!({"plates": pkg.plates, "targets": targets, "needs_approval": needs_approval})))
 }
 
 #[derive(Deserialize)]
@@ -245,7 +265,7 @@ async fn send_job(
     Path(id): Path<String>,
     Json(body): Json<SendRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let (job, _, _) = visible_job(&state, &user, &id)?;
+    let (job, tree, viewer) = visible_job(&state, &user, &id)?;
     let pkg = printing::package_of(&job).ok_or_else(|| {
         api_err(StatusCode::CONFLICT, "this job has no printable package (re-slice it, or upload a .gcode.3mf)")
     })?;
@@ -266,20 +286,29 @@ async fn send_job(
     if let Some(why) = printing::incompatibility(&state.profile_store, &printer, &plate) {
         return Err(api_err(StatusCode::CONFLICT, format!("can't print here: {why}")));
     }
-    if let Some(why) = busy_reason(&state, &printer) {
-        return Err(api_err(StatusCode::CONFLICT, why));
-    }
+    let violations = rules_for(&tree, &viewer, &job)
+        .map(|r| printing::rule_violations(&r, &plate))
+        .unwrap_or_default();
+    let reason = (!violations.is_empty()).then(|| violations.join("; "));
+
+    // A request that waits for approval doesn't need the printer now: the
+    // approver's send checks availability and the trays again.
     let status = state.printers.status(&printer.id);
     let mapping = body
         .ams_mapping
         .clone()
         .unwrap_or_else(|| printing::suggest_mapping(&plate, status.as_ref()));
-    let problems = printing::check_mapping(&plate, &mapping, status.as_ref());
-    if !problems.is_empty() && !body.ignore_mapping_problems {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(json!({"error": format!("filament mapping: {}", problems.join("; ")), "problems": problems})),
-        ));
+    if reason.is_none() {
+        if let Some(why) = busy_reason(&state, &printer) {
+            return Err(api_err(StatusCode::CONFLICT, why));
+        }
+        let problems = printing::check_mapping(&plate, &mapping, status.as_ref());
+        if !problems.is_empty() && !body.ignore_mapping_problems {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({"error": format!("filament mapping: {}", problems.join("; ")), "problems": problems})),
+            ));
+        }
     }
 
     let print_id = uuid::Uuid::new_v4().to_string();
@@ -294,7 +323,16 @@ async fn send_job(
         &printing::file_name(&name, &print_id),
         &name,
         &serde_json::to_string(&mapping).expect("mappings serialize"),
+        &serde_json::to_string(&body.options).expect("options serialize"),
+        reason.as_deref(),
     );
+    if let Some(reason) = reason {
+        println!(
+            "Print {}: {} asks to print {} on {}; needs approval: {reason}",
+            print.id, user.username, job.model_name, printer.name
+        );
+        return Ok((StatusCode::ACCEPTED, Json(json!(print))));
+    }
     println!(
         "Print {}: {} sends {} (plate {}) to {}, AMS mapping {:?}",
         print.id, user.username, job.model_name, plate.index, printer.name, mapping
@@ -315,6 +353,11 @@ fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRe
             .is_some_and(|job| viewer.can_see_job(tree, &job))
 }
 
+/// Admins and the managers of the print's group approve requests.
+fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
+    viewer.admin || print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+}
+
 fn can_control_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
     viewer.admin
         || print.user_id.as_deref() == Some(viewer.user.id.as_str())
@@ -324,7 +367,11 @@ fn can_control_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool 
 #[derive(Deserialize)]
 struct PrintsQuery {
     printer: Option<String>,
+    #[serde(default, deserialize_with = "crate::query::flag")]
     active: Option<bool>,
+    /// Only requests waiting for approval, oldest first.
+    #[serde(default, deserialize_with = "crate::query::flag")]
+    pending: Option<bool>,
     limit: Option<i64>,
 }
 
@@ -337,20 +384,26 @@ async fn list_prints(
     Query(q): Query<PrintsQuery>,
 ) -> Json<Value> {
     let (tree, viewer) = groups_api::context(&state, &user);
-    let prints: Vec<Value> = state
-        .db
-        .list_prints(q.printer.as_deref(), q.active.unwrap_or(false), q.limit.unwrap_or(100).clamp(1, 1000))
+    let list = if q.pending.unwrap_or(false) {
+        state.db.pending_prints()
+    } else {
+        state
+            .db
+            .list_prints(q.printer.as_deref(), q.active.unwrap_or(false), q.limit.unwrap_or(100).clamp(1, 1000))
+    };
+    let prints: Vec<Value> = list
         .into_iter()
         .map(|p| {
             if can_see_print(&state, &tree, &viewer, &p) {
                 let mut v = json!(p);
                 v["can_control"] = json!(can_control_print(&tree, &viewer, &p));
+                v["can_approve"] = json!(p.status == "pending_approval" && can_approve_print(&tree, &viewer, &p));
                 v
             } else {
                 json!({
                     "id": p.id, "printer_id": p.printer_id, "printer_name": p.printer_name,
                     "status": p.status, "progress": p.progress, "created_at": p.created_at,
-                    "name": null, "can_control": false,
+                    "name": null, "can_control": false, "can_approve": false,
                 })
             }
         })
@@ -371,7 +424,118 @@ async fn get_print(
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
     let mut v = json!(print);
     v["can_control"] = json!(can_control_print(&tree, &viewer, &print));
+    v["can_approve"] = json!(print.status == "pending_approval" && can_approve_print(&tree, &viewer, &print));
     Ok(Json(v))
+}
+
+/// `POST /api/prints/{id}/approve`: send a print that was waiting for
+/// approval, with the plate, mapping and options it was asked with. The
+/// printer must still fit and be free.
+#[derive(Deserialize, Default)]
+struct ApproveRequest {
+    /// Send even though the stored tray choice no longer matches what's loaded.
+    #[serde(default)]
+    ignore_mapping_problems: bool,
+}
+
+async fn approve_print(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    body: Option<Json<ApproveRequest>>,
+) -> Result<Json<Value>, ApiError> {
+    let body = body.map(|b| b.0).unwrap_or_default();
+    let (tree, viewer) = groups_api::context(&state, &user);
+    let print = state
+        .db
+        .get_print(&id)
+        .filter(|p| can_see_print(&state, &tree, &viewer, p))
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
+    if print.status != "pending_approval" {
+        return Err(api_err(StatusCode::CONFLICT, format!("the print is {}", print.status)));
+    }
+    if !can_approve_print(&tree, &viewer, &print) {
+        return Err(api_err(StatusCode::FORBIDDEN, "only admins and the group's managers approve prints"));
+    }
+    let job = print
+        .job_id
+        .as_deref()
+        .and_then(|j| state.db.get_job(j))
+        .ok_or_else(|| api_err(StatusCode::CONFLICT, "the job is gone"))?;
+    let pkg = printing::package_of(&job).ok_or_else(|| api_err(StatusCode::CONFLICT, "the job has no package"))?;
+    let package_path = job
+        .package_path
+        .clone()
+        .filter(|p| std::path::Path::new(p).exists())
+        .ok_or_else(|| api_err(StatusCode::CONFLICT, "the job's package file is gone"))?;
+    let plate = pkg
+        .plate(print.plate as u32)
+        .ok_or_else(|| api_err(StatusCode::CONFLICT, "the plate is gone"))?
+        .clone();
+    let printer = print
+        .printer_id
+        .as_deref()
+        .and_then(|p| state.db.get_printer(p))
+        .ok_or_else(|| api_err(StatusCode::CONFLICT, "the printer was removed"))?;
+    if let Some(why) = printing::incompatibility(&state.profile_store, &printer, &plate) {
+        return Err(api_err(StatusCode::CONFLICT, format!("can't print there any more: {why}")));
+    }
+    if let Some(why) = busy_reason(&state, &printer) {
+        return Err(api_err(StatusCode::CONFLICT, format!("{why}; approve it when the printer is free")));
+    }
+    let mapping: Vec<i64> = serde_json::from_str(print.ams_mapping.as_deref().unwrap_or("[]")).unwrap_or_default();
+    let options: PrintOptions = serde_json::from_str(print.options.as_deref().unwrap_or("{}")).unwrap_or_default();
+    let problems = printing::check_mapping(&plate, &mapping, state.printers.status(&printer.id).as_ref());
+    if !problems.is_empty() && !body.ignore_mapping_problems {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"error": format!("filament mapping: {}", problems.join("; ")), "problems": problems})),
+        ));
+    }
+    if !state.db.decide_print(&id, true, &user.username, None) {
+        return Err(api_err(StatusCode::CONFLICT, "someone else decided first"));
+    }
+    println!("Print {}: {} approved it; sending to {}", id, user.username, printer.name);
+    let print = state.db.get_print(&id).expect("print exists");
+    printing::spawn_send(state.clone(), print.clone(), package_path, plate, mapping, options);
+    Ok(Json(json!(print)))
+}
+
+#[derive(Deserialize, Default)]
+struct RejectRequest {
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// `POST /api/prints/{id}/reject`: turn a request down (approvers), or
+/// withdraw it (whoever asked).
+async fn reject_print(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    body: Option<Json<RejectRequest>>,
+) -> Result<Json<Value>, ApiError> {
+    let (tree, viewer) = groups_api::context(&state, &user);
+    let print = state
+        .db
+        .get_print(&id)
+        .filter(|p| can_see_print(&state, &tree, &viewer, p))
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
+    let own = print.user_id.as_deref() == Some(user.id.as_str());
+    if !own && !can_approve_print(&tree, &viewer, &print) {
+        return Err(api_err(StatusCode::FORBIDDEN, "only admins and the group's managers decide prints"));
+    }
+    let note = body.and_then(|b| b.0.note).map(|n| n.trim().chars().take(500).collect::<String>());
+    let note = match (own && !can_approve_print(&tree, &viewer, &print), note.filter(|n| !n.is_empty())) {
+        (true, _) => format!("withdrawn by {}", user.username),
+        (false, Some(n)) => format!("rejected by {}: {n}", user.username),
+        (false, None) => format!("rejected by {}", user.username),
+    };
+    if !state.db.decide_print(&id, false, &user.username, Some(&note)) {
+        return Err(api_err(StatusCode::CONFLICT, format!("the print is {}", print.status)));
+    }
+    println!("Print {id}: {note}");
+    Ok(Json(json!(state.db.get_print(&id))))
 }
 
 #[derive(Deserialize)]
@@ -467,5 +631,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/prints", get(list_prints))
         .route("/api/prints/{id}", get(get_print))
         .route("/api/prints/{id}/control", post(control_print))
+        .route("/api/prints/{id}/approve", post(approve_print))
+        .route("/api/prints/{id}/reject", post(reject_print))
         .route("/api/printers/{id}/control", post(control_printer))
 }

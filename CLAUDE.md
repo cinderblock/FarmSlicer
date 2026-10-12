@@ -98,6 +98,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `camera.rs` (on-demand feeds: RTSPS via `retina` behind a local TLS
   proxy → H.264 to the browser's WebCodecs; A1/P1 JPEG on port 6000)
 - `src/printers_api.rs` — printer CRUD (admins), status + SSE events
+- `src/farm_api.rs` — equipment reports, preheat/cooldown; print rules are
+  `groups::PrintRules` (inherited `print_rules`, site setting default),
+  checked in `prints_api::send_job` → `pending_approval` prints
+- `src/query.rs` — `flag`: `?x=1` query booleans
 - `src/overlay.rs` — thumbnail label (inherited group setting
   `thumbnail_label`, `{key}`/`{group}` template) and per-group logos
   (`data/logos/<group>.png`); `resources/fonts/` — the label font (OFL)

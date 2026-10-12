@@ -19,6 +19,22 @@ pub struct Printer {
     pub access_code: String,
     pub status: String,
     pub current_job: Option<String>,
+    /// Where the printer stands ("Bay 1"); the Printers page groups by it.
+    pub area: String,
+}
+
+/// A problem someone reported with a printer.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PrinterReport {
+    pub id: String,
+    pub printer_id: Option<String>,
+    pub printer_name: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub description: String,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub resolved_by: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -81,7 +97,13 @@ pub struct PrintRecord {
     pub name: String,
     /// JSON: the `ams_mapping` sent (tray slot per project filament, -1 unused).
     pub ams_mapping: Option<String>,
-    /// uploading | starting | printing | paused | finished | failed | cancelled
+    /// JSON: the print options (src/printing.rs `PrintOptions`).
+    pub options: Option<String>,
+    /// Why it needs approval (pending_approval), and who decided.
+    pub approval_reason: Option<String>,
+    pub decided_by: Option<String>,
+    /// pending_approval | uploading | starting | printing | paused | finished
+    /// | failed | cancelled | rejected
     pub status: String,
     /// Upload percent while uploading, then print percent.
     pub progress: i64,
@@ -236,7 +258,7 @@ impl Db {
         ).expect("failed to create tables");
 
         // Migrations — add columns that may not exist in older databases
-        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code"] {
+        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code", "area"] {
             if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {
                 conn.execute_batch(
                     &format!("ALTER TABLE printers ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
@@ -409,9 +431,24 @@ impl Db {
                 finished_at TEXT,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS printer_reports (
+                id TEXT PRIMARY KEY,
+                printer_id TEXT REFERENCES printers(id) ON DELETE SET NULL,
+                printer_name TEXT NOT NULL,
+                user_id TEXT,
+                description TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                resolved_at TEXT,
+                resolved_by TEXT
+            );
             CREATE INDEX IF NOT EXISTS prints_printer ON prints(printer_id, status);
             CREATE INDEX IF NOT EXISTS prints_job ON prints(job_id);"
         ).expect("failed to create prints table");
+        for col in &["options", "approval_reason", "decided_by"] {
+            if conn.prepare(&format!("SELECT {col} FROM prints LIMIT 0")).is_err() {
+                conn.execute_batch(&format!("ALTER TABLE prints ADD COLUMN {col} TEXT;")).ok();
+            }
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
              CREATE INDEX IF NOT EXISTS jobs_user ON jobs(user_id);"
@@ -831,7 +868,7 @@ impl Db {
     pub fn list_printers(&self) -> Vec<Printer> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job FROM printers ORDER BY name")
+            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job, area FROM printers ORDER BY name")
             .unwrap();
         stmt.query_map([], |row| {
             Ok(Printer {
@@ -845,6 +882,7 @@ impl Db {
                 access_code: row.get(7)?,
                 status: row.get(8)?,
                 current_job: row.get(9)?,
+                area: row.get(10)?,
             })
         })
         .unwrap()
@@ -861,12 +899,13 @@ impl Db {
         address: &str,
         serial_number: &str,
         access_code: &str,
+        area: &str,
     ) -> Printer {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code],
+            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area],
         )
         .unwrap();
         Printer {
@@ -880,6 +919,7 @@ impl Db {
             access_code: access_code.to_string(),
             status: "offline".to_string(),
             current_job: None,
+            area: area.to_string(),
         }
     }
 
@@ -899,6 +939,7 @@ impl Db {
         address: Option<&str>,
         serial_number: Option<&str>,
         access_code: Option<&str>,
+        area: Option<&str>,
     ) -> Option<Printer> {
         {
             let conn = self.conn.lock().unwrap();
@@ -911,9 +952,10 @@ impl Db {
                         protocol = COALESCE(?5, protocol),
                         address = COALESCE(?6, address),
                         serial_number = COALESCE(?7, serial_number),
-                        access_code = COALESCE(?8, access_code)
+                        access_code = COALESCE(?8, access_code),
+                        area = COALESCE(?9, area)
                      WHERE id = ?1",
-                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code],
+                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area],
                 )
                 .unwrap();
             if n == 0 {
@@ -1142,12 +1184,66 @@ impl Db {
         .unwrap();
     }
 
+    // -- Printer reports --
+
+    pub fn create_printer_report(&self, printer: &Printer, user_id: Option<&str>, description: &str) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO printer_reports (id, printer_id, printer_name, user_id, description) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, printer.id, printer.name, user_id, description],
+        )
+        .unwrap();
+        id
+    }
+
+    /// Newest first; `open` = unresolved only.
+    pub fn list_printer_reports(&self, open: bool) -> Vec<PrinterReport> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT r.id, r.printer_id, r.printer_name, r.user_id, u.username, r.description,
+                        r.created_at, r.resolved_at, r.resolved_by
+                 FROM printer_reports r LEFT JOIN users u ON r.user_id = u.id
+                 WHERE (?1 = 0 OR r.resolved_at IS NULL)
+                 ORDER BY r.created_at DESC, r.rowid DESC LIMIT 500",
+            )
+            .unwrap();
+        stmt.query_map(params![open as i64], |row| {
+            Ok(PrinterReport {
+                id: row.get(0)?,
+                printer_id: row.get(1)?,
+                printer_name: row.get(2)?,
+                user_id: row.get(3)?,
+                username: row.get(4)?,
+                description: row.get(5)?,
+                created_at: row.get(6)?,
+                resolved_at: row.get(7)?,
+                resolved_by: row.get(8)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    pub fn resolve_printer_report(&self, id: &str, by: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE printer_reports SET resolved_at = datetime('now'), resolved_by = ?2 WHERE id = ?1 AND resolved_at IS NULL",
+            params![id, by],
+        )
+        .unwrap()
+            > 0
+    }
+
     // -- Prints --
 
     const PRINT_SELECT: &'static str =
         "SELECT p.id, p.job_id, p.plate, p.printer_id, p.printer_name, p.user_id, u.username,
                 p.group_id, p.file_name, p.name, p.ams_mapping, p.status, p.progress, p.error,
-                p.created_at, p.started_at, p.finished_at, p.updated_at
+                p.created_at, p.started_at, p.finished_at, p.updated_at,
+                p.options, p.approval_reason, p.decided_by
          FROM prints p LEFT JOIN users u ON p.user_id = u.id";
 
     fn print_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintRecord> {
@@ -1170,10 +1266,14 @@ impl Db {
             started_at: row.get(15)?,
             finished_at: row.get(16)?,
             updated_at: row.get(17)?,
+            options: row.get(18)?,
+            approval_reason: row.get(19)?,
+            decided_by: row.get(20)?,
         })
     }
 
-    /// A new print, in status `uploading`.
+    /// A new print: `uploading`, or `pending_approval` when
+    /// `approval_reason` is given.
     #[allow(clippy::too_many_arguments)]
     pub fn create_print(
         &self,
@@ -1186,17 +1286,45 @@ impl Db {
         file_name: &str,
         name: &str,
         ams_mapping: &str,
+        options: &str,
+        approval_reason: Option<&str>,
     ) -> PrintRecord {
+        let status = if approval_reason.is_some() { "pending_approval" } else { "uploading" };
         {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO prints (id, job_id, plate, printer_id, printer_name, user_id, group_id, file_name, name, ams_mapping, status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'uploading')",
-                params![id, job_id, plate, printer.id, printer.name, user_id, group_id, file_name, name, ams_mapping],
+                "INSERT INTO prints (id, job_id, plate, printer_id, printer_name, user_id, group_id, file_name, name, ams_mapping, options, approval_reason, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![id, job_id, plate, printer.id, printer.name, user_id, group_id, file_name, name, ams_mapping, options, approval_reason, status],
             )
             .unwrap();
         }
         self.get_print(id).expect("print just inserted")
+    }
+
+    /// Decide a pending print: approved → `uploading`, else `rejected`
+    /// (with `note`). False if it wasn't pending.
+    pub fn decide_print(&self, id: &str, approve: bool, by: &str, note: Option<&str>) -> bool {
+        let conn = self.conn.lock().unwrap();
+        let (status, finished) = if approve { ("uploading", false) } else { ("rejected", true) };
+        conn.execute(
+            "UPDATE prints SET status = ?2, decided_by = ?3, error = COALESCE(?4, error),
+                    finished_at = CASE WHEN ?5 THEN datetime('now') ELSE finished_at END,
+                    updated_at = datetime('now')
+             WHERE id = ?1 AND status = 'pending_approval'",
+            params![id, status, by, note, finished],
+        )
+        .unwrap()
+            > 0
+    }
+
+    /// Prints waiting for approval, oldest first.
+    pub fn pending_prints(&self) -> Vec<PrintRecord> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!("{} WHERE p.status = 'pending_approval' ORDER BY p.created_at, p.rowid", Self::PRINT_SELECT))
+            .unwrap();
+        stmt.query_map([], Self::print_from_row).unwrap().filter_map(|r| r.ok()).collect()
     }
 
     pub fn get_print(&self, id: &str) -> Option<PrintRecord> {
