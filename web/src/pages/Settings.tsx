@@ -4,7 +4,7 @@ import { errorText, useJson } from "../api";
 import { QuotaRulesEditor } from "../components/Quota";
 import type { Rule } from "../groups";
 import PrintRulesEditor from "../components/PrintRulesEditor";
-import type { PrintRules } from "../printers";
+import type { Prices, PrintRules } from "../printers";
 
 interface SiteSettings {
   season_start: string;
@@ -12,6 +12,7 @@ interface SiteSettings {
   default_guest_quotas: Rule[];
   guest_session_days: number;
   print_rules: PrintRules;
+  filament_prices: Prices;
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -84,12 +85,94 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         <p className="hint">For personal jobs and for groups that set none.</p>
         <PrintRulesEditor rules={s.print_rules ?? {}} onChange={(r) => setS({ ...s, print_rules: r })} />
 
+        <h3>Filament prices</h3>
+        <p className="hint">Per kilogram, for the cost estimates on jobs and prints.</p>
+        <PricesEditor prices={s.filament_prices} onChange={(p) => setS({ ...s, filament_prices: p })} />
+
         <button className="btn-primary" type="submit">
           Save
         </button>
         {saved && <p className="hint">Saved.</p>}
         {error && <p className="login-error">{error}</p>}
       </form>
+    </div>
+  );
+}
+
+function PricesEditor({ prices, onChange }: { prices: Prices; onChange: (p: Prices) => void }) {
+  const [newMaterial, setNewMaterial] = useState("");
+  const rows = Object.entries(prices.per_kg);
+  const setPrice = (material: string, value: number) =>
+    onChange({ ...prices, per_kg: { ...prices.per_kg, [material]: value } });
+  const remove = (material: string) => {
+    const per_kg = { ...prices.per_kg };
+    delete per_kg[material];
+    onChange({ ...prices, per_kg });
+  };
+  return (
+    <div className="prices-editor">
+      <label>
+        Currency symbol
+        <input value={prices.currency} maxLength={8} onChange={(e) => onChange({ ...prices, currency: e.target.value })} />
+      </label>
+      <label>
+        Any other material ({prices.currency}/kg)
+        <input
+          type="number"
+          min={0}
+          step={0.01}
+          value={prices.default_per_kg}
+          onChange={(e) => onChange({ ...prices, default_per_kg: Number(e.target.value) })}
+        />
+      </label>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>{prices.currency}/kg</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([material, price]) => (
+            <tr key={material}>
+              <td>{material}</td>
+              <td>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={price}
+                  onChange={(e) => setPrice(material, Number(e.target.value))}
+                />
+              </td>
+              <td>
+                <button type="button" className="btn-sm" onClick={() => remove(material)}>
+                  Remove
+                </button>
+              </td>
+            </tr>
+          ))}
+          <tr>
+            <td>
+              <input value={newMaterial} placeholder="e.g. PETG-HF" onChange={(e) => setNewMaterial(e.target.value)} />
+            </td>
+            <td colSpan={2}>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={!newMaterial.trim() || newMaterial.trim() in prices.per_kg}
+                onClick={() => {
+                  setPrice(newMaterial.trim(), prices.default_per_kg);
+                  setNewMaterial("");
+                }}
+              >
+                Add material
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }

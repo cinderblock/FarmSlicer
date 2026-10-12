@@ -3,6 +3,7 @@ import { apiJson } from "../auth";
 import { errorText } from "../api";
 import {
   describeState,
+  formatCost,
   formatMinutes,
   loadedTrays,
   slotLabel,
@@ -17,6 +18,8 @@ interface Targets {
   targets: Target[];
   /** Why this plate needs approval for the caller (empty = it doesn't). */
   needs_approval: string[];
+  estimated_cost: number;
+  currency: string;
 }
 
 const OPTION_LABELS: [keyof PrintOptions, string, string][] = [
@@ -174,6 +177,7 @@ export default function SendDialog({
                   {[
                     currentPlate.print_time_sec ? formatMinutes(Math.round(currentPlate.print_time_sec / 60)) : null,
                     currentPlate.weight_g ? `${currentPlate.weight_g.toFixed(1)} g` : null,
+                    `about ${formatCost(data.estimated_cost, data.currency)} of filament`,
                     currentPlate.nozzle_diameters ? `${currentPlate.nozzle_diameters} mm nozzle` : null,
                   ]
                     .filter(Boolean)

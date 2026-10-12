@@ -240,7 +240,14 @@ async fn job_targets(
             })
         })
         .collect();
-    Ok(Json(json!({"plates": pkg.plates, "targets": targets, "needs_approval": needs_approval})))
+    let prices = crate::cost::Prices::load(&state.db);
+    Ok(Json(json!({
+        "plates": pkg.plates,
+        "targets": targets,
+        "needs_approval": needs_approval,
+        "estimated_cost": prices.plate(plate),
+        "currency": prices.currency,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -384,6 +391,7 @@ async fn list_prints(
     Query(q): Query<PrintsQuery>,
 ) -> Json<Value> {
     let (tree, viewer) = groups_api::context(&state, &user);
+    let prices = crate::cost::Prices::load(&state.db);
     let list = if q.pending.unwrap_or(false) {
         state.db.pending_prints()
     } else {
@@ -396,6 +404,12 @@ async fn list_prints(
         .map(|p| {
             if can_see_print(&state, &tree, &viewer, &p) {
                 let mut v = json!(p);
+                v["estimated_cost"] = json!(p
+                    .job_id
+                    .as_deref()
+                    .and_then(|j| state.db.get_job(j))
+                    .and_then(|job| printing::package_of(&job))
+                    .and_then(|pkg| pkg.plate(p.plate as u32).map(|pl| prices.plate(pl))));
                 v["can_control"] = json!(can_control_print(&tree, &viewer, &p));
                 v["can_approve"] = json!(p.status == "pending_approval" && can_approve_print(&tree, &viewer, &p));
                 v

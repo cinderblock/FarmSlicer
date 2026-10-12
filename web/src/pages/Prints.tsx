@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiJson } from "../auth";
 import { errorText, localDateTime, useJson } from "../api";
 import PrintControls from "../components/PrintControls";
-import { ACTIVE_PRINT, type PrintRecord } from "../printers";
+import { ACTIVE_PRINT, formatCost, type Prices, type PrintRecord } from "../printers";
 
 const STATUS_LABELS: Record<PrintRecord["status"], string> = {
   pending_approval: "Waiting for approval",
@@ -20,6 +20,7 @@ const STATUS_LABELS: Record<PrintRecord["status"], string> = {
 export default function PrintsPage() {
   const [rev, setRev] = useState(0);
   const prints = useJson<PrintRecord[]>("/api/prints?limit=200", rev).data;
+  const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
   const [error, setError] = useState("");
 
   // Poll while anything is in flight or waiting.
@@ -65,6 +66,7 @@ export default function PrintsPage() {
               <th>By</th>
               <th>Status</th>
               <th>Progress</th>
+              <th title="Filament at the farm's prices">Cost</th>
               <th>Sent</th>
               <th>Ended</th>
               <th></th>
@@ -110,6 +112,7 @@ export default function PrintsPage() {
                     `${p.progress}%`
                   )}
                 </td>
+                <td>{formatCost(p.estimated_cost, currency)}</td>
                 <td>{localDateTime(p.created_at)}</td>
                 <td>{localDateTime(p.finished_at)}</td>
                 <td>

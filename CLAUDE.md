@@ -102,6 +102,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `groups::PrintRules` (inherited `print_rules`, site setting default),
   checked in `prints_api::send_job` → `pending_approval` prints
 - `src/query.rs` — `flag`: `?x=1` query booleans
+- `src/cost.rs` — filament cost estimates (site setting `filament_prices`)
+- `src/printer_thumbs.rs` — job pictures for printer cards (package, or the
+  project fetched over FTPS from the printer's `/cache/` or `/`)
 - `src/overlay.rs` — thumbnail label (inherited group setting
   `thumbnail_label`, `{key}`/`{group}` template) and per-group logos
   (`data/logos/<group>.png`); `resources/fonts/` — the label font (OFL)

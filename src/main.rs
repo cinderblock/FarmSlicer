@@ -1,5 +1,6 @@
 mod auth;
 mod auth_api;
+mod cost;
 mod bambu;
 mod db;
 mod discovery;

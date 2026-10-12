@@ -407,8 +407,23 @@ async fn list_jobs(
     Query(q): Query<JobQuery>,
 ) -> Json<Value> {
     let (tree, viewer) = groups_api::context(&state, &user);
-    let jobs = state.db.list_jobs_filtered(&job_filter(&tree, &viewer, &q));
+    let prices = crate::cost::Prices::load(&state.db);
+    let jobs: Vec<Value> = state
+        .db
+        .list_jobs_filtered(&job_filter(&tree, &viewer, &q))
+        .into_iter()
+        .map(|job| {
+            let mut v = json!(job);
+            v["estimated_cost"] = json!(prices.job(&job));
+            v
+        })
+        .collect();
     Json(json!(jobs))
+}
+
+/// `GET /api/prices`: currency and price per kg (for showing estimates).
+async fn get_prices(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!(crate::cost::Prices::load(&state.db)))
 }
 
 /// A job the caller may see, or 404.
@@ -1159,6 +1174,7 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .delete(delete_custom_profile),
         )
         .route("/api/status", get(server_status))
+        .route("/api/prices", get(get_prices))
         .route("/api/jobs", get(list_jobs).post(create_job))
         .route("/api/jobs/{id}", axum::routing::put(update_job))
         .route("/api/jobs/{id}/model", get(download_model))

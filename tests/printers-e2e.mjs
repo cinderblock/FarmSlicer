@@ -152,6 +152,20 @@ r = await user.form(`/api/jobs/${browserJob}/result`, {
 check(r.status === 200 && r.json.status === "done", "the browser result is filed", json(r));
 check(JSON.parse(r.json.package_json ?? "null")?.plates?.length === 1, "the uploaded package makes the job sendable", r.json.package_json);
 
+// ---- cost estimates -----------------------------------------------------------------
+r = await user.get("/api/prices");
+check(r.status === 200 && r.json.currency === "$" && r.json.per_kg.PLA === 19.99, "default filament prices", json(r));
+r = await user.get("/api/jobs");
+check(r.json.find((j) => j.id === jobId)?.estimated_cost === 0.25, "12.5 g of PLA costs about $0.25", json(r));
+r = await owner.call("PUT", "/api/settings", { filament_prices: { currency: "€", per_kg: { PLA: 40 }, default_per_kg: 30 } });
+check(r.status === 200 && r.json.filament_prices.currency === "€", "admins set prices", json(r));
+r = await user.get(`/api/jobs/${jobId}/targets`);
+check(r.json.estimated_cost === 0.5 && r.json.currency === "€", "the send dialog gets the estimate", json(r));
+r = await owner.call("PUT", "/api/settings", { filament_prices: { currency: "$", per_kg: { PLA: -1 }, default_per_kg: 1 } });
+check(r.status === 400, "negative prices are refused", json(r));
+r = await user.call("PUT", "/api/settings", { filament_prices: { currency: "$", per_kg: {}, default_per_kg: 1 } });
+check(r.status === 403, "only admins set prices", json(r));
+
 // ---- areas, equipment reports, pre-heating --------------------------------------------
 r = await owner.patch(`/api/printers/${id}`, { area: " Bay 1 " });
 check(r.status === 200 && r.json.area === "Bay 1", "printers have an area", json(r));

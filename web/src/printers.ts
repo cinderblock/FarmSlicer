@@ -16,6 +16,17 @@ export interface Printer {
   area: string;
 }
 
+/** Filament prices (site setting; src/cost.rs). */
+export interface Prices {
+  currency: string;
+  per_kg: Record<string, number>;
+  default_per_kg: number;
+}
+
+export function formatCost(cost: number | null | undefined, currency = "$"): string {
+  return cost == null ? "—" : `${currency}${cost.toFixed(2)}`;
+}
+
 /** Limits on prints sent without approval (src/groups.rs `PrintRules`). */
 export interface PrintRules {
   max_minutes?: number;
@@ -223,6 +234,7 @@ export interface PrintRecord {
   updated_at: string;
   can_control: boolean;
   can_approve: boolean;
+  estimated_cost?: number | null;
 }
 
 export const ACTIVE_PRINT = ["uploading", "starting", "printing", "paused"];

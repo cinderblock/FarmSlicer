@@ -555,6 +555,16 @@ body {
 .print-pending_approval { background: #3a331e; color: var(--warning); }
 .print-rejected { background: #2a2a3e; color: var(--text-dim); }
 
+.prices-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.prices-editor td input {
+  width: 8rem;
+}
+
 .rules-editor,
 .rules-setting {
   display: flex;

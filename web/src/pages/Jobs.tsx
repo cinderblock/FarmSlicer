@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
+import { formatCost, type Prices } from "../printers";
 
 interface Job {
   id: string;
@@ -25,6 +26,7 @@ interface Job {
   group_name: string | null;
   /** The printable package's contents (JSON); set = can be sent to a printer. */
   package_json: string | null;
+  estimated_cost: number | null;
 }
 
 function hasThumbnail(job: Job): boolean {
@@ -72,6 +74,7 @@ export default function JobsPage() {
   const navigate = useNavigate();
   const jobs = useJson<Job[]>("/api/jobs", rev).data ?? [];
   const chargeable = useJson<{ chargeable: { id: string; path: string }[] }>("/api/me").data?.chargeable ?? [];
+  const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
 
   const upload = async (file: File) => {
     setError("");
@@ -172,6 +175,7 @@ export default function JobsPage() {
               <th>Sliced on</th>
               <th>Printer</th>
               <th>Time</th>
+              <th title="Filament at the farm's prices (Settings)">Cost</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -235,6 +239,7 @@ export default function JobsPage() {
                   <td>
                     {job.print_time_sec ? formatTime(job.print_time_sec) : "—"}
                   </td>
+                  <td>{job.status === "done" ? formatCost(job.estimated_cost, currency) : "—"}</td>
                   <td>
                     {job.status === "done" && job.package_json && (
                       <button className="btn-sm" onClick={() => setSending(job)}>

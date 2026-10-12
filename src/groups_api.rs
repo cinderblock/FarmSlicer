@@ -661,6 +661,7 @@ fn settings_json(state: &AppState) -> Value {
         "default_guest_quotas": quota::site_default_rules(&state.db, "guest"),
         "guest_session_days": guest_session_days(state),
         "print_rules": groups::PrintRules::site_default(&state.db),
+        "filament_prices": crate::cost::Prices::load(&state.db),
     })
 }
 
@@ -685,6 +686,9 @@ struct UpdateSettings {
     /// Rules for personal jobs and groups that set none.
     #[serde(default)]
     print_rules: Option<groups::PrintRules>,
+    /// Currency and price per kg by material, for cost estimates.
+    #[serde(default)]
+    filament_prices: Option<crate::cost::Prices>,
 }
 
 async fn update_settings(
@@ -719,6 +723,10 @@ async fn update_settings(
     if let Some(r) = &body.print_rules {
         r.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
         state.db.set_setting("print_rules", Some(&serde_json::to_string(r).unwrap()));
+    }
+    if let Some(p) = &body.filament_prices {
+        p.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+        state.db.set_setting("filament_prices", Some(&serde_json::to_string(p).unwrap()));
     }
     Ok(Json(settings_json(&state)))
 }
