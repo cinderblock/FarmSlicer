@@ -11,10 +11,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::db::Db;
 use crate::discovery;
 use crate::profiles::ProfileStore;
+use crate::progress;
 use crate::slicer;
 
 struct SlicerHandle(UniquePtr<slicer::Slicer>);
@@ -23,7 +25,7 @@ unsafe impl Send for SlicerHandle {}
 unsafe impl Sync for SlicerHandle {}
 
 pub struct AppState {
-    pub db: Db,
+    pub db: Arc<Db>,
     pub data_dir: std::path::PathBuf,
     slicer: Mutex<SlicerHandle>,
     pub profile_store: ProfileStore,
@@ -34,7 +36,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(
-        db: Db,
+        db: Arc<Db>,
         data_dir: std::path::PathBuf,
         slicer: UniquePtr<slicer::Slicer>,
         profile_store: ProfileStore,
@@ -150,6 +152,22 @@ async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<V
 
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+/// Load information the Slice page uses to suggest where to compute.
+async fn server_status(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let jobs = state.db.list_jobs();
+    let server_active = jobs
+        .iter()
+        .filter(|j| j.source == "server" && matches!(j.status.as_str(), "queued" | "slicing"))
+        .count();
+    let browser_engine = std::path::Path::new("dist/web/wasm/manifest.json").exists();
+    Json(json!({
+        "server_active_jobs": server_active,
+        "slicer_busy": server_active > 0,
+        "cpus": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+        "browser_engine_available": browser_engine,
+    }))
 }
 
 // -- Profiles --
@@ -479,6 +497,11 @@ async fn create_job(
     let mut process_profile = String::new();
     let mut filament_profile = String::new();
     let mut overrides_str = String::new();
+    // "server" (default): the model is uploaded and sliced here.
+    // "browser": the client slices with the WebAssembly engine and only
+    // uploads the G-code (POST /api/jobs/{id}/result); the model never
+    // leaves the user's machine.
+    let mut source = "server".to_string();
 
     while let Some(field) = multipart
         .next_field()
@@ -532,14 +555,37 @@ async fn create_job(
             "overrides" => {
                 overrides_str = field.text().await.unwrap_or_default();
             }
+            "source" => {
+                source = field.text().await.unwrap_or_default();
+            }
+            "model_name" => {
+                // Browser jobs send the file name only.
+                let val = field.text().await.unwrap_or_default();
+                if model_name.is_empty() {
+                    model_name = val;
+                }
+            }
             _ => {}
         }
     }
 
-    if model_path.is_empty() {
+    if !matches!(source.as_str(), "server" | "browser") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "source must be 'server' or 'browser'"})),
+        ));
+    }
+
+    if source == "server" && model_path.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No model file provided"})),
+        ));
+    }
+    if source == "browser" && model_name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "model_name is required for browser jobs"})),
         ));
     }
 
@@ -580,14 +626,24 @@ async fn create_job(
         Some(overrides_str)
     };
 
-    let job = state.db.create_job(
+    let mut job = state.db.create_job(
         &model_name,
         &model_path,
         printer_id.as_deref(),
         &routing,
         Some(&config_json),
         overrides_json.as_deref(),
+        &source,
     );
+
+    if source == "browser" {
+        // The client owns the slicing; the job just tracks it.
+        state.db.update_job_status(&job.id, "slicing", 0);
+        state.db.update_job_progress(&job.id, 0, "Slicing in browser");
+        job.status = "slicing".to_string();
+        job.progress_message = Some("Slicing in browser".to_string());
+        return Ok((StatusCode::CREATED, Json(json!(job))));
+    }
 
     let job_id = job.id.clone();
     let state_clone = state.clone();
@@ -599,46 +655,94 @@ async fn create_job(
     Ok((StatusCode::CREATED, Json(json!(job))))
 }
 
-fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json: &str) {
-    state.db.update_job_status(job_id, "slicing", 10);
-
+fn gcode_output_path(state: &AppState, job_id: &str) -> String {
     let gcode_dir = state.data_dir.join("gcode");
     std::fs::create_dir_all(&gcode_dir).ok();
-    let output_path = gcode_dir
+    gcode_dir
         .join(format!("{job_id}.gcode"))
         .to_string_lossy()
-        .to_string();
+        .to_string()
+}
 
-    let result = {
-        let handle = state.slicer.lock().unwrap();
-        handle.0.slice(model_path, config_json, &output_path)
+/// Record a finished slice: job row, slice-library row.
+fn finish_job(
+    state: &AppState,
+    job_id: &str,
+    gcode_path: &str,
+    print_time_sec: f64,
+    filament_used_g: f64,
+    warnings: &[String],
+) {
+    let file_size = std::fs::metadata(gcode_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+    let warnings_json = if warnings.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(warnings).unwrap())
     };
+    state.db.complete_job(
+        job_id,
+        gcode_path,
+        print_time_sec,
+        filament_used_g,
+        warnings_json.as_deref(),
+    );
+    if let Some(job) = state.db.get_job(job_id) {
+        state.db.create_slice(
+            job_id,
+            &job.model_name,
+            gcode_path,
+            print_time_sec,
+            filament_used_g,
+            file_size,
+        );
+    }
+}
+
+fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json: &str) {
+    // One slice at a time: wait for the engine before leaving "queued".
+    let handle = state.slicer.lock().unwrap();
+
+    // Cancelled while waiting in the queue? Then don't start.
+    match state.db.get_job(job_id) {
+        Some(job) if job.status == "queued" => {}
+        _ => {
+            progress::clear(job_id);
+            return;
+        }
+    }
+    state.db.update_job_status(job_id, "slicing", 0);
+
+    let output_path = gcode_output_path(state, job_id);
+    let result = handle.0.slice(job_id, model_path, config_json, &output_path);
+    drop(handle);
+    progress::clear(job_id);
+
+    let warnings: Vec<String> = result.warnings.iter().map(|w| w.to_string()).collect();
+    for w in &warnings {
+        println!("job {job_id}: slicer warning: {w}");
+    }
 
     if result.success {
-        let file_size = std::fs::metadata(&result.gcode_path)
-            .map(|m| m.len() as i64)
-            .unwrap_or(0);
-
-        state.db.complete_job(
+        finish_job(
+            state,
             job_id,
             &result.gcode_path,
             result.print_time_sec,
             result.filament_used_g,
+            &warnings,
         );
-
-        let job = state.db.list_jobs().into_iter().find(|j| j.id == job_id);
-        if let Some(job) = job {
-            state.db.create_slice(
-                job_id,
-                &job.model_name,
-                &result.gcode_path,
-                result.print_time_sec,
-                result.filament_used_g,
-                file_size,
-            );
-        }
+        println!(
+            "job {job_id}: sliced OK ({} layers, {:.0} s, {:.1} g)",
+            result.layer_count, result.print_time_sec, result.filament_used_g
+        );
+    } else if result.cancelled {
+        state.db.cancel_job(job_id);
+        println!("job {job_id}: cancelled");
     } else {
         state.db.fail_job(job_id, &result.error);
+        println!("job {job_id}: failed: {}", result.error);
     }
 }
 
@@ -646,10 +750,142 @@ async fn cancel_job(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> StatusCode {
+    // Flag first so a running slice stops at its next checkpoint; the DB row
+    // flips to "cancelled" here (queued/slicing only) and run_slice confirms.
+    progress::request_cancel(&id);
     if state.db.cancel_job(&id) {
         StatusCode::OK
     } else {
+        progress::clear(&id);
         StatusCode::NOT_FOUND
+    }
+}
+
+// -- Browser-sourced jobs --
+
+#[derive(Deserialize)]
+struct ProgressUpdate {
+    percent: i32,
+    message: Option<String>,
+}
+
+/// Progress tick from the browser engine.
+async fn update_job_progress(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ProgressUpdate>,
+) -> StatusCode {
+    match state.db.get_job(&id) {
+        Some(job) if job.source != "browser" => StatusCode::BAD_REQUEST,
+        Some(job) if job.status == "slicing" => {
+            state
+                .db
+                .update_job_progress(&id, body.percent, body.message.as_deref().unwrap_or(""));
+            StatusCode::OK
+        }
+        // Cancelled or finished: tell the client to stop.
+        Some(_) => StatusCode::CONFLICT,
+        None => StatusCode::NOT_FOUND,
+    }
+}
+
+/// The browser engine finished: receive the G-code and the statistics it
+/// computed, and file them exactly like a server-sliced job.
+async fn upload_job_result(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let err = |code: StatusCode, msg: &str| (code, Json(json!({"error": msg})));
+
+    let Some(job) = state.db.get_job(&id) else {
+        return Err(err(StatusCode::NOT_FOUND, "job not found"));
+    };
+    if job.source != "browser" {
+        return Err(err(StatusCode::BAD_REQUEST, "not a browser job"));
+    }
+    if job.status != "slicing" {
+        return Err(err(StatusCode::CONFLICT, &format!("job is {}", job.status)));
+    }
+
+    let mut gcode: Option<axum::body::Bytes> = None;
+    let mut print_time_sec = 0.0_f64;
+    let mut filament_used_g = 0.0_f64;
+    let mut warnings: Vec<String> = Vec::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_string();
+        match name.as_str() {
+            "gcode" => {
+                gcode = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?,
+                );
+            }
+            "print_time_sec" => {
+                print_time_sec = field.text().await.ok().and_then(|t| t.parse().ok()).unwrap_or(0.0);
+            }
+            "filament_used_g" => {
+                filament_used_g = field.text().await.ok().and_then(|t| t.parse().ok()).unwrap_or(0.0);
+            }
+            "warnings" => {
+                if let Ok(text) = field.text().await {
+                    warnings = serde_json::from_str(&text).unwrap_or_default();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let Some(gcode) = gcode else {
+        return Err(err(StatusCode::BAD_REQUEST, "no gcode field"));
+    };
+    if gcode.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "empty gcode"));
+    }
+
+    let output_path = gcode_output_path(&state, &id);
+    std::fs::write(&output_path, &gcode)
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
+    println!(
+        "job {id}: browser slice uploaded ({} bytes, {:.0} s, {:.1} g)",
+        gcode.len(),
+        print_time_sec,
+        filament_used_g
+    );
+
+    let job = state.db.get_job(&id).unwrap();
+    Ok(Json(json!(job)))
+}
+
+#[derive(Deserialize)]
+struct FailRequest {
+    error: String,
+}
+
+/// The browser engine failed.
+async fn fail_job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<FailRequest>,
+) -> StatusCode {
+    match state.db.get_job(&id) {
+        Some(job) if job.source != "browser" => StatusCode::BAD_REQUEST,
+        Some(job) if job.status == "slicing" => {
+            state.db.fail_job(&id, &body.error);
+            println!("job {id}: browser slice failed: {}", body.error);
+            StatusCode::OK
+        }
+        Some(_) => StatusCode::CONFLICT,
+        None => StatusCode::NOT_FOUND,
     }
 }
 
@@ -722,11 +958,15 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .put(update_custom_profile)
                 .delete(delete_custom_profile),
         )
+        .route("/api/status", get(server_status))
         .route("/api/jobs", get(list_jobs).post(create_job))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
+        .route("/api/jobs/{id}/progress", post(update_job_progress))
+        .route("/api/jobs/{id}/result", post(upload_job_result))
+        .route("/api/jobs/{id}/fail", post(fail_job))
         .route("/api/slices", get(list_slices))
         .route("/api/slices/{id}/download", get(download_gcode))
-        .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 
@@ -734,5 +974,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .append_index_html_on_directories(true)
         .fallback(tower_http::services::ServeFile::new("dist/web/index.html"));
 
-    public.merge(protected).fallback_service(static_files)
+    public
+        .merge(protected)
+        .fallback_service(static_files)
+        // Cross-origin isolation: the multithreaded WebAssembly engine needs
+        // SharedArrayBuffer, which browsers only enable on isolated pages.
+        // Every asset is same-origin, so require-corp costs nothing.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::HeaderName::from_static("cross-origin-opener-policy"),
+            header::HeaderValue::from_static("same-origin"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::HeaderName::from_static("cross-origin-embedder-policy"),
+            header::HeaderValue::from_static("require-corp"),
+        ))
 }

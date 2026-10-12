@@ -37,6 +37,14 @@ pub struct Job {
     pub error: Option<String>,
     pub config_json: Option<String>,
     pub overrides_json: Option<String>,
+    /// Current slicing step, e.g. "Generating perimeters".
+    pub progress_message: Option<String>,
+    /// JSON array of non-fatal slicer messages.
+    pub warnings: Option<String>,
+    /// Where the slicing ran: "server" (libslic3r in this process) or
+    /// "browser" (the WebAssembly engine in the user's browser, G-code
+    /// uploaded afterwards).
+    pub source: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -120,12 +128,17 @@ impl Db {
                 ).ok();
             }
         }
-        for col in &["config_json", "overrides_json"] {
+        for col in &["config_json", "overrides_json", "progress_message", "warnings"] {
             if conn.prepare(&format!("SELECT {col} FROM jobs LIMIT 0")).is_err() {
                 conn.execute_batch(
                     &format!("ALTER TABLE jobs ADD COLUMN {col} TEXT;")
                 ).ok();
             }
+        }
+        if conn.prepare("SELECT source FROM jobs LIMIT 0").is_err() {
+            conn.execute_batch(
+                "ALTER TABLE jobs ADD COLUMN source TEXT NOT NULL DEFAULT 'server';"
+            ).ok();
         }
 
         conn.execute_batch(
@@ -209,42 +222,58 @@ impl Db {
 
     // -- Jobs --
 
+    const JOB_SELECT: &'static str =
+        "SELECT j.id, j.model_name, j.model_path, j.status, j.progress,
+                j.printer_id, p.name, j.routing, j.gcode_path,
+                j.print_time_sec, j.filament_used_g, j.error,
+                j.config_json, j.overrides_json,
+                j.progress_message, j.warnings, j.source,
+                j.created_at, j.updated_at
+         FROM jobs j LEFT JOIN printers p ON j.printer_id = p.id";
+
+    fn job_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
+        Ok(Job {
+            id: row.get(0)?,
+            model_name: row.get(1)?,
+            model_path: row.get(2)?,
+            status: row.get(3)?,
+            progress: row.get(4)?,
+            printer_id: row.get(5)?,
+            printer_name: row.get(6)?,
+            routing: row.get(7)?,
+            gcode_path: row.get(8)?,
+            print_time_sec: row.get(9)?,
+            filament_used_g: row.get(10)?,
+            error: row.get(11)?,
+            config_json: row.get(12)?,
+            overrides_json: row.get(13)?,
+            progress_message: row.get(14)?,
+            warnings: row.get(15)?,
+            source: row.get(16)?,
+            created_at: row.get(17)?,
+            updated_at: row.get(18)?,
+        })
+    }
+
     pub fn list_jobs(&self) -> Vec<Job> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare(
-                "SELECT j.id, j.model_name, j.model_path, j.status, j.progress,
-                        j.printer_id, p.name, j.routing, j.gcode_path,
-                        j.print_time_sec, j.filament_used_g, j.error,
-                        j.config_json, j.overrides_json,
-                        j.created_at, j.updated_at
-                 FROM jobs j LEFT JOIN printers p ON j.printer_id = p.id
-                 ORDER BY j.created_at DESC",
-            )
+            .prepare(&format!("{} ORDER BY j.created_at DESC", Self::JOB_SELECT))
             .unwrap();
-        stmt.query_map([], |row| {
-            Ok(Job {
-                id: row.get(0)?,
-                model_name: row.get(1)?,
-                model_path: row.get(2)?,
-                status: row.get(3)?,
-                progress: row.get(4)?,
-                printer_id: row.get(5)?,
-                printer_name: row.get(6)?,
-                routing: row.get(7)?,
-                gcode_path: row.get(8)?,
-                print_time_sec: row.get(9)?,
-                filament_used_g: row.get(10)?,
-                error: row.get(11)?,
-                config_json: row.get(12)?,
-                overrides_json: row.get(13)?,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
-            })
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect()
+        stmt.query_map([], Self::job_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_job(&self, id: &str) -> Option<Job> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("{} WHERE j.id = ?1", Self::JOB_SELECT),
+            params![id],
+            Self::job_from_row,
+        )
+        .ok()
     }
 
     pub fn create_job(
@@ -255,12 +284,14 @@ impl Db {
         routing: &str,
         config_json: Option<&str>,
         overrides_json: Option<&str>,
+        source: &str,
     ) -> Job {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, model_name, model_path, printer_id, routing, config_json, overrides_json],
+            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source],
         )
         .unwrap();
         let created_at: String = conn
@@ -281,6 +312,9 @@ impl Db {
             error: None,
             config_json: config_json.map(String::from),
             overrides_json: overrides_json.map(String::from),
+            progress_message: None,
+            warnings: None,
+            source: source.to_string(),
             created_at: created_at.clone(),
             updated_at: created_at,
         }
@@ -295,19 +329,32 @@ impl Db {
         .unwrap();
     }
 
+    /// Progress tick from the slicer (server or browser). Only touches jobs
+    /// that are still running so a late tick can't resurrect a finished job.
+    pub fn update_job_progress(&self, id: &str, progress: i32, message: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET progress = ?2, progress_message = ?3, updated_at = datetime('now')
+             WHERE id = ?1 AND status IN ('queued', 'slicing')",
+            params![id, progress, message],
+        )
+        .unwrap();
+    }
+
     pub fn complete_job(
         &self,
         id: &str,
         gcode_path: &str,
         print_time_sec: f64,
         filament_used_g: f64,
+        warnings: Option<&str>,
     ) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE jobs SET status = 'done', progress = 100, gcode_path = ?2,
-             print_time_sec = ?3, filament_used_g = ?4, updated_at = datetime('now')
+            "UPDATE jobs SET status = 'done', progress = 100, progress_message = NULL, gcode_path = ?2,
+             print_time_sec = ?3, filament_used_g = ?4, warnings = ?5, updated_at = datetime('now')
              WHERE id = ?1",
-            params![id, gcode_path, print_time_sec, filament_used_g],
+            params![id, gcode_path, print_time_sec, filament_used_g, warnings],
         )
         .unwrap();
     }

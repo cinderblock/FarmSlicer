@@ -1,6 +1,7 @@
 mod db;
 mod discovery;
 mod profiles;
+mod progress;
 mod server;
 mod slicer;
 
@@ -16,11 +17,23 @@ async fn main() {
         .unwrap_or(9337);
 
     let data_dir = PathBuf::from("data");
-    let db = db::Db::open(&data_dir);
+    let db = Arc::new(db::Db::open(&data_dir));
 
-    let slicer = slicer::new_slicer();
-    let profiles_dir = PathBuf::from("extern/OrcaSlicer/resources/profiles");
-    let profile_store = profiles::ProfileStore::load(&profiles_dir);
+    // libslic3r progress ticks land in the jobs table so the UI can poll them.
+    {
+        let db = db.clone();
+        progress::install_sink(Box::new(move |job_id, percent, message| {
+            db.update_job_progress(job_id, percent, message);
+        }));
+    }
+
+    // OrcaSlicer's resources/ tree: profiles for us, nozzle/flush tables for
+    // libslic3r. Overridable so the container can mount it elsewhere.
+    let resources_dir = std::env::var("ORCA_RESOURCES_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("extern/OrcaSlicer/resources"));
+    let slicer = slicer::new_slicer(&resources_dir.to_string_lossy());
+    let profile_store = profiles::ProfileStore::load(&resources_dir.join("profiles"));
 
     let discovered = Arc::new(Mutex::new(HashMap::new()));
 

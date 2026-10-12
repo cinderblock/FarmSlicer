@@ -1,16 +1,25 @@
 use std::path::PathBuf;
 
 fn main() {
+    // Typecheck-only builds (e.g. `cargo check` on a machine without the
+    // OrcaSlicer toolchain): skip the C++ bridge. Linking will fail, checking won't.
+    if std::env::var_os("FARMSLICER_SKIP_CXX").is_some() {
+        println!("cargo:rerun-if-env-changed=FARMSLICER_SKIP_CXX");
+        return;
+    }
+
     let orca_dir = PathBuf::from("extern/OrcaSlicer");
     let deps_prefix = orca_dir.join("deps/build/OrcaSlicer_dep/usr/local");
     let orca_build = orca_dir.join("build");
 
     let is_windows = cfg!(target_os = "windows");
 
-    // Build the cxx bridge + nanosvg implementation
+    // Build the cxx bridge, the shared slicing pipeline and the nanosvg
+    // implementation shim.
     let mut build = cxx_build::bridge("src/slicer.rs");
     build
         .file("cxx/slicer_bridge.cpp")
+        .file("cxx/slice_core.cpp")
         .file("cxx/nanosvg_impl.cpp")
         .std("c++17")
         .include(".")
@@ -107,6 +116,8 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=cxx/slicer_bridge.h");
+    println!("cargo:rerun-if-changed=cxx/slice_core.hpp");
+    println!("cargo:rerun-if-changed=cxx/slice_core.cpp");
     println!("cargo:rerun-if-changed=cxx/slicer_bridge.cpp");
     println!("cargo:rerun-if-changed=src/slicer.rs");
 }
@@ -239,7 +250,7 @@ fn link_linux_libs() {
     for lib in &[
         "expat", "draco", "libnoise_static", "nlopt", "gmp", "mpfr",
         "openvdb", "blosc", "Half-2_5", "Iex-2_5", "IlmThread-2_5",
-        "Imath-2_5", "freetype", "fontconfig",
+        "Imath-2_5", "freetype",
     ] {
         println!("cargo:rustc-link-arg=-l{lib}");
     }
@@ -269,6 +280,11 @@ fn link_linux_libs() {
 
     println!("cargo:rustc-link-arg=-Wl,--end-group");
     println!("cargo:rustc-link-arg=-Wl,-Bdynamic");
+
+    // fontconfig is a system library (libslic3r links it for text shapes on
+    // Linux). Link it by soname so the build works with only the runtime
+    // package installed (no libfontconfig1-dev, no static archive).
+    println!("cargo:rustc-link-arg=-l:libfontconfig.so.1");
 
     // System / dynamic libraries (outside the group)
     for sys_lib in &["pthread", "dl", "m", "rt", "stdc++"] {
