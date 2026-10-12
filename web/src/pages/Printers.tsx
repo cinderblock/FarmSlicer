@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
 import { useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
-import { usePrinterStatuses, type Printer } from "../printers";
+import { useActivePrints, usePrinterStatuses, type Printer } from "../printers";
 
 interface MachineModel {
   name: string;
@@ -61,6 +61,7 @@ export default function PrintersPage() {
   const modelsData = useJson<MachineModel[]>("/api/profiles/machine-models").data;
   const models = useMemo(() => modelsData ?? [], [modelsData]);
   const statuses = usePrinterStatuses();
+  const activePrints = useActivePrints();
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState("");
@@ -390,6 +391,8 @@ export default function PrintersPage() {
               key={printer.id}
               printer={printer}
               status={statuses[printer.id]}
+              print={activePrints[printer.id]}
+              isAdmin={isAdmin}
               actions={
                 isAdmin && (
                   <>

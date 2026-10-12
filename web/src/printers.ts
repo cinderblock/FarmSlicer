@@ -128,3 +128,110 @@ export function formatMinutes(min: number): string {
   const m = min % 60;
   return h > 0 ? `${h} h ${m} min` : `${m} min`;
 }
+
+// ---- sending and prints (src/prints_api.rs, src/printing.rs) ----------------------
+
+export interface FilamentUse {
+  /** 1-based project filament number; ams_mapping index + 1. */
+  id: number;
+  material: string;
+  color: string;
+  filament_id: string;
+  used_g: number;
+  used_m: number;
+}
+
+export interface Plate {
+  index: number;
+  printer_model_id: string | null;
+  nozzle_diameters: string | null;
+  print_time_sec: number | null;
+  weight_g: number | null;
+  filaments: FilamentUse[];
+  has_thumbnail: boolean;
+  gcode_md5: string;
+}
+
+export interface Target {
+  printer_id: string;
+  name: string;
+  machine_profile: string;
+  nozzle_diameter: string;
+  /** Why the plate can't print here; null = it fits. */
+  incompatible: string | null;
+  /** Why the printer can't take it now; null = free. */
+  busy: string | null;
+  ams_mapping: number[];
+  problems: string[];
+  status: PrinterStatus | null;
+}
+
+export interface PrintOptions {
+  bed_leveling: boolean;
+  flow_calibration: boolean;
+  vibration_calibration: boolean;
+  timelapse: boolean;
+  layer_inspect: boolean;
+}
+
+export interface PrintRecord {
+  id: string;
+  job_id: string | null;
+  plate: number;
+  printer_id: string | null;
+  printer_name: string;
+  user_id: string | null;
+  username: string | null;
+  group_id: string | null;
+  file_name: string;
+  /** null when the caller can't see the job (only that the printer is busy). */
+  name: string | null;
+  ams_mapping: string | null;
+  status: "uploading" | "starting" | "printing" | "paused" | "finished" | "failed" | "cancelled";
+  progress: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+  can_control: boolean;
+}
+
+export const ACTIVE_PRINT = ["uploading", "starting", "printing", "paused"];
+
+/** Prints still using a printer, by printer id, refreshed every few seconds. */
+export function useActivePrints(rev = 0): Record<string, PrintRecord> {
+  const [prints, setPrints] = useState<Record<string, PrintRecord>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      fetch("/api/prints?active=1", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((list: PrintRecord[]) => {
+          if (cancelled) return;
+          const byPrinter: Record<string, PrintRecord> = {};
+          for (const p of list) if (p.printer_id && !byPrinter[p.printer_id]) byPrinter[p.printer_id] = p;
+          setPrints(byPrinter);
+        })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [rev]);
+  return prints;
+}
+
+/** Every loaded tray of a printer (AMS units, then external spools). */
+export function loadedTrays(status: PrinterStatus | null | undefined): Tray[] {
+  if (!status) return [];
+  return [...status.ams.flatMap((u) => u.trays), ...status.external].filter((t) => t.material);
+}
+
+export function slotLabel(t: Tray): string {
+  if (t.slot === 254 || t.slot === 255) return "External";
+  if (t.unit != null && t.unit >= 128) return `AMS HT ${t.unit - 127}`;
+  return `AMS ${(t.unit ?? 0) + 1} · ${t.index + 1}`;
+}

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import PrintControls from "./PrintControls";
 import {
   describeState,
   formatMinutes,
@@ -6,6 +7,7 @@ import {
   printErrorCode,
   type Printer,
   type PrinterStatus,
+  type PrintRecord,
   type Tray,
 } from "../printers";
 
@@ -34,10 +36,15 @@ function TraySwatch({ tray, active }: { tray: Tray; active: boolean }) {
 export default function PrinterCard({
   printer,
   status,
+  print,
+  isAdmin,
   actions,
 }: {
   printer: Printer;
   status: PrinterStatus | undefined;
+  /** The FarmSlicer print using this printer, if any. */
+  print?: PrintRecord;
+  isAdmin?: boolean;
   /** Admin buttons. */
   actions?: ReactNode;
 }) {
@@ -77,7 +84,8 @@ export default function PrinterCard({
           {busy && (
             <div className="printer-job">
               <div className="printer-job-name" title={status.gcode_file ?? undefined}>
-                {status.job_name ?? "Untitled"}
+                {print?.name ?? status.job_name ?? "Untitled"}
+                {print?.username && <span className="hint"> · {print.username}</span>}
               </div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${status.percent ?? 0}%` }} />
@@ -93,6 +101,24 @@ export default function PrinterCard({
                   .filter(Boolean)
                   .join(" · ")}
               </div>
+              {print?.can_control ? (
+                <PrintControls print={print} state={status.state} />
+              ) : (
+                isAdmin && <PrintControls url={`/api/printers/${printer.id}/control`} state={status.state} />
+              )}
+            </div>
+          )}
+          {print && ["uploading", "starting"].includes(print.status) && (
+            <div className="printer-job">
+              <div className="printer-job-name">
+                {print.status === "uploading" ? "Uploading" : "Starting"} {print.name ?? "a print"}
+                {print.username && <span className="hint"> · {print.username}</span>}
+              </div>
+              {print.status === "uploading" && (
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `${print.progress}%` }} />
+                </div>
+              )}
             </div>
           )}
           {!busy && status.state === "FINISH" && status.job_name && (

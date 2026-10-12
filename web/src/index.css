@@ -514,6 +514,160 @@ body {
   padding-top: 0.25rem;
 }
 
+/* Jobs and prints: thumbnails, upload */
+.job-name {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.job-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.upload-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.source-upload { background: #2a2a1e; color: var(--warning); }
+
+.print-uploading, .print-starting { background: #2a2a3e; color: var(--text-dim); }
+.print-printing { background: #1e3a5f; color: var(--accent); }
+.print-paused { background: #3a331e; color: var(--warning); }
+.print-finished { background: #1e3a2e; color: var(--success); }
+.print-failed { background: #3a1e1e; color: var(--error); }
+.print-cancelled { background: #2a2a3e; color: var(--text-dim); }
+
+.print-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* Modal dialogs */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4vh 1rem;
+  z-index: 100;
+  overflow-y: auto;
+}
+
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal h4 {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.send-plate {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.plate-thumb {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--bg-card);
+}
+
+.target-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.target {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  cursor: pointer;
+}
+
+.target-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.target-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.mapping-table td {
+  padding: 0.25rem 0.4rem;
+  vertical-align: middle;
+}
+
+.mapping-table select {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+.send-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.9rem;
+}
+
+.send-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
 /* Printer form */
 .printer-form {
   display: flex;
