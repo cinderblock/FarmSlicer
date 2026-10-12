@@ -80,6 +80,9 @@ pub fn mqtt_config() -> Arc<ClientConfig> {
 /// an MQTT reconnect or another upload to the same address.
 pub fn ftps_config() -> Arc<ClientConfig> {
     let mut config = build();
-    config.resumption = Resumption::in_memory_sessions(4);
+    // Not smaller: rustls sizes the cache in servers of 8 tickets each, and a
+    // one-server cache evicts each entry as soon as it is inserted (so
+    // nothing ever resumes). 64 sessions = room for 8 servers.
+    config.resumption = Resumption::in_memory_sessions(64);
     Arc::new(config)
 }
