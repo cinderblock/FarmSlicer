@@ -39,7 +39,10 @@ pub struct ProfileStore {
     machines: Vec<ProfileEntry>,
     processes: Vec<ProfileEntry>,
     filaments: Vec<ProfileEntry>,
-    by_name: HashMap<String, PathBuf>,
+    /// name → every (vendor, path) that defines it. Base profiles such as
+    /// `fdm_process_common` exist in ~60 vendor directories with different
+    /// contents, so inheritance must be resolved within the chain's vendor.
+    by_name: HashMap<String, Vec<(String, PathBuf)>>,
     machine_models: Vec<MachineModel>,
 }
 
@@ -48,7 +51,7 @@ impl ProfileStore {
         let mut machines = Vec::new();
         let mut processes = Vec::new();
         let mut filaments = Vec::new();
-        let mut by_name: HashMap<String, PathBuf> = HashMap::new();
+        let mut by_name: HashMap<String, Vec<(String, PathBuf)>> = HashMap::new();
         // Collect machine_model entries: model_name → (vendor, nozzle_diameters)
         let mut model_nozzles: HashMap<String, (String, Vec<String>)> = HashMap::new();
 
@@ -95,7 +98,10 @@ impl ProfileStore {
                     }
 
                     if let Some(pe) = load_profile_entry(&path, &vendor, subdir) {
-                        by_name.insert(pe.name.clone(), path);
+                        by_name
+                            .entry(pe.name.clone())
+                            .or_default()
+                            .push((vendor.clone(), path));
                         target.push(pe);
                     }
                 }
@@ -304,16 +310,27 @@ impl ProfileStore {
         let mut chain = Vec::new();
         let mut current = name.to_string();
         let mut seen = std::collections::HashSet::new();
+        // Vendor of the profile the chain started from; parents are looked up
+        // in that vendor's directory first.
+        let mut vendor: Option<String> = None;
 
         loop {
             if !seen.insert(current.clone()) {
                 return Err(format!("circular inheritance at '{current}'"));
             }
 
-            let path = self
+            let candidates = self
                 .by_name
                 .get(&current)
                 .ok_or_else(|| format!("profile '{current}' not found"))?;
+            let (found_vendor, path) = vendor
+                .as_deref()
+                .and_then(|v| candidates.iter().find(|(cv, _)| cv == v))
+                .or_else(|| candidates.first())
+                .ok_or_else(|| format!("profile '{current}' not found"))?;
+            if vendor.is_none() {
+                vendor = Some(found_vendor.clone());
+            }
 
             let content = std::fs::read_to_string(path)
                 .map_err(|e| format!("reading '{}': {e}", path.display()))?;
