@@ -47,6 +47,14 @@ pub struct Job {
     pub source: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Who created the job (None for jobs from before accounts existed).
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    /// The group the job is charged to and shared with (None = personal).
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
+    /// Bytes kept on the server for this job: model (if stored) + G-code.
+    pub stored_bytes: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -59,6 +67,17 @@ pub struct SliceRecord {
     pub filament_used_g: f64,
     pub file_size: i64,
     pub created_at: String,
+    /// From the job: creator, group, and whether its model file is kept.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub has_model: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -69,6 +88,12 @@ pub struct User {
     pub role: String,
     pub created_at: String,
     pub last_login: Option<String>,
+    /// "full" (signs in with a passkey) | "guest" (no credential: a
+    /// long-lived session plus one-time sign-in codes; limited access).
+    pub kind: String,
+    /// Per-user quota rules (JSON array, see src/quota.rs); None = the site
+    /// default for the account kind.
+    pub quotas: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -252,6 +277,70 @@ impl Db {
         if conn.prepare("SELECT password_hash FROM users LIMIT 0").is_ok() {
             conn.execute_batch("ALTER TABLE users DROP COLUMN password_hash;").ok();
         }
+        if conn.prepare("SELECT kind FROM users LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN kind TEXT NOT NULL DEFAULT 'full';").ok();
+        }
+        if conn.prepare("SELECT quotas FROM users LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN quotas TEXT;").ok();
+        }
+
+        // Groups (see src/groups.rs): a tree; members, join links, and
+        // site-wide runtime settings. Settings and quotas are JSON.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS groups (
+                id TEXT PRIMARY KEY,
+                parent_id TEXT REFERENCES groups(id) ON DELETE RESTRICT,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                settings TEXT NOT NULL DEFAULT '{}',
+                quotas TEXT NOT NULL DEFAULT '{}',
+                self_key TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS groups_parent_self_key
+                ON groups(parent_id, self_key) WHERE self_key IS NOT NULL;
+            CREATE TABLE IF NOT EXISTS group_members (
+                group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role TEXT NOT NULL DEFAULT 'member',
+                status TEXT NOT NULL DEFAULT 'active',
+                quotas TEXT,
+                joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (group_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS group_members_user ON group_members(user_id);
+            CREATE TABLE IF NOT EXISTS join_links (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+                code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                public INTEGER NOT NULL DEFAULT 0,
+                bypass_approval INTEGER NOT NULL DEFAULT 0,
+                label TEXT NOT NULL DEFAULT '',
+                max_uses INTEGER,
+                uses INTEGER NOT NULL DEFAULT 0,
+                expires_at TEXT,
+                disabled INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        ).expect("failed to create group tables");
+        if conn.prepare("SELECT group_id FROM jobs LIMIT 0").is_err() {
+            conn.execute_batch(
+                "ALTER TABLE jobs ADD COLUMN group_id TEXT REFERENCES groups(id) ON DELETE SET NULL;"
+            ).ok();
+        }
+        if conn.prepare("SELECT stored_bytes FROM jobs LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE jobs ADD COLUMN stored_bytes INTEGER NOT NULL DEFAULT 0;").ok();
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
+             CREATE INDEX IF NOT EXISTS jobs_user ON jobs(user_id);"
+        ).ok();
 
         Db { conn: Mutex::new(conn) }
     }
@@ -265,6 +354,8 @@ impl Db {
             role: row.get(2)?,
             created_at: row.get(3)?,
             last_login: row.get(4)?,
+            kind: row.get(5)?,
+            quotas: row.get(6)?,
         })
     }
 
@@ -280,17 +371,23 @@ impl Db {
     pub fn no_way_in(&self) -> bool {
         let conn = self.conn.lock().unwrap();
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+        // Guests' sign-in codes live in recovery_codes too; they don't make
+        // the installation administrable, so only full accounts count.
         count("SELECT COUNT(*) FROM passkeys") == 0
             && count("SELECT COUNT(*) FROM invites WHERE used_at IS NULL AND expires_at > datetime('now')") == 0
-            && count("SELECT COUNT(*) FROM recovery_codes WHERE used_at IS NULL") == 0
+            && count(
+                "SELECT COUNT(*) FROM recovery_codes r JOIN users u ON u.id = r.user_id
+                 WHERE r.used_at IS NULL AND u.kind = 'full'",
+            ) == 0
     }
 
-    /// Remove accounts that have no passkey (first-run re-bootstrap: such
-    /// accounts are unreachable). Cascades to their sessions, keys, invites.
+    /// Remove full accounts that have no passkey (first-run re-bootstrap:
+    /// such accounts are unreachable; guests never have one and keep their
+    /// sign-in codes). Cascades to their sessions, keys, invites.
     pub fn delete_users_without_passkeys(&self) -> usize {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "DELETE FROM users WHERE id NOT IN (SELECT DISTINCT user_id FROM passkeys)",
+            "DELETE FROM users WHERE kind = 'full' AND id NOT IN (SELECT DISTINCT user_id FROM passkeys)",
             [],
         )
         .unwrap_or(0)
@@ -299,7 +396,7 @@ impl Db {
     pub fn list_users(&self) -> Vec<User> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, username, role, created_at, last_login FROM users ORDER BY created_at")
+            .prepare("SELECT id, username, role, created_at, last_login, kind, quotas FROM users ORDER BY created_at")
             .unwrap();
         stmt.query_map([], Self::user_from_row)
             .unwrap()
@@ -310,7 +407,7 @@ impl Db {
     pub fn get_user(&self, id: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login FROM users WHERE id = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas FROM users WHERE id = ?1",
             params![id],
             Self::user_from_row,
         )
@@ -320,7 +417,7 @@ impl Db {
     pub fn get_user_by_username(&self, username: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login FROM users WHERE username = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas FROM users WHERE username = ?1",
             params![username.trim()],
             Self::user_from_row,
         )
@@ -329,11 +426,11 @@ impl Db {
 
     /// Creates the account row. `id` is caller-chosen so a registration
     /// ceremony can be bound to it before the row exists.
-    pub fn create_user(&self, id: &str, username: &str, role: &str) -> Result<User, String> {
+    pub fn create_user(&self, id: &str, username: &str, role: &str, kind: &str) -> Result<User, String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO users (id, username, role) VALUES (?1, ?2, ?3)",
-            params![id, username.trim(), role],
+            "INSERT INTO users (id, username, role, kind) VALUES (?1, ?2, ?3, ?4)",
+            params![id, username.trim(), role, kind],
         )
         .map_err(|e| {
             if e.to_string().contains("UNIQUE") {
@@ -343,7 +440,7 @@ impl Db {
             }
         })?;
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login FROM users WHERE id = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas FROM users WHERE id = ?1",
             params![id],
             Self::user_from_row,
         )
@@ -461,7 +558,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT i.user_id, i.created_by, i.created_at, i.expires_at, i.used_at,
-                    u.id, u.username, u.role, u.created_at, u.last_login
+                    u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas
              FROM invites i JOIN users u ON u.id = i.user_id
              WHERE i.token_hash = ?1 AND i.used_at IS NULL AND i.expires_at > datetime('now')",
             params![token_hash],
@@ -480,6 +577,8 @@ impl Db {
                         role: row.get(7)?,
                         created_at: row.get(8)?,
                         last_login: row.get(9)?,
+                        kind: row.get(10)?,
+                        quotas: row.get(11)?,
                     },
                 ))
             },
@@ -569,7 +668,7 @@ impl Db {
     pub fn session_user(&self, token_hash: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT u.id, u.username, u.role, u.created_at, u.last_login
+            "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > datetime('now')",
             params![token_hash],
@@ -628,7 +727,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let user = conn
             .query_row(
-                "SELECT u.id, u.username, u.role, u.created_at, u.last_login
+                "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas
                  FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?1",
                 params![key_hash],
                 Self::user_from_row,
@@ -724,8 +823,12 @@ impl Db {
                 j.print_time_sec, j.filament_used_g, j.error,
                 j.config_json, j.overrides_json,
                 j.progress_message, j.warnings, j.source,
-                j.created_at, j.updated_at
-         FROM jobs j LEFT JOIN printers p ON j.printer_id = p.id";
+                j.created_at, j.updated_at,
+                j.user_id, u.username, j.group_id, g.name, j.stored_bytes
+         FROM jobs j
+         LEFT JOIN printers p ON j.printer_id = p.id
+         LEFT JOIN users u ON j.user_id = u.id
+         LEFT JOIN groups g ON j.group_id = g.id";
 
     fn job_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         Ok(Job {
@@ -748,18 +851,89 @@ impl Db {
             source: row.get(16)?,
             created_at: row.get(17)?,
             updated_at: row.get(18)?,
+            user_id: row.get(19)?,
+            username: row.get(20)?,
+            group_id: row.get(21)?,
+            group_name: row.get(22)?,
+            stored_bytes: row.get(23)?,
         })
     }
 
     pub fn list_jobs(&self) -> Vec<Job> {
+        self.list_jobs_filtered(&JobFilter::default())
+    }
+
+    /// Jobs matching `filter`, newest first.
+    pub fn list_jobs_filtered(&self, filter: &JobFilter) -> Vec<Job> {
+        let (where_sql, args) = filter.sql();
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare(&format!("{} ORDER BY j.created_at DESC", Self::JOB_SELECT))
+            .prepare(&format!("{} {where_sql} ORDER BY j.created_at DESC", Self::JOB_SELECT))
             .unwrap();
-        stmt.query_map([], Self::job_from_row)
+        stmt.query_map(rusqlite::params_from_iter(args.iter()), Self::job_from_row)
             .unwrap()
             .filter_map(|r| r.ok())
             .collect()
+    }
+
+    /// Usage totals over the jobs matching `filter` (failed and cancelled
+    /// jobs don't count). Flow metrics count jobs created at or after
+    /// `since` (SQLite datetime text); storage is always the running total.
+    pub fn usage(&self, filter: &JobFilter, since: &str) -> Usage {
+        let (where_sql, mut args) = filter.sql();
+        let joiner = if where_sql.is_empty() { "WHERE" } else { "AND" };
+        args.push(since.to_string());
+        let n = args.len();
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!(
+                "SELECT
+                    COALESCE(SUM(CASE WHEN j.created_at >= ?{n} THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN j.created_at >= ?{n} THEN COALESCE(j.filament_used_g, 0) ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN j.created_at >= ?{n} THEN COALESCE(j.print_time_sec, 0) ELSE 0 END), 0),
+                    COALESCE(SUM(j.stored_bytes), 0)
+                 FROM jobs j {where_sql} {joiner} j.status NOT IN ('failed', 'cancelled')"
+            ),
+            rusqlite::params_from_iter(args.iter()),
+            |r| {
+                Ok(Usage {
+                    slices: r.get(0)?,
+                    filament_g: r.get(1)?,
+                    print_sec: r.get(2)?,
+                    stored_bytes: r.get(3)?,
+                })
+            },
+        )
+        .unwrap_or_default()
+    }
+
+    pub fn set_job_group(&self, id: &str, group_id: Option<&str>) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET group_id = ?2, updated_at = datetime('now') WHERE id = ?1",
+            params![id, group_id],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    /// Record a model file stored for the job (browser jobs that keep it).
+    pub fn set_job_model(&self, id: &str, model_path: &str, bytes: i64) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET model_path = ?2, stored_bytes = stored_bytes + ?3 WHERE id = ?1",
+            params![id, model_path, bytes],
+        )
+        .ok();
+    }
+
+    pub fn add_job_stored_bytes(&self, id: &str, bytes: i64) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET stored_bytes = stored_bytes + ?2 WHERE id = ?1",
+            params![id, bytes],
+        )
+        .ok();
     }
 
     pub fn get_job(&self, id: &str) -> Option<Job> {
@@ -782,39 +956,20 @@ impl Db {
         overrides_json: Option<&str>,
         source: &str,
         user_id: Option<&str>,
+        group_id: Option<&str>,
+        model_bytes: i64,
     ) -> Job {
         let id = uuid::Uuid::new_v4().to_string();
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id],
-        )
-        .unwrap();
-        let created_at: String = conn
-            .query_row("SELECT created_at FROM jobs WHERE id = ?1", params![id], |r| r.get(0))
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id, group_id, stored_bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id, group_id, model_bytes],
+            )
             .unwrap();
-        Job {
-            id,
-            model_name: model_name.to_string(),
-            model_path: model_path.to_string(),
-            status: "queued".to_string(),
-            progress: 0,
-            printer_id: printer_id.map(String::from),
-            printer_name: None,
-            routing: routing.to_string(),
-            gcode_path: None,
-            print_time_sec: None,
-            filament_used_g: None,
-            error: None,
-            config_json: config_json.map(String::from),
-            overrides_json: overrides_json.map(String::from),
-            progress_message: None,
-            warnings: None,
-            source: source.to_string(),
-            created_at: created_at.clone(),
-            updated_at: created_at,
         }
+        self.get_job(&id).expect("job just inserted")
     }
 
     pub fn update_job_status(&self, id: &str, status: &str, progress: i32) {
@@ -894,29 +1049,54 @@ impl Db {
 
     // -- Slices --
 
-    pub fn list_slices(&self) -> Vec<SliceRecord> {
+    const SLICE_SELECT: &'static str =
+        "SELECT s.id, s.job_id, s.model_name, s.gcode_path, s.print_time_sec, s.filament_used_g,
+                s.file_size, s.created_at, j.user_id, u.username, j.group_id, g.name,
+                COALESCE(j.model_path, '') != ''
+         FROM slices s
+         JOIN jobs j ON j.id = s.job_id
+         LEFT JOIN users u ON j.user_id = u.id
+         LEFT JOIN groups g ON j.group_id = g.id";
+
+    fn slice_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SliceRecord> {
+        Ok(SliceRecord {
+            id: row.get(0)?,
+            job_id: row.get(1)?,
+            model_name: row.get(2)?,
+            gcode_path: row.get(3)?,
+            print_time_sec: row.get(4)?,
+            filament_used_g: row.get(5)?,
+            file_size: row.get(6)?,
+            created_at: row.get(7)?,
+            user_id: row.get(8)?,
+            username: row.get(9)?,
+            group_id: row.get(10)?,
+            group_name: row.get(11)?,
+            has_model: row.get(12)?,
+        })
+    }
+
+    /// Slices of the jobs matching `filter`, newest first.
+    pub fn list_slices_filtered(&self, filter: &JobFilter) -> Vec<SliceRecord> {
+        let (where_sql, args) = filter.sql();
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare(
-                "SELECT id, job_id, model_name, gcode_path, print_time_sec, filament_used_g, file_size, created_at
-                 FROM slices ORDER BY created_at DESC",
-            )
+            .prepare(&format!("{} {where_sql} ORDER BY s.created_at DESC", Self::SLICE_SELECT))
             .unwrap();
-        stmt.query_map([], |row| {
-            Ok(SliceRecord {
-                id: row.get(0)?,
-                job_id: row.get(1)?,
-                model_name: row.get(2)?,
-                gcode_path: row.get(3)?,
-                print_time_sec: row.get(4)?,
-                filament_used_g: row.get(5)?,
-                file_size: row.get(6)?,
-                created_at: row.get(7)?,
-            })
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect()
+        stmt.query_map(rusqlite::params_from_iter(args.iter()), Self::slice_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_slice(&self, id: &str) -> Option<SliceRecord> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("{} WHERE s.id = ?1", Self::SLICE_SELECT),
+            params![id],
+            Self::slice_from_row,
+        )
+        .ok()
     }
 
     pub fn create_slice(
@@ -948,6 +1128,11 @@ impl Db {
             filament_used_g,
             file_size,
             created_at,
+            user_id: None,
+            username: None,
+            group_id: None,
+            group_name: None,
+            has_model: false,
         }
     }
 
@@ -1036,6 +1221,466 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM custom_profiles WHERE id = ?1", params![id])
             .unwrap()
+            > 0
+    }
+}
+
+// ---- Job filters and usage --------------------------------------------------
+
+/// Which jobs a query covers. Empty filter = every job.
+#[derive(Debug, Default, Clone)]
+pub struct JobFilter {
+    /// Visibility: jobs created by this user, or charged to one of these
+    /// groups. None = no visibility restriction (admins).
+    pub visible_to: Option<(String, Vec<String>)>,
+    /// Only jobs created by this user.
+    pub user_id: Option<String>,
+    /// Only jobs charged to one of these groups.
+    pub group_ids: Option<Vec<String>>,
+}
+
+impl JobFilter {
+    fn sql(&self) -> (String, Vec<String>) {
+        fn placeholders(args: &mut Vec<String>, values: &[String]) -> String {
+            values
+                .iter()
+                .map(|v| {
+                    args.push(v.clone());
+                    format!("?{}", args.len())
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+        let mut clauses: Vec<String> = Vec::new();
+        let mut args: Vec<String> = Vec::new();
+        if let Some((user_id, groups)) = &self.visible_to {
+            args.push(user_id.clone());
+            let mine = format!("j.user_id = ?{}", args.len());
+            if groups.is_empty() {
+                clauses.push(mine);
+            } else {
+                let list = placeholders(&mut args, groups);
+                clauses.push(format!("({mine} OR j.group_id IN ({list}))"));
+            }
+        }
+        if let Some(user_id) = &self.user_id {
+            args.push(user_id.clone());
+            clauses.push(format!("j.user_id = ?{}", args.len()));
+        }
+        if let Some(groups) = &self.group_ids {
+            if groups.is_empty() {
+                clauses.push("0".into());
+            } else {
+                let list = placeholders(&mut args, groups);
+                clauses.push(format!("j.group_id IN ({list})"));
+            }
+        }
+        if clauses.is_empty() {
+            (String::new(), args)
+        } else {
+            (format!("WHERE {}", clauses.join(" AND ")), args)
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Usage {
+    pub slices: i64,
+    pub filament_g: f64,
+    pub print_sec: f64,
+    pub stored_bytes: i64,
+}
+
+// ---- Groups -------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Group {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub description: String,
+    /// JSON object, see `groups::GroupSettings`.
+    pub settings: String,
+    /// JSON object, see `quota::GroupQuotas`.
+    pub quotas: String,
+    /// Identifier this group was self-created under (e.g. a team number).
+    pub self_key: Option<String>,
+    pub created_by: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Membership {
+    pub group_id: String,
+    pub user_id: String,
+    pub username: String,
+    pub user_kind: String,
+    /// "member" | "manager"
+    pub role: String,
+    /// "active" | "pending" (waiting for a manager's approval)
+    pub status: String,
+    /// Per-member quota override (JSON array), None = the group's default.
+    pub quotas: Option<String>,
+    pub joined_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct JoinLink {
+    pub id: String,
+    pub group_id: String,
+    pub code: String,
+    pub public: bool,
+    pub bypass_approval: bool,
+    pub label: String,
+    pub max_uses: Option<i64>,
+    pub uses: i64,
+    pub expires_at: Option<String>,
+    pub disabled: bool,
+    pub created_by: Option<String>,
+    pub created_at: String,
+}
+
+const GROUP_COLS: &str =
+    "id, parent_id, name, description, settings, quotas, self_key, created_by, created_at";
+
+const MEMBER_SELECT: &str = "SELECT m.group_id, m.user_id, u.username, u.kind, m.role, m.status, m.quotas, m.joined_at
+     FROM group_members m JOIN users u ON u.id = m.user_id";
+
+const LINK_COLS: &str = "id, group_id, code, public, bypass_approval, label, max_uses, uses, expires_at, disabled, created_by, created_at";
+
+impl Db {
+    fn group_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Group> {
+        Ok(Group {
+            id: row.get(0)?,
+            parent_id: row.get(1)?,
+            name: row.get(2)?,
+            description: row.get(3)?,
+            settings: row.get(4)?,
+            quotas: row.get(5)?,
+            self_key: row.get(6)?,
+            created_by: row.get(7)?,
+            created_at: row.get(8)?,
+        })
+    }
+
+    fn membership_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Membership> {
+        Ok(Membership {
+            group_id: row.get(0)?,
+            user_id: row.get(1)?,
+            username: row.get(2)?,
+            user_kind: row.get(3)?,
+            role: row.get(4)?,
+            status: row.get(5)?,
+            quotas: row.get(6)?,
+            joined_at: row.get(7)?,
+        })
+    }
+
+    fn link_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JoinLink> {
+        Ok(JoinLink {
+            id: row.get(0)?,
+            group_id: row.get(1)?,
+            code: row.get(2)?,
+            public: row.get::<_, i64>(3)? != 0,
+            bypass_approval: row.get::<_, i64>(4)? != 0,
+            label: row.get(5)?,
+            max_uses: row.get(6)?,
+            uses: row.get(7)?,
+            expires_at: row.get(8)?,
+            disabled: row.get::<_, i64>(9)? != 0,
+            created_by: row.get(10)?,
+            created_at: row.get(11)?,
+        })
+    }
+
+    pub fn list_groups(&self) -> Vec<Group> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!("SELECT {GROUP_COLS} FROM groups ORDER BY name COLLATE NOCASE"))
+            .unwrap();
+        stmt.query_map([], Self::group_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_group(&self, id: &str) -> Option<Group> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT {GROUP_COLS} FROM groups WHERE id = ?1"),
+            params![id],
+            Self::group_from_row,
+        )
+        .ok()
+    }
+
+    /// The child of `parent_id` created under `self_key`, if any.
+    pub fn child_group_by_key(&self, parent_id: &str, self_key: &str) -> Option<Group> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT {GROUP_COLS} FROM groups WHERE parent_id = ?1 AND self_key = ?2"),
+            params![parent_id, self_key],
+            Self::group_from_row,
+        )
+        .ok()
+    }
+
+    pub fn create_group(
+        &self,
+        parent_id: Option<&str>,
+        name: &str,
+        description: &str,
+        settings: &str,
+        self_key: Option<&str>,
+        created_by: Option<&str>,
+    ) -> Result<Group, String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO groups (id, parent_id, name, description, settings, self_key, created_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![id, parent_id, name.trim(), description.trim(), settings, self_key, created_by],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        self.get_group(&id).ok_or_else(|| "group vanished".to_string())
+    }
+
+    pub fn update_group(
+        &self,
+        id: &str,
+        parent_id: Option<&str>,
+        name: &str,
+        description: &str,
+        settings: &str,
+        quotas: &str,
+    ) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE groups SET parent_id = ?2, name = ?3, description = ?4, settings = ?5, quotas = ?6
+             WHERE id = ?1",
+            params![id, parent_id, name.trim(), description.trim(), settings, quotas],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    /// Fails while the group has subgroups (ON DELETE RESTRICT). Its jobs
+    /// become personal jobs of their creators.
+    pub fn delete_group(&self, id: &str) -> Result<bool, String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM groups WHERE id = ?1", params![id])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
+    // -- Members --
+
+    pub fn memberships_of_user(&self, user_id: &str) -> Vec<Membership> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!("{MEMBER_SELECT} WHERE m.user_id = ?1"))
+            .unwrap();
+        stmt.query_map(params![user_id], Self::membership_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn group_members(&self, group_id: &str) -> Vec<Membership> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!(
+                "{MEMBER_SELECT} WHERE m.group_id = ?1 ORDER BY m.status DESC, u.username COLLATE NOCASE"
+            ))
+            .unwrap();
+        stmt.query_map(params![group_id], Self::membership_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_membership(&self, group_id: &str, user_id: &str) -> Option<Membership> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("{MEMBER_SELECT} WHERE m.group_id = ?1 AND m.user_id = ?2"),
+            params![group_id, user_id],
+            Self::membership_from_row,
+        )
+        .ok()
+    }
+
+    /// Active member counts per group.
+    pub fn member_counts(&self) -> std::collections::HashMap<String, i64> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT group_id, COUNT(*) FROM group_members WHERE status = 'active' GROUP BY group_id")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// Add a member, or update role/status of an existing one.
+    pub fn upsert_membership(&self, group_id: &str, user_id: &str, role: &str, status: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO group_members (group_id, user_id, role, status) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (group_id, user_id) DO UPDATE SET role = excluded.role, status = excluded.status",
+            params![group_id, user_id, role, status],
+        )
+        .unwrap();
+    }
+
+    pub fn set_membership_quotas(&self, group_id: &str, user_id: &str, quotas: Option<&str>) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE group_members SET quotas = ?3 WHERE group_id = ?1 AND user_id = ?2",
+            params![group_id, user_id, quotas],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    pub fn delete_membership(&self, group_id: &str, user_id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM group_members WHERE group_id = ?1 AND user_id = ?2",
+            params![group_id, user_id],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    // -- Join links --
+
+    pub fn list_join_links(&self, group_id: &str) -> Vec<JoinLink> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!("SELECT {LINK_COLS} FROM join_links WHERE group_id = ?1 ORDER BY created_at"))
+            .unwrap();
+        stmt.query_map(params![group_id], Self::link_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_join_link(&self, id: &str) -> Option<JoinLink> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT {LINK_COLS} FROM join_links WHERE id = ?1"),
+            params![id],
+            Self::link_from_row,
+        )
+        .ok()
+    }
+
+    /// A usable link: not disabled, not expired, uses left.
+    pub fn live_join_link_by_code(&self, code: &str) -> Option<JoinLink> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!(
+                "SELECT {LINK_COLS} FROM join_links
+                 WHERE code = ?1 AND disabled = 0
+                   AND (expires_at IS NULL OR expires_at > datetime('now'))
+                   AND (max_uses IS NULL OR uses < max_uses)"
+            ),
+            params![code.trim()],
+            Self::link_from_row,
+        )
+        .ok()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_join_link(
+        &self,
+        group_id: &str,
+        code: &str,
+        public: bool,
+        bypass_approval: bool,
+        label: &str,
+        max_uses: Option<i64>,
+        expires_hours: Option<i64>,
+        created_by: &str,
+    ) -> Result<JoinLink, String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO join_links (id, group_id, code, public, bypass_approval, label, max_uses, expires_at, created_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                         CASE WHEN ?8 IS NULL THEN NULL ELSE datetime('now', '+' || ?8 || ' hours') END, ?9)",
+                params![id, group_id, code, public as i64, bypass_approval as i64, label.trim(), max_uses, expires_hours, created_by],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE") {
+                    "that link code is taken".to_string()
+                } else {
+                    e.to_string()
+                }
+            })?;
+        }
+        self.get_join_link(&id).ok_or_else(|| "link vanished".to_string())
+    }
+
+    pub fn set_join_link_disabled(&self, id: &str, disabled: bool) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE join_links SET disabled = ?2 WHERE id = ?1",
+            params![id, disabled as i64],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    pub fn delete_join_link(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM join_links WHERE id = ?1", params![id])
+            .unwrap_or(0)
+            > 0
+    }
+
+    pub fn count_join_link_use(&self, id: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE join_links SET uses = uses + 1 WHERE id = ?1", params![id])
+            .ok();
+    }
+
+    // -- Site settings --
+
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))
+            .ok()
+    }
+
+    pub fn set_setting(&self, key: &str, value: Option<&str>) {
+        let conn = self.conn.lock().unwrap();
+        match value {
+            Some(v) => conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, v],
+            ),
+            None => conn.execute("DELETE FROM settings WHERE key = ?1", params![key]),
+        }
+        .ok();
+    }
+
+    // -- Account kind and per-user quotas --
+
+    pub fn set_user_kind(&self, id: &str, kind: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE users SET kind = ?2 WHERE id = ?1", params![id, kind])
+            .ok();
+    }
+
+    pub fn set_user_quotas(&self, id: &str, quotas: Option<&str>) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE users SET quotas = ?2 WHERE id = ?1", params![id, quotas])
+            .unwrap_or(0)
             > 0
     }
 }

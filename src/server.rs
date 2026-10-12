@@ -14,10 +14,14 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::auth::{self, CurrentUser};
 use crate::auth_api;
-use crate::db::Db;
+use crate::db::{Db, Job, JobFilter, User};
 use crate::discovery;
+use crate::groups::{Tree, Viewer};
+use crate::groups_api;
+use crate::join_api;
 use crate::profiles::ProfileStore;
 use crate::progress;
+use crate::quota;
 use crate::slicer;
 
 struct SlicerHandle(slicer::SlicerBox);
@@ -246,8 +250,10 @@ struct CreatePrinter {
 
 async fn create_printer(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<CreatePrinter>,
-) -> (StatusCode, Json<Value>) {
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    auth::require_full(&user)?;
     let printer = state.db.create_printer(
         &body.name,
         body.machine_profile.as_deref().unwrap_or(""),
@@ -257,13 +263,17 @@ async fn create_printer(
         body.serial_number.as_deref().unwrap_or(""),
         body.access_code.as_deref().unwrap_or(""),
     );
-    (StatusCode::CREATED, Json(json!(printer)))
+    Ok((StatusCode::CREATED, Json(json!(printer))))
 }
 
 async fn delete_printer(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> StatusCode {
+    if auth::require_full(&user).is_err() {
+        return StatusCode::FORBIDDEN;
+    }
     if state.db.delete_printer(&id) {
         StatusCode::NO_CONTENT
     } else {
@@ -288,8 +298,10 @@ struct CreateCustomProfile {
 
 async fn create_custom_profile(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<CreateCustomProfile>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    auth::require_full(&user)?;
     if body.name.trim().is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -320,9 +332,13 @@ struct UpdateCustomProfile {
 
 async fn update_custom_profile(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
     Json(body): Json<UpdateCustomProfile>,
 ) -> StatusCode {
+    if auth::require_full(&user).is_err() {
+        return StatusCode::FORBIDDEN;
+    }
     let Some(existing) = state.db.get_custom_profile(&id) else {
         return StatusCode::NOT_FOUND;
     };
@@ -337,8 +353,12 @@ async fn update_custom_profile(
 
 async fn delete_custom_profile(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> StatusCode {
+    if auth::require_full(&user).is_err() {
+        return StatusCode::FORBIDDEN;
+    }
     if state.db.delete_custom_profile(&id) {
         StatusCode::NO_CONTENT
     } else {
@@ -384,9 +404,121 @@ async fn get_custom_profile(
 
 // -- Jobs --
 
-async fn list_jobs(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let jobs = state.db.list_jobs();
+type ApiError = (StatusCode, Json<Value>);
+
+fn api_err(code: StatusCode, msg: impl Into<String>) -> ApiError {
+    (code, Json(json!({"error": msg.into()})))
+}
+
+/// Does the job have a model file on the server?
+pub fn model_available(job: &Job) -> bool {
+    !job.model_path.is_empty() && std::path::Path::new(&job.model_path).exists()
+}
+
+#[derive(Deserialize, Default)]
+struct JobQuery {
+    /// Only jobs charged to this group or its subgroups.
+    #[serde(default)]
+    group: Option<String>,
+    /// Only the caller's own jobs.
+    #[serde(default)]
+    mine: Option<bool>,
+}
+
+/// What the caller may see, narrowed by the query.
+fn job_filter(tree: &Tree, viewer: &Viewer, q: &JobQuery) -> JobFilter {
+    JobFilter {
+        visible_to: viewer
+            .visible_groups(tree)
+            .map(|groups| (viewer.user.id.clone(), groups)),
+        user_id: q.mine.unwrap_or(false).then(|| viewer.user.id.clone()),
+        group_ids: q.group.as_deref().map(|g| tree.subtree(g)),
+    }
+}
+
+async fn list_jobs(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Query(q): Query<JobQuery>,
+) -> Json<Value> {
+    let (tree, viewer) = groups_api::context(&state, &user);
+    let jobs = state.db.list_jobs_filtered(&job_filter(&tree, &viewer, &q));
     Json(json!(jobs))
+}
+
+/// A job the caller may see, or 404.
+fn visible_job(state: &AppState, user: &User, id: &str) -> Result<(Job, Tree, Viewer), ApiError> {
+    let (tree, viewer) = groups_api::context(state, user);
+    match state.db.get_job(id) {
+        Some(job) if viewer.can_see_job(&tree, &job) => Ok((job, tree, viewer)),
+        _ => Err(api_err(StatusCode::NOT_FOUND, "job not found")),
+    }
+}
+
+/// Browser jobs are driven by the tab that created them.
+fn own_job(state: &AppState, user: &User, id: &str) -> Result<Job, StatusCode> {
+    match state.db.get_job(id) {
+        Some(job) if job.user_id.as_deref() == Some(user.id.as_str()) || auth::auth_disabled() => Ok(job),
+        _ => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateJob {
+    /// The group to charge the job to; null = personal.
+    group_id: Option<String>,
+}
+
+/// Move a job to another group (or make it personal): its creator, into a
+/// group they're an active member of; admins anywhere.
+async fn update_job(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateJob>,
+) -> Result<Json<Value>, ApiError> {
+    let (job, tree, viewer) = visible_job(&state, &user, &id)?;
+    let creator = job.user_id.as_deref() == Some(user.id.as_str());
+    if !creator && !viewer.admin {
+        return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator or an admin can move it"));
+    }
+    if let Some(g) = &body.group_id {
+        if tree.get(g).is_none() {
+            return Err(api_err(StatusCode::BAD_REQUEST, "no such group"));
+        }
+        if !viewer.admin && !viewer.can_charge(g) {
+            return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
+        }
+    }
+    state.db.set_job_group(&id, body.group_id.as_deref());
+    Ok(Json(json!(state.db.get_job(&id))))
+}
+
+/// Download the job's source model, when the server kept it.
+async fn download_model(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (job, _, _) = visible_job(&state, &user, &id)?;
+    if !model_available(&job) {
+        return Err(api_err(StatusCode::NOT_FOUND, "the model of this job was not kept"));
+    }
+    let data = std::fs::read(&job.model_path)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let filename: String = job
+        .model_name
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n'))
+        .collect();
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{filename}\"")),
+        ],
+        data,
+    ))
 }
 
 async fn create_job(
@@ -410,6 +542,8 @@ async fn create_job(
     // uploads the G-code (POST /api/jobs/{id}/result); the model never
     // leaves the user's machine.
     let mut source = "server".to_string();
+    let mut group_id: Option<String> = None;
+    let mut model_bytes: i64 = 0;
 
     while let Some(field) = multipart
         .next_field()
@@ -441,6 +575,13 @@ async fn create_job(
 
                 model_name = file_name;
                 model_path = dest.to_string_lossy().to_string();
+                model_bytes = data.len() as i64;
+            }
+            "group_id" => {
+                let val = field.text().await.unwrap_or_default();
+                if !val.is_empty() {
+                    group_id = Some(val);
+                }
             }
             "printer_id" => {
                 let val = field.text().await.unwrap_or_default();
@@ -476,6 +617,26 @@ async fn create_job(
             _ => {}
         }
     }
+
+    // The group the job is charged to, and every quota on the way.
+    let (tree, viewer) = groups_api::context(&state, &user);
+    let admission = match &group_id {
+        Some(g) if tree.get(g).is_none() || !viewer.can_charge(g) => Err(api_err(
+            StatusCode::FORBIDDEN,
+            "you are not an active member of that group",
+        )),
+        _ => quota::check(&state.db, &tree, &user, group_id.as_deref())
+            .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e)),
+    };
+    if let Err(e) = admission {
+        if !model_path.is_empty() {
+            std::fs::remove_file(&model_path).ok();
+        }
+        return Err(e);
+    }
+    let keep_model = group_id
+        .as_deref()
+        .is_some_and(|g| tree.effective(g).keep_models);
 
     if !matches!(source.as_str(), "server" | "browser") {
         return Err((
@@ -543,15 +704,20 @@ async fn create_job(
         overrides_json.as_deref(),
         &source,
         Some(&user.id),
+        group_id.as_deref(),
+        model_bytes,
     );
 
     if source == "browser" {
-        // The client owns the slicing; the job just tracks it.
+        // The client owns the slicing; the job just tracks it. When the
+        // group keeps models, the client uploads the model with the result.
         state.db.update_job_status(&job.id, "slicing", 0);
         state.db.update_job_progress(&job.id, 0, "Slicing in browser");
         job.status = "slicing".to_string();
         job.progress_message = Some("Slicing in browser".to_string());
-        return Ok((StatusCode::CREATED, Json(json!(job))));
+        let mut body = json!(job);
+        body["keep_model"] = json!(keep_model);
+        return Ok((StatusCode::CREATED, Json(body)));
     }
 
     let job_id = job.id.clone();
@@ -597,6 +763,7 @@ fn finish_job(
         filament_used_g,
         warnings_json.as_deref(),
     );
+    state.db.add_job_stored_bytes(job_id, file_size);
     if let Some(job) = state.db.get_job(job_id) {
         state.db.create_slice(
             job_id,
@@ -657,8 +824,18 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json:
 
 async fn cancel_job(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> StatusCode {
+    // The creator, whoever manages the job's group, and admins.
+    let Ok((job, tree, viewer)) = visible_job(&state, &user, &id) else {
+        return StatusCode::NOT_FOUND;
+    };
+    let creator = job.user_id.as_deref() == Some(user.id.as_str());
+    let manager = job.group_id.as_deref().is_some_and(|g| viewer.can_manage(&tree, g));
+    if !creator && !manager && !viewer.admin {
+        return StatusCode::FORBIDDEN;
+    }
     // Flag first so a running slice stops at its next checkpoint; the DB row
     // flips to "cancelled" here (queued/slicing only) and run_slice confirms.
     progress::request_cancel(&id);
@@ -681,9 +858,13 @@ struct ProgressUpdate {
 /// Progress tick from the browser engine.
 async fn update_job_progress(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
     Json(body): Json<ProgressUpdate>,
 ) -> StatusCode {
+    if let Err(code) = own_job(&state, &user, &id) {
+        return code;
+    }
     match state.db.get_job(&id) {
         Some(job) if job.source != "browser" => StatusCode::BAD_REQUEST,
         Some(job) if job.status == "slicing" => {
@@ -699,17 +880,23 @@ async fn update_job_progress(
 }
 
 /// The browser engine finished: receive the G-code and the statistics it
-/// computed, and file them exactly like a server-sliced job.
+/// computed (and the model, when the job's group keeps models), and file
+/// them exactly like a server-sliced job.
 async fn upload_job_result(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let err = |code: StatusCode, msg: &str| (code, Json(json!({"error": msg})));
 
-    let Some(job) = state.db.get_job(&id) else {
+    let Ok(job) = own_job(&state, &user, &id) else {
         return Err(err(StatusCode::NOT_FOUND, "job not found"));
     };
+    let keep_model = job
+        .group_id
+        .as_deref()
+        .is_some_and(|g| Tree::load(&state.db).effective(g).keep_models);
     if job.source != "browser" {
         return Err(err(StatusCode::BAD_REQUEST, "not a browser job"));
     }
@@ -718,6 +905,7 @@ async fn upload_job_result(
     }
 
     let mut gcode: Option<axum::body::Bytes> = None;
+    let mut model: Option<(String, axum::body::Bytes)> = None;
     let mut print_time_sec = 0.0_f64;
     let mut filament_used_g = 0.0_f64;
     let mut warnings: Vec<String> = Vec::new();
@@ -736,6 +924,14 @@ async fn upload_job_result(
                         .await
                         .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?,
                 );
+            }
+            "model" if keep_model => {
+                let file_name = field.file_name().unwrap_or("model.stl").to_string();
+                let data = field
+                    .bytes()
+                    .await
+                    .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
+                model = Some((file_name, data));
             }
             "print_time_sec" => {
                 print_time_sec = field.text().await.ok().and_then(|t| t.parse().ok()).unwrap_or(0.0);
@@ -763,6 +959,21 @@ async fn upload_job_result(
     std::fs::write(&output_path, &gcode)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
+    if let Some((file_name, data)) = model.filter(|(_, d)| !d.is_empty()) {
+        let models_dir = state.data_dir.join("models");
+        std::fs::create_dir_all(&models_dir).ok();
+        let ext = std::path::Path::new(&file_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("stl");
+        let dest = models_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+        std::fs::write(&dest, &data)
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        state
+            .db
+            .set_job_model(&id, &dest.to_string_lossy(), data.len() as i64);
+    }
+
     finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
     println!(
         "job {id}: browser slice uploaded ({} bytes, {:.0} s, {:.1} g)",
@@ -783,9 +994,13 @@ struct FailRequest {
 /// The browser engine failed.
 async fn fail_job(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
     Json(body): Json<FailRequest>,
 ) -> StatusCode {
+    if let Err(code) = own_job(&state, &user, &id) {
+        return code;
+    }
     match state.db.get_job(&id) {
         Some(job) if job.source != "browser" => StatusCode::BAD_REQUEST,
         Some(job) if job.status == "slicing" => {
@@ -800,17 +1015,25 @@ async fn fail_job(
 
 // -- Slices --
 
-async fn list_slices(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let slices = state.db.list_slices();
+async fn list_slices(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Query(q): Query<JobQuery>,
+) -> Json<Value> {
+    let (tree, viewer) = groups_api::context(&state, &user);
+    let slices = state.db.list_slices_filtered(&job_filter(&tree, &viewer, &q));
     Json(json!(slices))
 }
 
 async fn download_gcode(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let slices = state.db.list_slices();
-    let slice = slices.iter().find(|s| s.id == id);
+    let slice = state
+        .db
+        .get_slice(&id)
+        .filter(|s| visible_job(&state, &user, &s.job_id).is_ok());
     match slice {
         Some(s) => {
             let path = std::path::Path::new(&s.gcode_path);
@@ -842,12 +1065,15 @@ pub fn router(state: Arc<AppState>) -> Router {
     let public = Router::new()
         .route("/api/health", get(health))
         .merge(auth_api::public_routes())
+        .merge(join_api::public_routes())
         .with_state(state.clone());
 
     // Protected routes — a session cookie or an API key (see src/auth.rs).
     // Admin-only handlers check the role themselves.
     let protected = Router::new()
         .merge(auth_api::protected_routes())
+        .merge(groups_api::routes())
+        .merge(join_api::protected_routes())
         .route("/api/profiles/machine-models", get(list_machine_models))
         .route("/api/profiles/machines", get(list_machines))
         .route("/api/profiles/processes", get(list_processes))
@@ -869,6 +1095,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/status", get(server_status))
         .route("/api/jobs", get(list_jobs).post(create_job))
+        .route("/api/jobs/{id}", axum::routing::put(update_job))
+        .route("/api/jobs/{id}/model", get(download_model))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/jobs/{id}/progress", post(update_job_progress))
         .route("/api/jobs/{id}/result", post(upload_job_result))

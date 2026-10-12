@@ -12,8 +12,11 @@ can run in the user's browser.
   inheritance resolved server-side; per-job overrides and saved custom profiles.
 - **Compute:** each slice runs either on the server or in the browser
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
-  isolated). Browser slicing never uploads the model, only the resulting G-code.
+  isolated). Browser slicing uploads only the resulting G-code, unless the
+  job's group is set to keep models.
 - **Printers:** Bambu Lab SSDP discovery; machine model + nozzle size per printer.
+- **People:** passkey accounts, nested groups with shared libraries and
+  seasons, quotas, self-service joining through links, guest accounts.
 
 License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
 
@@ -70,6 +73,46 @@ Account page (shown once), sent as `Authorization: Bearer fsk_…`. A key has th
 permissions of the account that created it; revoke it there.
 `tests/passkey-e2e.mjs` drives all of the above against a running server with
 a software authenticator.
+
+### Groups, quotas and joining
+
+All of this is configured at runtime in the web UI (Groups and Settings
+pages); nothing is set through environment variables.
+
+- **Groups** form a tree; a user can be in any number of them, as `member`
+  or `manager`. Managers run their group and everything below it (members,
+  join links, settings, subgroups); admins run everything.
+- **Jobs belong to a group** when the slicer picks one (the Slice page offers
+  the groups you're an active member of), otherwise they are personal.
+  A job is visible to its creator, to the group's members when the group's
+  library is shared, to anyone managing the group, and to admins. A group's
+  library splits its jobs by **season** (the `season_start` setting, e.g.
+  `09-01` for a season that runs September to August).
+- **Settings** are inherited down the tree unless a group sets its own:
+  `season_start`, `shared_library` (default on), `keep_models` (browser-sliced
+  jobs upload their model too), `allow_registration` (the join flow may create
+  passkey accounts), `allow_guests`, `join_policy` (`open`, or `approval` by a
+  manager). Per group only: `listed` (a button on the sign-in page; admins
+  only) and `subgroups` (how joiners pick a child: from a list, or
+  self-service by typing an identifier that must match a pattern; the child
+  is created from a name template if it doesn't exist yet, optionally with
+  its creator as manager).
+- **Joining**: `/join/<code>` links (secret ones skip approval by default;
+  public ones have a chosen, guessable code) or the sign-in page's buttons.
+  The joiner walks down through subgroups if the group asks for it, then
+  joins as their signed-in self, a new passkey account, or a **guest**.
+- **Guest accounts** have no credential: a long-lived session cookie plus a
+  one-time sign-in code for another device (each use hands out the next one).
+  They can't create API keys, change printers or profiles, or create groups.
+  Adding a passkey turns a guest into a full account.
+- **Quotas** are optional rules `{metric, period, limit}`: `slices`,
+  `filament_g`, `print_hours` (slicer estimates), `storage_mb`; per `day`,
+  `week`, `month`, `season` or `total`. A new job must fit the user's own
+  rules (per-user override, else the site default for their account kind),
+  and for its group and every group above it, the per-member rules (a
+  member's override, else the group's member or guest rules) and the shared
+  pool. Group quotas are set by admins or managers of a parent group, never
+  by the group's own managers.
 
 ## Building
 
@@ -153,24 +196,37 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/printers`, `DELETE /api/printers/{id}` | printer CRUD |
 | `GET /api/discovery` | Bambu printers seen on the LAN |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
-| `GET /api/jobs` | jobs with status, progress, step message, warnings, `source` |
-| `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser |
+| `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
+| `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser (the response's `keep_model` says whether to upload the model with the result). Optional `group_id`; 429 when a quota is used up |
+| `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
+| `GET /api/jobs/{id}/model` | the job's source model, when kept |
 | `POST /api/jobs/{id}/progress` | browser engine progress tick |
-| `POST /api/jobs/{id}/result` (multipart `gcode`, stats) | browser engine result upload |
+| `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `model`) | browser engine result upload |
 | `POST /api/jobs/{id}/fail`, `POST /api/jobs/{id}/cancel` | browser failure / cancel either kind |
-| `GET /api/slices`, `GET /api/slices/{id}/download` | slice library, G-code download |
+| `GET /api/slices?group=&mine=1`, `GET /api/slices/{id}/download` | slice library, G-code download |
+| `GET/POST /api/groups`, `GET/PUT/DELETE /api/groups/{id}` | groups (settings, quotas, moving) |
+| `GET/POST /api/groups/{id}/members`, `PUT/DELETE /api/groups/{id}/members/{user}` | members, approval, per-member quotas, leaving |
+| `GET /api/groups/{id}/library`, `GET /api/groups/{id}/usage` | the group's jobs by season; quota usage |
+| `GET/POST /api/groups/{id}/links`, `PUT/DELETE /api/groups/{id}/links/{link}` | join links |
+| `POST /api/join/resolve`, `/api/join/finish`, `/api/join/register/{start,finish}`, `/api/join/guest` | the join flow |
+| `POST /api/auth/guest/signin` | guest sign-in with a one-time code |
+| `GET /api/me/usage`, `GET/PUT /api/settings` | own quota usage; site-wide settings (admins) |
 
 ## Repository layout
 
 ```
 src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
+                auth.rs + auth_api.rs (passkeys, sessions, users),
+                groups.rs + groups_api.rs (groups, visibility, settings),
+                join_api.rs (join links, guests), quota.rs,
                 profiles.rs (OrcaSlicer profile inheritance), progress.rs,
-                slicer.rs (cxx bridge declaration), discovery.rs (SSDP)
+                slicer.rs (cxx bridge declaration + stub), discovery.rs (SSDP)
 cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
                 engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp
 wasm/           Emscripten superbuild + C bridge for the browser engine
 web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build
-plans/          living plan documents (see plans/get-online.md)
+tests/          API end-to-end tests (run-e2e.sh) and their shared helpers
+plans/          living plan documents
 ```

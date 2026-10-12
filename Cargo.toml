@@ -23,6 +23,9 @@ url = "2"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
+# Groups and quotas: UTC period boundaries, self-service identifier patterns.
+chrono = { version = "0.4", default-features = false, features = ["now", "std"] }
+regex = "1"
 
 [build-dependencies]
 cxx-build = "1"

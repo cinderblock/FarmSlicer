@@ -29,6 +29,7 @@ fn user_json(user: &User) -> Value {
         "id": user.id,
         "username": user.username,
         "role": user.role,
+        "kind": user.kind,
         "created_at": user.created_at,
         "last_login": user.last_login,
     })
@@ -56,11 +57,11 @@ fn load_passkeys(state: &AppState, user_id: &str) -> Vec<(PasskeyRecord, Passkey
         .collect()
 }
 
-fn start_session(state: &AppState, user: &User, extra: Value) -> Response {
+pub(crate) fn start_session(state: &AppState, user: &User, extra: Value, days: i64) -> Response {
     let token = auth::random_token();
     state
         .db
-        .create_session(&auth::sha256_hex(&token), &user.id, auth::SESSION_DAYS);
+        .create_session(&auth::sha256_hex(&token), &user.id, days);
     let mut body = json!({"ok": true, "user": user_json(user)});
     if let (Some(obj), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
         for (k, v) in extra {
@@ -69,14 +70,15 @@ fn start_session(state: &AppState, user: &User, extra: Value) -> Response {
     }
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, auth::session_cookie(&token))],
+        [(header::SET_COOKIE, auth::session_cookie(&token, days))],
         Json(body),
     )
         .into_response()
 }
 
-/// Issue a fresh recovery code for the user and return it (plaintext, once).
-fn issue_recovery_code(state: &AppState, user_id: &str) -> String {
+/// Issue a fresh recovery code (a guest's sign-in code) for the user and
+/// return it (plaintext, once).
+pub(crate) fn issue_recovery_code(state: &AppState, user_id: &str) -> String {
     let code = auth::recovery_code();
     state
         .db
@@ -84,7 +86,7 @@ fn issue_recovery_code(state: &AppState, user_id: &str) -> String {
     code
 }
 
-fn begin_registration(
+pub(crate) fn begin_registration(
     state: &AppState,
     user_id: &str,
     username: &str,
@@ -108,21 +110,21 @@ fn begin_registration(
 }
 
 #[derive(Deserialize)]
-struct FinishRegistration {
-    flow_id: String,
-    credential: RegisterPublicKeyCredential,
+pub(crate) struct FinishRegistration {
+    pub flow_id: String,
+    pub credential: RegisterPublicKeyCredential,
     #[serde(default)]
-    key_name: Option<String>,
+    pub key_name: Option<String>,
 }
 
-fn take_registration(state: &AppState, flow_id: &str) -> Result<(PasskeyRegistration, RegisterPurpose), ApiError> {
+pub(crate) fn take_registration(state: &AppState, flow_id: &str) -> Result<(PasskeyRegistration, RegisterPurpose), ApiError> {
     match state.rp.take_flow(flow_id) {
         Some(Flow::Register { state, purpose }) => Ok((state, purpose)),
         _ => Err(err(StatusCode::BAD_REQUEST, "registration expired or unknown; start again")),
     }
 }
 
-fn finish_registration(
+pub(crate) fn finish_registration(
     state: &AppState,
     reg_state: &PasskeyRegistration,
     credential: &RegisterPublicKeyCredential,
@@ -138,7 +140,7 @@ fn finish_registration(
     Ok((id, json))
 }
 
-fn key_name(body: &Option<String>) -> String {
+pub(crate) fn key_name(body: &Option<String>) -> String {
     body.as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -151,12 +153,19 @@ fn key_name(body: &Option<String>) -> String {
 async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
     let setup_required = auth::setup_required(&state.db);
     let user = auth::resolve_user(&state, &req);
+    let tree = crate::groups::Tree::load(&state.db);
+    let join_groups: Vec<Value> = tree
+        .listed()
+        .iter()
+        .map(|g| json!({"id": g.id, "name": g.name, "description": g.description}))
+        .collect();
     Json(json!({
         "setup_required": setup_required,
         "auth_disabled": auth::auth_disabled(),
         "authenticated": user.is_some(),
         "user": user.as_ref().map(user_json),
         "rp_id": state.rp.rp_id,
+        "join_groups": join_groups,
     }))
 }
 
@@ -206,7 +215,7 @@ async fn setup_finish(
     }
     let user = state
         .db
-        .create_user(&user_id, &username, "owner")
+        .create_user(&user_id, &username, "owner", "full")
         .map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
     state
         .db
@@ -214,7 +223,7 @@ async fn setup_finish(
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
     println!("first-run setup: owner account '{}' created with a passkey", user.username);
-    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code})))
+    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code}), auth::SESSION_DAYS))
 }
 
 // ---- public: login -------------------------------------------------------------------
@@ -236,6 +245,9 @@ async fn login_start(
         };
         let keys: Vec<Passkey> = load_passkeys(&state, &user.id).into_iter().map(|(_, k)| k).collect();
         if keys.is_empty() {
+            if user.kind == "guest" {
+                return Err(err(StatusCode::NOT_FOUND, "that is a guest account; sign in with its sign-in code"));
+            }
             return Err(err(StatusCode::NOT_FOUND, "that account has no passkey yet; use its invite link"));
         }
         let (options, auth_state) = state
@@ -312,7 +324,7 @@ async fn login_finish(
             }
         }
     }
-    Ok(start_session(&state, &user, json!({})))
+    Ok(start_session(&state, &user, json!({}), auth::SESSION_DAYS))
 }
 
 async fn logout(State(state): State<Arc<AppState>>, req: Request) -> impl IntoResponse {
@@ -380,7 +392,7 @@ async fn invite_finish(
     let user = state.db.get_user(&user_id).ok_or_else(|| err(StatusCode::NOT_FOUND, "user vanished"))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
     println!("invite accepted: '{}' enrolled a passkey", user.username);
-    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code})))
+    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code}), auth::SESSION_DAYS))
 }
 
 // ---- public: recovery (lost every passkey) -------------------------------------------
@@ -426,16 +438,48 @@ async fn recover_finish(
         .add_passkey(&cred_id, &user_id, &key_name(&body.key_name), &passkey_json)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     state.db.use_recovery_code(&code_hash);
+    // A guest who enrols a passkey becomes a full account.
+    state.db.set_user_kind(&user_id, "full");
     let user = state.db.get_user(&user_id).ok_or_else(|| err(StatusCode::NOT_FOUND, "user vanished"))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
     println!("recovery: '{}' re-enrolled a passkey", user.username);
-    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code})))
+    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code}), auth::SESSION_DAYS))
 }
 
 // ---- signed-in user: own account ------------------------------------------------------
 
-async fn me(Extension(CurrentUser(user)): Extension<CurrentUser>) -> Json<Value> {
-    Json(user_json(&user))
+/// The caller, their memberships, and the groups they can charge jobs to.
+async fn me(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+) -> Json<Value> {
+    let (tree, viewer) = crate::groups_api::context(&state, &user);
+    let mut v = user_json(&user);
+    let groups: Vec<Value> = viewer
+        .memberships
+        .iter()
+        .filter(|m| tree.get(&m.group_id).is_some())
+        .map(|m| {
+            json!({
+                "group_id": m.group_id,
+                "path": tree.display_path(&m.group_id),
+                "role": m.role,
+                "status": m.status,
+                "keep_models": tree.effective(&m.group_id).keep_models,
+            })
+        })
+        .collect();
+    let obj = v.as_object_mut().unwrap();
+    obj.insert("groups".into(), json!(groups));
+    obj.insert(
+        "chargeable".into(),
+        json!(viewer
+            .chargeable(&tree)
+            .into_iter()
+            .map(|(id, path)| json!({"id": id, "path": path}))
+            .collect::<Vec<_>>()),
+    );
+    Json(v)
 }
 
 async fn list_my_passkeys(
@@ -475,6 +519,10 @@ async fn add_passkey_finish(
         .db
         .add_passkey(&cred_id, &user.id, &key_name(&body.key_name), &pk_json)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    if user.kind == "guest" {
+        state.db.set_user_kind(&user.id, "full");
+        println!("'{}' added a passkey: guest account upgraded to full", user.username);
+    }
     let rec = state.db.get_passkey(&cred_id).ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "passkey not stored"))?;
     Ok((StatusCode::CREATED, Json(passkey_json(&rec))))
 }
@@ -542,6 +590,7 @@ async fn create_my_api_key(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<CreateApiKey>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    auth::require_full(&user)?;
     if body.name.trim().is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "name is required"));
     }
@@ -567,11 +616,23 @@ async fn delete_my_api_key(
 
 // ---- admin: users ---------------------------------------------------------------------
 
-fn admin_user_json(state: &AppState, user: &User) -> Value {
+fn admin_user_json(state: &AppState, tree: &crate::groups::Tree, user: &User) -> Value {
     let mut v = user_json(user);
     if let Some(obj) = v.as_object_mut() {
         obj.insert("passkeys".into(), json!(state.db.passkey_count(&user.id)));
         obj.insert("invite_expires_at".into(), json!(state.db.pending_invite_expiry(&user.id)));
+        obj.insert(
+            "quotas".into(),
+            json!(user.quotas.as_deref().map(crate::quota::parse_rules)),
+        );
+        let groups: Vec<Value> = state
+            .db
+            .memberships_of_user(&user.id)
+            .iter()
+            .filter(|m| tree.get(&m.group_id).is_some())
+            .map(|m| json!({"group_id": m.group_id, "path": tree.display_path(&m.group_id), "role": m.role, "status": m.status}))
+            .collect();
+        obj.insert("groups".into(), json!(groups));
     }
     v
 }
@@ -581,11 +642,12 @@ async fn list_users(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
 ) -> Result<Json<Value>, ApiError> {
     auth::require_admin(&user)?;
+    let tree = crate::groups::Tree::load(&state.db);
     let users: Vec<Value> = state
         .db
         .list_users()
         .iter()
-        .map(|u| admin_user_json(&state, u))
+        .map(|u| admin_user_json(&state, &tree, u))
         .collect();
     Ok(Json(json!(users)))
 }
@@ -623,12 +685,13 @@ async fn create_user(
     }
     let user = state
         .db
-        .create_user(&Uuid::new_v4().to_string(), &body.username, role)
+        .create_user(&Uuid::new_v4().to_string(), &body.username, role, "full")
         .map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
     let (invite_url, expires_at) = issue_invite(&state, &user.id, &actor.id);
+    let tree = crate::groups::Tree::load(&state.db);
     Ok((
         StatusCode::CREATED,
-        Json(json!({"user": admin_user_json(&state, &user), "invite_url": invite_url, "expires_at": expires_at})),
+        Json(json!({"user": admin_user_json(&state, &tree, &user), "invite_url": invite_url, "expires_at": expires_at})),
     ))
 }
 
@@ -652,7 +715,20 @@ async fn reissue_invite(
 
 #[derive(Deserialize)]
 struct UpdateUser {
+    #[serde(default)]
     role: Option<String>,
+    /// Present → per-user quota rules (`null` = back to the site default).
+    #[serde(default, deserialize_with = "deserialize_some")]
+    quotas: Option<Option<Vec<crate::quota::Rule>>>,
+}
+
+/// Distinguish an absent field (None) from an explicit null (Some(None)).
+fn deserialize_some<'de, T, D>(d: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    T::deserialize(d).map(Some)
 }
 
 async fn update_user(
@@ -674,7 +750,18 @@ async fn update_user(
         }
         state.db.update_user_role(&id, role);
     }
-    Ok(Json(admin_user_json(&state, &state.db.get_user(&id).unwrap_or(target))))
+    if let Some(quotas) = &body.quotas {
+        if target.role == "owner" && actor.id != target.id {
+            return Err(err(StatusCode::FORBIDDEN, "only the owner can change the owner's quotas"));
+        }
+        if let Some(rules) = quotas {
+            crate::quota::validate_rules(rules).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+        }
+        let json = quotas.as_ref().map(|r| serde_json::to_string(r).unwrap());
+        state.db.set_user_quotas(&id, json.as_deref());
+    }
+    let tree = crate::groups::Tree::load(&state.db);
+    Ok(Json(admin_user_json(&state, &tree, &state.db.get_user(&id).unwrap_or(target))))
 }
 
 async fn delete_user(

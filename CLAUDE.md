@@ -31,8 +31,16 @@ Native builds mirror the Dockerfile's steps:
 
 - Linux needs GNU ld (`.cargo/config.toml` sets `-fuse-ld=bfd`): the static
   C++ archives have circular deps that need `--start-group`.
-- `FARMSLICER_SKIP_CXX=1 cargo check` typechecks the Rust side without the
-  C++ toolchain (build.rs returns early). Use it on Windows/dev machines.
+- `FARMSLICER_SKIP_CXX=1` skips the C++ bridge (build.rs returns early and
+  sets cfg `farmslicer_no_cxx`): `src/slicer.rs` compiles a stub slicer that
+  fails every server slice, so the binary links and runs without libslic3r.
+  `cargo check`/`cargo test` with it work anywhere OpenSSL can build (not on
+  this Windows box without Strawberry Perl; not in WSL without make).
+- **Tests**: `tests/run-e2e.sh` builds the stub server and runs every
+  `tests/*-e2e.mjs` against a fresh instance (HOST=127.0.0.1, port 9339);
+  `tests/lib.mjs` has the software passkey authenticator + cookie client.
+  From Windows, run it on buildhost: tar `Cargo.* build.rs .cargo src tests`
+  to a home dir there and run with `CARGO_TARGET_DIR` set. CI runs it too.
 - Windows: Visual Studio Build Tools, Strawberry Perl (MSYS perl can't build
   OpenSSL), CMake before Strawberry's `c/bin` in PATH. `build.rs` expects the
   MSVC layout (`Release/` subdirs, `.lib`), and OCCT/GMP/MPFR DLLs must be
@@ -81,6 +89,11 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, model, config_json, out)`;
   `extern "Rust"` `slice_progress` / `slice_cancelled`
 - `src/discovery.rs` — Bambu SSDP listener
+- `src/groups.rs` — group tree, inherited settings, permissions
+  (`can_manage`, `can_govern`), job visibility, seasons; `src/groups_api.rs`
+  (groups, members, links, library, usage, site settings);
+  `src/join_api.rs` (join flow, guest accounts); `src/quota.rs`
+  (rules, periods, three-layer check). Plan: `plans/groups-quotas-registration.md`
 - `cxx/slice_core.{hpp,cpp}` — **the** slicing pipeline (Model::read_from_file →
   config from JSON via temp file on top of `FullPrintConfig::defaults()` →
   place on bed → Print::apply/validate/process/export_gcode → stats). Shared by
@@ -99,12 +112,13 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `.github/workflows/build.yml` — check → wasm → image (registry build cache)
 - `extern/OrcaSlicer/` — submodule @ v2.4.2 (libslic3r + 11k vendor profiles)
 - `data/` — runtime (gitignored): SQLite db, models, G-code
-- `plans/` — living plans; `plans/get-online.md` is the current one
+- `tests/` — API end-to-end tests (`run-e2e.sh`, `lib.mjs`, `*-e2e.mjs`)
+- `plans/` — living plans
 
 ## Architecture
 
 - Rust handles HTTP, job queue, database, profile resolution; libslic3r does
-  the slicing. `SlicerHandle(UniquePtr<Slicer>)` with `unsafe impl Send + Sync`,
+  the slicing. `SlicerHandle(slicer::SlicerBox)` with `unsafe impl Send + Sync`,
   behind a `Mutex` → one slice at a time; queued jobs wait on the mutex.
 - Profile system merges machine + process + filament JSON (child keys win) into
   one config object; per-job overrides are merged on top; stored on the job as
@@ -133,6 +147,15 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   software-authenticator end-to-end test (webauthn-rs builds OpenSSL from
   source via the `openssl` crate's `vendored` feature, which on Windows needs
   Strawberry Perl; typecheck on Linux if that bites).
+- Groups (`src/groups.rs`): a tree; direct memberships (`member`/`manager`,
+  `active`/`pending`); settings JSON inherited down the tree (`listed` and
+  `subgroups` are per group). `jobs.group_id` charges and shares a job; job
+  visibility = creator, active members if `shared_library`, managers of the
+  group or an ancestor, admins. Account `kind` `full`|`guest`: guests have no
+  credential (long session + one-time sign-in codes stored in
+  `recovery_codes`); `auth::require_full` blocks them from API keys,
+  printers, profiles, group creation. Quotas are checked in `create_job`
+  (429). Nothing deployment-specific (league/team names) belongs in the code.
 
 ## Known Issues
 

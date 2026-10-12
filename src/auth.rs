@@ -11,6 +11,12 @@
 //!   as `Authorization: Bearer fsk_...`.
 //! - Roles: `owner` (first account), `admin`, `user`. Admins cannot modify
 //!   the owner.
+//! - Kinds: `full` accounts sign in with passkeys; `guest` accounts (created
+//!   through a group's join flow when the group allows it, src/join_api.rs)
+//!   have no credential: a long-lived session plus one-time sign-in codes
+//!   (stored like recovery codes). Guests can't create API keys, change
+//!   printers or profiles, or create groups; adding a passkey (or recovering
+//!   with the code) makes them full accounts.
 //! - WebAuthn relying party: `FARMSLICER_ORIGINS` (comma-separated, first one
 //!   is canonical; its host is the RP ID, which must never change once users
 //!   have enrolled). Default for development: `http://localhost:9337` and the
@@ -91,6 +97,12 @@ pub enum RegisterPurpose {
     Recovery { user_id: String, code_hash: String },
     /// A signed-in user adding another passkey.
     AddKey { user_id: String },
+    /// A new account created through a group's join flow.
+    Join {
+        user_id: String,
+        username: String,
+        request: Box<crate::join_api::JoinRequest>,
+    },
 }
 
 pub fn configured_origins() -> Vec<Url> {
@@ -213,10 +225,10 @@ pub fn valid_username(name: &str) -> bool {
 
 // ---- sessions -----------------------------------------------------------------
 
-pub fn session_cookie(token: &str) -> String {
+pub fn session_cookie(token: &str, days: i64) -> String {
     format!(
         "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
-        SESSION_DAYS * 86400
+        days * 86400
     )
 }
 
@@ -268,6 +280,8 @@ fn dev_user() -> User {
         role: "owner".to_string(),
         created_at: String::new(),
         last_login: None,
+        kind: "full".to_string(),
+        quotas: None,
     }
 }
 
@@ -295,6 +309,18 @@ pub async fn require_auth(
             )
                 .into_response()
         }
+    }
+}
+
+/// Guests (credential-less accounts) are refused.
+pub fn require_full(user: &User) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
+    if user.kind == "guest" {
+        Err((
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({"error": "guest accounts can't do that; add a passkey on your Account page"})),
+        ))
+    } else {
+        Ok(())
     }
 }
 

@@ -2,8 +2,12 @@ mod auth;
 mod auth_api;
 mod db;
 mod discovery;
+mod groups;
+mod groups_api;
+mod join_api;
 mod profiles;
 mod progress;
+mod quota;
 mod server;
 mod slicer;
 
