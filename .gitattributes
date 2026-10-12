@@ -1,0 +1,8 @@
+# Files that must stay LF even on Windows checkouts: shell scripts and the
+# libslic3r patch are consumed on Linux (buildhost, CI), and a CR in a `\`
+# continuation or a patch hunk breaks them.
+*.sh        text eol=lf
+*.patch     text eol=lf
+*.mjs       text eol=lf
+Dockerfile  text eol=lf
+.dockerignore text eol=lf
