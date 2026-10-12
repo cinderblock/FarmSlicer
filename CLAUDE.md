@@ -121,8 +121,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 
 - `issues/eigen-2d-3d-matrix-mismatch.md` — Eigen 5.x debug assertion, worked
   around with the `NDEBUG` define in build.rs.
-- The `mt` engine aborts in Node at its first parallel section (fine in the
-  browser is the expectation; unverified in Node). CI smoke-tests `st`.
+- The `mt` engine works in Chrome (verified end to end) but `fs_slice_start`
+  never completes under Node 22 (`wasm/test/smoke.mjs --variant mt` times out)
+  and the synchronous path aborts there; Node's pthread/worker semantics
+  differ from the browser's. CI smoke-tests `st` only.
+- libslic3r's GCodeProcessor logs `Invalid T command (T1000)` for Bambu start
+  G-code on every slice; harmless.
 - Thumbnails are not embedded in G-code yet (Bambu printers show a blank preview).
 - Jobs tagged `printer_id` are not sent to printers; "routing" is bookkeeping only.
 

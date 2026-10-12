@@ -213,10 +213,47 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
   the counter at 0, the runtime exits and kills every pthread. Fix:
   `emscripten_runtime_keepalive_push()` once in `engine_threads()`; also run
   `fs_slice` on the main runtime thread inside a 1-slot `tbb::task_arena`.
-- [ ] Browser slice e2e in Chrome via `ssh -L 9338:127.0.0.1:9338 buildhost`
-  (localhost = secure context; `crossOriginIsolated` true, manifest served,
-  ST and MT modules instantiate in-page). ← **current** (chain
-  `~/fs-chain.sh`: mt rebuild → image → container restart)
+- [x] 2026-10-11: **Browser slice e2e passes in Chrome** (tunnel
+  `ssh -L 9338:127.0.0.1:9338 buildhost`, Compute = This browser, MT engine,
+  12 threads): job registered, sliced in < 2 s including engine load, G-code
+  uploaded, Jobs page shows "Browser" badge. Same cube on the server after the
+  resolver fix: **1167.4 s / 3.679 g** vs browser **1167.0 s / 3.680 g** —
+  identical. (Before the fix the server said 1220 s / 4.25 g: wrong vendor's
+  `fdm_process_common`.) The 61 "unknown config key" entries are keys in the
+  v2.4.2 vendor JSONs that v2.4.2's PrintConfig doesn't define (Bambu Studio
+  leftovers) — same list from both engines; now folded into one warning.
+- [x] 2026-10-11: stale browser jobs (tab closed mid-slice) are failed after
+  2 min without a tick (`fail_stale_browser_jobs`, 30 s task).
+- [x] 2026-10-11: final image (`farmslicer:dev` on buildhost, dev container on
+  127.0.0.1:9338) verified again in Chrome: browser job done, 1 folded
+  warning, identical numbers to the server job; the reaper failed the orphaned
+  job from the earlier tab reload. Node smoke: `st` passes; `mt` now starts
+  its pthread but stalls at the first TBB parallel section under Node 22
+  (Chrome is fine) — documented in CLAUDE.md, CI smoke-tests `st`.
+  Screenshot: `plans/get-online-jobs-page.jpg`.
+- [x] 2026-10-11: everything committed on `master`; pushed to GitHub so the
+  `Build image` workflow publishes the first image (needed for the ops pin).
+
+## Hand-off: what Cameron has to do (none of it is mine to do)
+
+1. **GitHub Actions run** of `Build image` on `cinderblock/FarmSlicer` master:
+   check it goes green (first run: ~45 min wasm job + ~90 min image job; the
+   deps layers then live in the registry build cache). Copy the `pin.json`
+   from the run summary.
+2. **GHCR package visibility**: the repo is private, so
+   `ghcr.io/cinderblock/farmslicer` is private too. Either make the package
+   public (image is AGPL-3.0, redistributable) or grant `OWNER/ops` read
+   access (Package settings → Manage Actions access).
+3. **ops**: `gh secret set BUILDHOST_FARMSLICER_PASSPHRASE --env buildhost` (the
+   old value redacted), then move `ops/plans/farmslicer-stack/` to
+   `ops/servers/buildhost/stacks/farmslicer/` with the real `pin.json`, add the
+   port-registry row + README entry, update the Caddy site comment — per
+   `ops/plans/farmslicer-stack/NOTES.md`. I staged the files but did not
+   commit or push anything in ops (needs your explicit yes per change).
+4. Later: uptime coverage for farm.example.com (ops follow-up), real
+   user accounts (`plans/auth.md`), sending jobs to printers, G-code thumbnails
+   for the Bambu display, cache-busting for `/wasm/*` (file names are stable;
+   browsers may serve a stale engine after an upgrade until reloaded).
 - [ ] CI workflow, LICENSE, ops stack staging, README/CLAUDE.md updates, commit.
 
 ## Open questions for Cameron
