@@ -1,10 +1,13 @@
 use std::path::PathBuf;
 
 fn main() {
-    // Typecheck-only builds (e.g. `cargo check` on a machine without the
-    // OrcaSlicer toolchain): skip the C++ bridge. Linking will fail, checking won't.
+    println!("cargo::rustc-check-cfg=cfg(farmslicer_no_cxx)");
+    println!("cargo:rerun-if-env-changed=FARMSLICER_SKIP_CXX");
+    // Builds without the OrcaSlicer toolchain (typechecking, the account and
+    // API tests, browser-only slicing): skip the C++ bridge and compile the
+    // stub slicer in src/slicer.rs instead, which fails every server slice.
     if std::env::var_os("FARMSLICER_SKIP_CXX").is_some() {
-        println!("cargo:rerun-if-env-changed=FARMSLICER_SKIP_CXX");
+        println!("cargo:rustc-cfg=farmslicer_no_cxx");
         return;
     }
 

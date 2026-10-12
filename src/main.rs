@@ -17,6 +17,8 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(9337);
+    // Listen address; HOST=127.0.0.1 keeps a test server off the network.
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
     let data_dir = PathBuf::from("data");
     let db = Arc::new(db::Db::open(&data_dir));
@@ -86,7 +88,7 @@ async fn main() {
 
     let app = server::router(state);
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port))
         .await
         .expect("failed to bind");
 

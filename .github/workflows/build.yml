@@ -34,8 +34,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Fast gates: frontend typecheck + build, Rust typecheck (without the C++
-  # bridge; FARMSLICER_SKIP_CXX makes build.rs a no-op).
+  # Fast gates: frontend typecheck + build, Rust typecheck, unit tests and the
+  # API end-to-end tests. All without the C++ bridge: FARMSLICER_SKIP_CXX
+  # swaps libslic3r for a stub slicer (src/slicer.rs).
   check:
     runs-on: ubuntu-latest
     steps:
@@ -59,6 +60,18 @@ jobs:
         run: cargo check --locked
         env:
           FARMSLICER_SKIP_CXX: "1"
+
+      - name: Rust unit tests
+        run: cargo test --locked
+        env:
+          FARMSLICER_SKIP_CXX: "1"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: API end-to-end tests (stub slicer)
+        run: tests/run-e2e.sh
 
   # libslic3r → WebAssembly (single-threaded + pthreads variants). The
   # Emscripten toolchain and the cross-compiled deps (Boost, CGAL, GMP, MPFR,

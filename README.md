@@ -33,6 +33,7 @@ docker run -d --name farmslicer -p 9337:9337 \
 | Env var | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `9337` | HTTP port |
+| `HOST` | `0.0.0.0` | Listen address (`127.0.0.1` for a local-only test server) |
 | `ORCA_RESOURCES_DIR` | `extern/OrcaSlicer/resources` | OrcaSlicer `resources/` tree (profiles, nozzle/flush tables) |
 | `FARMSLICER_ORIGINS` | `http://localhost:9337,http://localhost:5173` | Comma-separated origins the UI is served from. The first one is canonical: its host is the WebAuthn relying-party ID (never change it once users have enrolled) and it is used in invite links. Must be HTTPS except for `localhost`. |
 | `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner |
@@ -86,7 +87,17 @@ docker build --target orca-deps -t farmslicer:deps .   # just the slow part, onc
 Native (non-Docker) builds follow the same steps as the Dockerfile; see
 `CLAUDE.md` for the toolchain notes, including the Windows layout `build.rs`
 expects. On a machine without the OrcaSlicer toolchain,
-`FARMSLICER_SKIP_CXX=1 cargo check` typechecks the Rust side alone.
+`FARMSLICER_SKIP_CXX=1` builds the server without libslic3r: a stub slicer
+fails every server-side slice, and everything else (accounts, the API, browser
+slicing) works. `FARMSLICER_SKIP_CXX=1 cargo check` typechecks.
+
+### Tests
+
+`cargo test` (with `FARMSLICER_SKIP_CXX=1` off the build box) runs the unit
+tests. `tests/run-e2e.sh` (Linux: cargo, Node 22, curl) builds the stub server,
+starts a throwaway instance per test on `localhost:9339` and runs every
+`tests/*-e2e.mjs` against it; each test drives the HTTP API with a software
+passkey authenticator (`tests/lib.mjs`).
 
 Frontend only:
 

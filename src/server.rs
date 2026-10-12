@@ -6,7 +6,6 @@ use axum::{
     routing::{delete, get, post},
     Extension, Json, Router,
 };
-use cxx::UniquePtr;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -21,7 +20,7 @@ use crate::profiles::ProfileStore;
 use crate::progress;
 use crate::slicer;
 
-struct SlicerHandle(UniquePtr<slicer::Slicer>);
+struct SlicerHandle(slicer::SlicerBox);
 // Safety: Slicer is only accessed through Mutex, one thread at a time
 unsafe impl Send for SlicerHandle {}
 unsafe impl Sync for SlicerHandle {}
@@ -40,7 +39,7 @@ impl AppState {
     pub fn new(
         db: Arc<Db>,
         data_dir: std::path::PathBuf,
-        slicer: UniquePtr<slicer::Slicer>,
+        slicer: slicer::SlicerBox,
         profile_store: ProfileStore,
         discovered: Arc<discovery::DiscoveryMap>,
         rp: auth::Rp,

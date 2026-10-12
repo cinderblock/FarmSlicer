@@ -19,6 +19,8 @@ pub fn install_sink(sink: Sink) {
     let _ = SINK.set(sink);
 }
 
+// Only the C++ bridge calls these; the stub slicer (FARMSLICER_SKIP_CXX) doesn't.
+#[cfg_attr(farmslicer_no_cxx, allow(dead_code))]
 pub fn report(job_id: &str, percent: i32, message: &str) {
     if let Some(sink) = SINK.get() {
         sink(job_id, percent.clamp(0, 100), message);
@@ -31,6 +33,7 @@ pub fn request_cancel(job_id: &str) {
     guard.get_or_insert_with(HashSet::new).insert(job_id.to_string());
 }
 
+#[cfg_attr(farmslicer_no_cxx, allow(dead_code))]
 pub fn is_cancelled(job_id: &str) -> bool {
     let guard = CANCELLED.lock().unwrap();
     guard.as_ref().is_some_and(|set| set.contains(job_id))
