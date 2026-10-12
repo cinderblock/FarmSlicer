@@ -20,7 +20,9 @@ mosquitto_sub $O -t device/$S/request | while read -r line; do
       name=${url#ftp://}; name=${name#/}
       if [ -f "/sdcard/$name" ]; then
         pub "{\"print\":{\"command\":\"project_file\",\"sequence_id\":\"$seq\",\"result\":\"SUCCESS\",\"url\":\"file:///sdcard/$name\"}}"
-        FILE="/sdcard/$name"; SUBTASK=$(echo "$line" | sed -n 's/.*"subtask_name":"\([^"]*\)".*/\1/p')
+        # Like real printers: gcode_file is the extracted plate; the job is
+        # known by its subtask_name.
+        FILE="/data/Metadata/plate_1.gcode"; SUBTASK=$(echo "$line" | sed -n 's/.*"subtask_name":"\([^"]*\)".*/\1/p')
         ( STATE=PREPARE; PCT=0; ERR=0; status; sleep 2
           for PCT in 10 30 60 90; do STATE=RUNNING; status; sleep 1; done
           STATE=FINISH; PCT=100; status ) &

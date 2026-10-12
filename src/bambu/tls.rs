@@ -2,8 +2,12 @@
 //!
 //! A printer presents a certificate chained to Bambu's own CA and issued for
 //! its serial number, while we reach it by IP address: nothing a public trust
-//! store can vouch for. We accept the certificate but still check the
-//! handshake signatures, so the server has to hold the certificate's key.
+//! store can vouch for. We accept it without checks. Real printers send an
+//! X.509 *v1* certificate, which webpki refuses to parse
+//! (`UnsupportedCertVersion`), so the handshake signatures can't be checked
+//! through it either; and with any certificate accepted, that check would
+//! prove nothing anyway (an impostor signs with its own key). Pinning each
+//! printer's certificate on first contact would be the real protection.
 
 use std::sync::{Arc, OnceLock};
 
@@ -11,9 +15,7 @@ use tokio_rustls::rustls::client::Resumption;
 use tokio_rustls::rustls::client::danger::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
 };
-use tokio_rustls::rustls::crypto::{
-    CryptoProvider, verify_tls12_signature, verify_tls13_signature,
-};
+use tokio_rustls::rustls::crypto::CryptoProvider;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio_rustls::rustls::{self, ClientConfig, DigitallySignedStruct, SignatureScheme};
 
@@ -34,20 +36,20 @@ impl ServerCertVerifier for AcceptPrinterCert {
 
     fn verify_tls12_signature(
         &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+        Ok(HandshakeSignatureValid::assertion())
     }
 
     fn verify_tls13_signature(
         &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+        Ok(HandshakeSignatureValid::assertion())
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {

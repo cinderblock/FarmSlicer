@@ -266,7 +266,8 @@ pub fn start_command(print: &PrintRecord, plate: &Plate, mapping: &[i64], option
         "profile_id": "0",
         "task_id": "0",
         "subtask_id": "0",
-        "subtask_name": print.name,
+        // Unique, so reports can be matched to this print (see `match_print`).
+        "subtask_name": task_name(print),
         "file": print.file_name,
         "url": format!("ftp://{}", print.file_name),
         "md5": plate.gcode_md5,
@@ -425,16 +426,41 @@ fn started_on_printer(state: &AppState, print: &PrintRecord) -> bool {
         .printer_id
         .as_deref()
         .and_then(|id| state.printers.status(id))
-        .is_some_and(|s| is_ours(print, &s) && matches!(s.state.as_deref(), Some("PREPARE" | "RUNNING" | "PAUSE")))
+        .is_some_and(|s| {
+            match_print(print, &s) != Match::Other && matches!(s.state.as_deref(), Some("PREPARE" | "RUNNING" | "PAUSE"))
+        })
 }
 
 // -- Tracking --------------------------------------------------------------------
 
-/// Is the printer's current job this print?
-fn is_ours(print: &PrintRecord, status: &PrinterStatus) -> bool {
-    match status.gcode_file.as_deref() {
-        Some(file) if !file.is_empty() => file.ends_with(&print.file_name) || file.contains(&print.file_name),
-        _ => status.job_name.as_deref() == Some(print.name.as_str()),
+/// The job name we send (and the printer shows): the file's stem, unique per
+/// print.
+pub fn task_name(print: &PrintRecord) -> String {
+    print.file_name.strip_suffix(".gcode.3mf").unwrap_or(&print.file_name).to_string()
+}
+
+#[derive(Debug, PartialEq)]
+enum Match {
+    /// The report names this print.
+    Ours,
+    /// The report names no job we can tell apart (LAN starts may report
+    /// "project_file" or nothing).
+    Unnamed,
+    /// The report names another job.
+    Other,
+}
+
+/// Is the printer's current job this print? Real printers report the
+/// extracted plate as `gcode_file` (`/data/Metadata/plate_1.gcode`), so the
+/// unique job name we sent is what identifies it.
+fn match_print(print: &PrintRecord, status: &PrinterStatus) -> Match {
+    if status.gcode_file.as_deref().is_some_and(|f| f.contains(&print.file_name)) {
+        return Match::Ours;
+    }
+    match status.subtask_name.as_deref() {
+        Some(s) if s == task_name(print) => Match::Ours,
+        None | Some("project_file") => Match::Unnamed,
+        Some(_) => Match::Other,
     }
 }
 
@@ -445,12 +471,23 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
         return None;
     }
     let state = status.state.as_deref().unwrap_or("");
-    if !is_ours(print, status) {
-        // Until the printer picks our file up it still reports the previous job.
-        if matches!(print.status.as_str(), "printing" | "paused") && matches!(state, "PREPARE" | "RUNNING" | "PAUSE") {
-            return Some(("failed", None, Some("another print replaced it on the printer".to_string())));
+    let started = matches!(print.status.as_str(), "printing" | "paused");
+    match match_print(print, status) {
+        Match::Ours => {}
+        // Until the printer picks our file up it still reports the previous
+        // job, which may be unnamed too: an unnamed report only starts our
+        // print (it is the one just sent), it can't finish a print not yet
+        // seen running.
+        Match::Unnamed if !started => {
+            return matches!(state, "PREPARE" | "RUNNING").then(|| ("printing", status.percent, None));
         }
-        return None;
+        Match::Unnamed => {}
+        Match::Other => {
+            if started && matches!(state, "PREPARE" | "RUNNING" | "PAUSE") {
+                return Some(("failed", None, Some("another print replaced it on the printer".to_string())));
+            }
+            return None;
+        }
     }
     match state {
         "PREPARE" | "RUNNING" | "SLICING" => Some(("printing", status.percent, None)),
@@ -643,11 +680,14 @@ mod tests {
         }
     }
 
-    fn report(state: &str, file: &str, error: Option<i64>) -> PrinterStatus {
+    /// A report as real printers send it: the plate as gcode_file, the job
+    /// in subtask_name.
+    fn report(state: &str, subtask: Option<&str>, error: Option<i64>) -> PrinterStatus {
         let mut s = PrinterStatus::offline("p", None);
         s.online = true;
         s.state = Some(state.into());
-        s.gcode_file = Some(file.into());
+        s.gcode_file = Some("/data/Metadata/plate_1.gcode".into());
+        s.subtask_name = subtask.map(String::from);
         s.percent = Some(40);
         s.print_error = error;
         s
@@ -655,10 +695,11 @@ mod tests {
 
     #[test]
     fn transitions_follow_the_printer() {
-        let ours = "/sdcard/Bracket-1a2b3c4d.gcode.3mf";
+        let ours = Some("Bracket-1a2b3c4d");
         let starting = record("starting");
+        assert_eq!(task_name(&starting), "Bracket-1a2b3c4d");
         // The previous job is still on show: wait.
-        assert_eq!(transition(&starting, &report("FINISH", "/sdcard/Old.gcode.3mf", None)), None);
+        assert_eq!(transition(&starting, &report("FINISH", Some("Rail Section"), None)), None);
         assert_eq!(transition(&starting, &report("RUNNING", ours, None)).unwrap().0, "printing");
         let printing = record("printing");
         assert_eq!(transition(&printing, &report("PAUSE", ours, None)).unwrap().0, "paused");
@@ -666,7 +707,19 @@ mod tests {
         assert_eq!(transition(&printing, &report("FAILED", ours, Some(PRINT_CANCELLED))).unwrap().0, "cancelled");
         let failed = transition(&printing, &report("FAILED", ours, Some(0x0500_4038))).unwrap();
         assert_eq!((failed.0, failed.2.as_deref()), ("failed", Some("printer error 0500_4038")));
-        assert_eq!(transition(&printing, &report("RUNNING", "/sdcard/Other.gcode.3mf", None)).unwrap().0, "failed");
+        assert_eq!(transition(&printing, &report("RUNNING", Some("Other job"), None)).unwrap().0, "failed");
+    }
+
+    #[test]
+    fn unnamed_reports_only_start_a_print() {
+        let starting = record("starting");
+        // A finished, unnamed previous job must not finish our new print.
+        assert_eq!(transition(&starting, &report("FINISH", Some("project_file"), None)), None);
+        assert_eq!(transition(&starting, &report("FINISH", None, None)), None);
+        assert_eq!(transition(&starting, &report("PREPARE", Some("project_file"), None)).unwrap().0, "printing");
+        // Once running, the unnamed job is ours.
+        let printing = record("printing");
+        assert_eq!(transition(&printing, &report("FINISH", Some("project_file"), None)).unwrap().0, "finished");
     }
 
     #[test]

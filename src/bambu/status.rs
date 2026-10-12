@@ -119,6 +119,10 @@ pub struct PrinterStatus {
     pub layer: Option<i64>,
     pub total_layers: Option<i64>,
     pub job_name: Option<String>,
+    /// `subtask_name` as reported (LAN starts may report "project_file").
+    pub subtask_name: Option<String>,
+    /// Real printers report the extracted plate (`/data/Metadata/plate_1.gcode`),
+    /// not the uploaded file.
     pub gcode_file: Option<String>,
     /// `print_error`, when non-zero.
     pub print_error: Option<i64>,
@@ -215,6 +219,7 @@ impl PrinterStatus {
             layer: int(&r["layer_num"]),
             total_layers: int(&r["total_layer_num"]),
             job_name,
+            subtask_name: text(&r["subtask_name"]),
             gcode_file: text(&r["gcode_file"]),
             print_error: int(&r["print_error"]).filter(|&e| e != 0),
             hms,

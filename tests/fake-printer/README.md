@@ -3,6 +3,8 @@
 A container that answers like a Bambu Lab printer in LAN mode, for
 developing and testing FarmSlicer's printer link without real hardware:
 
+- Like the printers it presents an X.509 v1 certificate (no extensions),
+  which some TLS stacks refuse to parse.
 - MQTT over TLS on 8883 (mosquitto), user `bblp`, access code `12345678`,
   serial `FAKE00000000001`. `responder.sh` answers `pushall` with a full
   report (AMS with four trays, an external spool), acks commands, and on
