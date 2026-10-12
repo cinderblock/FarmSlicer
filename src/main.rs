@@ -39,6 +39,21 @@ async fn main() {
 
     tokio::spawn(discovery::run(discovered.clone()));
 
+    // Reap browser jobs whose tab went away (no progress tick for 2 minutes).
+    {
+        let db = db.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                tick.tick().await;
+                let n = db.fail_stale_browser_jobs(120);
+                if n > 0 {
+                    println!("failed {n} stale browser job(s)");
+                }
+            }
+        });
+    }
+
     let passphrase = server::AppState::passphrase();
     if passphrase.is_some() {
         println!("Auth enabled (ADMIN_PASSPHRASE set)");

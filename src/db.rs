@@ -368,6 +368,22 @@ impl Db {
         .unwrap();
     }
 
+    /// Browser jobs are driven by a tab; if it closes mid-slice nothing ever
+    /// reports back. Fail any browser job that has not ticked for `max_age`
+    /// seconds. Returns how many were failed.
+    pub fn fail_stale_browser_jobs(&self, max_age_secs: i64) -> usize {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET status = 'failed', progress_message = NULL,
+                error = 'browser stopped reporting (tab closed or engine crashed)',
+                updated_at = datetime('now')
+             WHERE source = 'browser' AND status = 'slicing'
+               AND updated_at < datetime('now', ?1 || ' seconds')",
+            params![format!("-{max_age_secs}")],
+        )
+        .unwrap_or(0)
+    }
+
     pub fn cancel_job(&self, id: &str) -> bool {
         let conn = self.conn.lock().unwrap();
         conn.execute(
