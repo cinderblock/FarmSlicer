@@ -234,12 +234,18 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
 - [x] 2026-10-11: everything committed on `master`; pushed to GitHub so the
   `Build image` workflow publishes the first image (needed for the ops pin).
 
+- [x] 2026-10-12: **first CI run green** (run 38188709785: check 1 min, wasm
+  1 h 52 min cold, image 1 h 54 min cold). Published
+  `ghcr.io/cinderblock/farmslicer@sha256:dfa3fd72891f39587abc9b287e5ce4226b1cd2407a11f9a073701f481ad4d232`
+  (tags `latest`, `b282fc8f…`). Package is **private** (repo is private).
+  Real digest written into `ops/plans/farmslicer-stack/pin.json` (ops still
+  uncommitted). Workflow now skips docs-only pushes (`paths-ignore`).
+
 ## Hand-off: what Cameron has to do (none of it is mine to do)
 
-1. **GitHub Actions run** of `Build image` on `cinderblock/FarmSlicer` master:
-   check it goes green (first run: ~45 min wasm job + ~90 min image job; the
-   deps layers then live in the registry build cache). Copy the `pin.json`
-   from the run summary.
+1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much
+   faster: the Emscripten toolchain/deps are in the Actions cache and the
+   deps/libslic3r layers in the registry build cache.
 2. **GHCR package visibility**: the repo is private, so
    `ghcr.io/cinderblock/farmslicer` is private too. Either make the package
    public (image is AGPL-3.0, redistributable) or grant `OWNER/ops` read

@@ -16,6 +16,12 @@ on:
   push:
     branches:
       - master
+    # Docs-only pushes don't need a two-hour image build.
+    paths-ignore:
+      - 'plans/**'
+      - 'issues/**'
+      - '**.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 env:
