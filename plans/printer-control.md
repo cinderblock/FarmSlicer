@@ -130,13 +130,23 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
       accepted?, `ftp://<name>` url on each model, stop → `FAILED` +
       0300_400C?, H2D AMS mapping (`ams_mapping2`), P1/A1 delta reports.
 
-**Phase 3 — thumbnails and packaging** ← current
-- [ ] Software rasteriser + thumbnail callback; config `thumbnails` sizes.
-- [ ] `.gcode.3mf` via `store_bbs_3mf`; wasm bridge parity.
-- [ ] Group setting for label/logo overlay; UI to set it.
-- [ ] Jobs/Library show thumbnails. FarmSlicer-sliced jobs become sendable.
+**Phase 3 — thumbnails and packaging** (done)
+- [x] `cxx/thumbnail.cpp`: software rasteriser (z-buffer, 3x3 SS, filament
+      colours, transparent) as export_gcode's thumbnail callback; `.gcode.3mf`
+      via `store_bbs_3mf` (`9ca0bc2`). Verified: X1C cube → package with
+      model id, nozzle, GFA00, 512 px thumbnail; sends and prints on the fake
+      printer.
+- [x] Overlay: inherited group setting `thumbnail_label` (`{key}`,
+      `{group}`), per-group logo (PNG/JPEG → 256 px PNG, decoded in Rust /
+      the browser to RGBA), Sarabun SemiBold (OFL) in `resources/fonts`.
+- [x] wasm parity (`ce31b5a`): `fs_set_options`, package via MEMFS, worker
+      + Slice page upload it; st and mt engines rebuilt on buildhost.
+      Verified in Chrome: browser slice → package → print on fake printer.
+- [x] Group Settings tab: label + logo.
+- [x] Fixed on the way: Slice page sent jobs without process/filament
+      (`4ae2116`).
 
-**Phase 4 — camera**
+**Phase 4 — camera** ← current
 - [ ] RTSP (`rtsps://bblp:<code>@<ip>:322/streaming/live/1`) via ffmpeg for
       X1/H2/P2S; native port-6000 JPEG protocol for A1/P1 (the old app never
       had it). ffmpeg in the runtime image.
@@ -160,6 +170,27 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 - `prints.user_id` has no FK (like `jobs.user_id`): with
   `FARMSLICER_NO_AUTH` the stand-in owner has no users row, and a failed
   insert panicked and poisoned the DB mutex.
+- `store_bbs_3mf` gives the Model a scratch "backup" dir; `~Model` then
+  calls `remove_backup()` through libslic3r's backup-manager *thread*: the
+  single-threaded wasm engine spun at 100% CPU forever after "Done", the
+  server started a stray thread and left `/tmp/orcaslicer_model/...`.
+  slice_core calls `remove_backup_path_if_exist()` itself.
+- libslic3r's `png::decode_colored_png` only takes 8-bit RGB/RGBA and stores
+  rows bottom-up; logos are decoded by the callers instead.
+- `ThumbnailData` rows are bottom-up (OpenGL); PNG writers flip.
+- For Bambu printers libslic3r embeds no G-code thumbnails; the printer
+  shows the package's `plate_N.png`.
+- `.dockerignore` excludes OrcaSlicer's `resources/fonts`; the label font is
+  vendored in `resources/fonts` instead (un-ignoring would bust the
+  libslic3r layer cache).
+- Dev loop for C++: container `fs-cxx-dev` from image `farmslicer:libslic3r`
+  (mounts `~/farmslicer-printer-control`), `cxx-build.sh` (~40 s full
+  server build), `cxx-run-auth.sh` (9341, real auth), `overlay-e2e.mjs`.
+  Wasm: `~/farmslicer-wasm` (sources synced from this branch; backup of
+  the previous ones in `~/farmslicer-wasm-src-backup-2026-10-12.tar`),
+  `~/farmslicer-wasm-build.sh st|mt`.
+- `pkill -f` inside `docker exec bash -c '...'` matches its own command
+  line when the pattern appears anywhere in it; use PID files.
 - The Chrome extension's screenshots time out now and then on the dev
   server; the page itself has no long tasks (checked with a
   PerformanceObserver). Retry.
