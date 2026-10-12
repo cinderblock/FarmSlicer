@@ -274,6 +274,28 @@ impl Db {
             .unwrap_or(0)
     }
 
+    /// True when nobody can possibly sign in: no passkeys anywhere, no live
+    /// invite, no unused recovery code. The installation then counts as not
+    /// set up (see `auth::setup_required`).
+    pub fn no_way_in(&self) -> bool {
+        let conn = self.conn.lock().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+        count("SELECT COUNT(*) FROM passkeys") == 0
+            && count("SELECT COUNT(*) FROM invites WHERE used_at IS NULL AND expires_at > datetime('now')") == 0
+            && count("SELECT COUNT(*) FROM recovery_codes WHERE used_at IS NULL") == 0
+    }
+
+    /// Remove accounts that have no passkey (first-run re-bootstrap: such
+    /// accounts are unreachable). Cascades to their sessions, keys, invites.
+    pub fn delete_users_without_passkeys(&self) -> usize {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM users WHERE id NOT IN (SELECT DISTINCT user_id FROM passkeys)",
+            [],
+        )
+        .unwrap_or(0)
+    }
+
     pub fn list_users(&self) -> Vec<User> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn

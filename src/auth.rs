@@ -48,6 +48,14 @@ pub fn auth_disabled() -> bool {
     std::env::var_os("FARMSLICER_NO_AUTH").is_some()
 }
 
+/// First-run setup is offered when there are no accounts, and also when the
+/// accounts that exist can never sign in (no passkey, no live invite, no
+/// unused recovery code): an installation nobody can enter is not set up.
+/// Setup then replaces those unreachable accounts.
+pub fn setup_required(db: &crate::db::Db) -> bool {
+    !auth_disabled() && (db.user_count() == 0 || db.no_way_in())
+}
+
 // ---- WebAuthn relying party -------------------------------------------------
 
 pub struct Rp {
@@ -275,7 +283,7 @@ pub async fn require_auth(
             next.run(req).await
         }
         None => {
-            let body = if state.db.user_count() == 0 {
+            let body = if setup_required(&state.db) {
                 r#"{"error":"setup required","setup_required":true}"#
             } else {
                 r#"{"error":"authentication required"}"#

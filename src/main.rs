@@ -69,8 +69,8 @@ async fn main() {
     );
     if auth::auth_disabled() {
         println!("Auth DISABLED (FARMSLICER_NO_AUTH is set): every request runs as owner");
-    } else if db.user_count() == 0 {
-        println!("First run: no accounts yet. Open the web UI to create the owner account with a passkey.");
+    } else if auth::setup_required(&db) {
+        println!("First run: no usable accounts. Open the web UI to create the owner account with a passkey.");
     } else {
         println!("Auth enabled: {} account(s)", db.user_count());
     }

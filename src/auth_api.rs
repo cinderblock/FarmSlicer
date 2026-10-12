@@ -149,7 +149,7 @@ fn key_name(body: &Option<String>) -> String {
 // ---- public: status ------------------------------------------------------------
 
 async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
-    let setup_required = !auth::auth_disabled() && state.db.user_count() == 0;
+    let setup_required = auth::setup_required(&state.db);
     let user = auth::resolve_user(&state, &req);
     Json(json!({
         "setup_required": setup_required,
@@ -171,7 +171,7 @@ async fn setup_start(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SetupStart>,
 ) -> Result<Json<Value>, ApiError> {
-    if state.db.user_count() > 0 {
+    if !auth::setup_required(&state.db) {
         return Err(err(StatusCode::CONFLICT, "setup already completed"));
     }
     if !auth::valid_username(&body.username) {
@@ -195,10 +195,15 @@ async fn setup_finish(
     let RegisterPurpose::Setup { user_id, username } = purpose else {
         return Err(err(StatusCode::BAD_REQUEST, "not a setup registration"));
     };
-    if state.db.user_count() > 0 {
+    if !auth::setup_required(&state.db) {
         return Err(err(StatusCode::CONFLICT, "setup already completed"));
     }
     let (cred_id, passkey_json) = finish_registration(&state, &reg_state, &body.credential)?;
+    // Re-bootstrap: accounts nobody can sign in to (no passkey) make way.
+    let removed = state.db.delete_users_without_passkeys();
+    if removed > 0 {
+        println!("first-run setup: removed {removed} account(s) that had no passkey");
+    }
     let user = state
         .db
         .create_user(&user_id, &username, "owner")
