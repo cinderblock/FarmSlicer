@@ -21,3 +21,16 @@ Known problems not being worked on right now. Claim one by marking it
 
 Why it matters: lint can't gate CI until it is clean, and the
 set-state-in-effect cases cause extra renders.
+
+## "Sign in with a passkey" (no username) fails for non-discoverable credentials
+
+Registration (`auth_api::begin_registration` → webauthn-rs
+`start_passkey_registration`) sends `residentKey: "discouraged"`. Authenticators
+that honour that (hardware security keys; Chromium's virtual authenticator)
+store a non-discoverable credential, so the username-less button fails with
+"The passkey prompt was cancelled or timed out"; "Sign in with a username
+instead" works. Windows Hello / iCloud / Google Password Manager store
+discoverable credentials regardless, so most users won't notice. Reproduce:
+Playwright + CDP `WebAuthn.addVirtualAuthenticator` (ctap2, internal,
+hasResidentKey), register through setup, invite or join, log out, use the
+username-less button. Affects setup, invites and the join flow alike.

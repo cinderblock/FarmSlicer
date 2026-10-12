@@ -185,9 +185,16 @@ and `keep_models` on the teams. Exact names live outside this repo.
    Settings.
 5. ~~UI check in a browser~~ against the stub server on the build box
    (tunnelled to localhost:9339, seeded by a script).
-6. **[current]** Deploy and configure the league on the real instance:
-   push → CI image → ops pin (needs the maintainer's go-ahead for the push
-   and the ops change), then create the groups in the UI.
+6. ~~Deploy~~: pushed `ccfee49`, CI green (unit + e2e on GitHub's runner),
+   image `sha256:6016040e…`, ops pin commit `9f50b22`, Server Deploys run
+   succeeded; the live container runs `ccfee49` with the existing account.
+7. ~~Configure the league on the live instance~~ (2026-10-12, through the
+   owner's browser session): a listed top-level league group (new accounts
+   and guests allowed, approval to join, choose a program), two program
+   subgroups with self-service team numbers (`[0-9]{1,5}`, creator manages,
+   keep models, season starts 01-01 and 09-01), a public join link. The
+   join flow was checked with `/api/join/resolve` (preview only; nothing
+   created). No quotas set yet.
 
 ## Findings / gotchas
 
@@ -212,6 +219,10 @@ and `keep_models` on the teams. Exact names live outside this repo.
 - `tests/run-e2e.sh` on a port another server already uses tested that
   server instead (every check failed with "setup already completed"); it
   now refuses to start when the port answers.
+- The ops checkout had a stale local commit (a duplicate of one already on
+  origin under another hash) and many uncommitted files from other
+  threads; the pin commit was made in a temporary worktree on top of
+  `origin/master` and pushed from there, leaving the shared checkout alone.
 - Possible follow-ups, not built: rate limiting guest/account creation on
   public links; per-member usage table in the UI beyond the usage endpoint;
   re-slicing a kept model from the library.
@@ -229,12 +240,15 @@ and `keep_models` on the teams. Exact names live outside this repo.
       pending), owner's group page (library, members + approve, inherited
       settings with sources, quotas + members' usage), Slice group picker,
       Users, Settings, Account (full and guest), Jobs, Library
-- [ ] Not exercised in a real browser: passkey registration through the
-      join page (covered by the API test with a software authenticator) and
-      a browser-engine slice uploading its model (the stub build has no
-      engine; the upload itself is covered by the API test)
-- [ ] Pushed / deployed (waiting for the maintainer)
-- [ ] League configured on the deployed instance
+- [x] Real image + headless Chromium (Playwright, throwaway container on
+      the build box): guest joins a keep-models group, slices a cube with the
+      WebAssembly engine charged to it, the job is in the group library with
+      its model kept and downloadable; a passkey account signs up through
+      the join page (CDP virtual authenticator) and signs back in by
+      username. Username-less sign-in fails for non-discoverable
+      credentials: pre-existing, logged in `ISSUES.md`.
+- [x] Pushed and deployed (`ccfee49`, ops `9f50b22`)
+- [x] League configured on the deployed instance
 
 ## Open questions for the user
 
