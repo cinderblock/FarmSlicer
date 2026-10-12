@@ -850,6 +850,10 @@ impl Db {
 
     pub fn delete_printer(&self, id: &str) -> bool {
         let conn = self.conn.lock().unwrap();
+        // jobs.printer_id references printers without ON DELETE: untag the
+        // printer's jobs first, or the foreign key refuses the delete.
+        conn.execute("UPDATE jobs SET printer_id = NULL WHERE printer_id = ?1", params![id])
+            .unwrap();
         conn.execute("DELETE FROM printers WHERE id = ?1", params![id])
             .unwrap()
             > 0
