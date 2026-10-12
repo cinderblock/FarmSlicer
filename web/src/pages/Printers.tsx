@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
-import { useJson } from "../api";
+import { localDateTime, useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
 import { useActivePrints, usePrinterStatuses, type Printer } from "../printers";
 
@@ -19,6 +19,15 @@ interface DiscoveredPrinter {
   machine_profile: string;
   ip: string;
   signal: string;
+}
+
+interface OpenReport {
+  id: string;
+  printer_id: string | null;
+  printer_name: string;
+  username: string | null;
+  description: string;
+  created_at: string;
 }
 
 /** The add/edit form's fields. `accessCode` empty on edit = keep the old one. */
@@ -64,7 +73,7 @@ export default function PrintersPage() {
   const models = useMemo(() => modelsData ?? [], [modelsData]);
   const statuses = usePrinterStatuses();
   const activePrints = useActivePrints();
-  const reports = useJson<{ printer_id: string | null }[]>(isAdmin ? "/api/printer-reports?open=1" : null, rev).data;
+  const reports = useJson<OpenReport[]>(isAdmin ? "/api/printer-reports?open=1" : null, rev).data;
   const openReports = (id: string) => (reports ?? []).filter((r) => r.printer_id === id).length;
   // Cards by area (as entered), unnamed last.
   const areas = [...new Set(printers.map((p) => p.area))].sort((a, b) =>
@@ -360,6 +369,31 @@ export default function PrintersPage() {
               {draft.id ? "Save" : "Add Printer"}
             </button>
           </div>
+        </div>
+      )}
+
+      {isAdmin && (reports?.length ?? 0) > 0 && (
+        <div className="card reports-panel">
+          <h3>Problem reports</h3>
+          {reports!.map((r) => (
+            <div key={r.id} className="report-row">
+              <div>
+                <strong>{r.printer_name}</strong>: {r.description}
+                <div className="hint">
+                  {r.username ?? "someone"}, {localDateTime(r.created_at)}
+                </div>
+              </div>
+              <button
+                className="btn-sm"
+                onClick={async () => {
+                  await fetch(`/api/printer-reports/${r.id}/resolve`, { method: "POST" });
+                  setRev((x) => x + 1);
+                }}
+              >
+                Resolved
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

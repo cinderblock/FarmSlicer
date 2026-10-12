@@ -635,6 +635,21 @@ body {
   flex-wrap: wrap;
 }
 
+.reports-panel {
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-color: var(--warning);
+}
+
+.report-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
 /* Printer cameras */
 .modal.camera-modal {
   width: min(1100px, 100%);
