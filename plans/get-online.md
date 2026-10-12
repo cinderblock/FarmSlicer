@@ -4,7 +4,7 @@
 
 ## Goal
 
-Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
+Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocean"):
 
 1. **Make the online slicer actually work.** The Rust server links libslic3r but a
    slice has never completed end to end (no G-code was ever produced on the old
@@ -20,8 +20,7 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
 
 ## Environment / context
 
-- Repo: `C:\Users\me\git\Personal Projects\Farm Slicer` (GitHub
-  `cinderblock/FarmSlicer`, private, branch `master`). Rust 2024 + axum, cxx bridge
+- Repo: GitHub `cinderblock/FarmSlicer`, branch `master`. Rust 2024 + axum, cxx bridge
   to libslic3r, React/Vite frontend in `web/`.
 - OrcaSlicer submodule `extern/OrcaSlicer` @ `a167702` = upstream main 2026-05-12,
   `version.inc` says 2.4.0-dev (`v2.3.1-beta-3510-ga167702`). **Not checked out
@@ -29,10 +28,10 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
   `/tmp/farmslicer-submodule.log`).
 - Local Windows machine has never built libslic3r (no `extern/OrcaSlicer/deps/build`,
   no `target/debug/farmslicer`). All native work happens on buildhost.
-- **buildhost** (`ssh user@buildhost`): Ubuntu 26.04, Ryzen 7900X3D 24 threads,
+- **buildhost** (the LAN build box): Ubuntu 26.04, Ryzen 7900X3D 24 threads,
   122 GiB RAM, 1.5 TB free, gcc 15.2, cmake 4.2.3, node 22, Docker 29. Shared with
-  another tenant; Secure Boot on. cameron has passwordless sudo, but **no sudo/apt without
-  Cameron's per-change yes** (global CLAUDE.md infra rule). User-level work in
+  another tenant; Secure Boot on. The deploy user has sudo, but **no sudo/apt
+  without the maintainer's per-change yes** (infra rule). User-level work in
   `~` is fine.
 - Old buildhost disk is NFS-mounted at `/mnt/old-root`. The old FarmSlicer tree
   (`/mnt/old-root/opt/farmslicer`, HEAD `f3c9d1c` = current master, same
@@ -103,7 +102,7 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
    (AGPL-3.0, forced by libslic3r), `pin.json` in step summary.
 9. [ ] **ops**: stage `plans/farmslicer-stack/` in ops; once a digest exists move
    to `servers/buildhost/stacks/farmslicer/` + port registry row + README; Caddy
-   placeholder comment update. Needs Cameron's explicit yes to commit/push ops.
+   placeholder comment update. Needs the maintainer's explicit yes to commit/push ops.
 10. [ ] Retire `.claude/skills/deploy/` (replace with a dev-on-buildhost note),
     update `CLAUDE.md`/README, close `issues/slicer-runtime-crash.md` if resolved.
 
@@ -116,7 +115,6 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
 - No `LICENSE` file in the repo. libslic3r is AGPL-3.0, so FarmSlicer must be too
   (both the server binary and a wasm bundle served to browsers).
 - OrcaSlicer wasm ports all pin **v2.4.2**; our submodule predates it (2.4.0-dev).
-- The old `.claude/skills/deploy/.env` stores `ADMIN_PASSPHRASE=<redacted>`.
 - **Host-native build on the new buildhost is a dead end.** The copied deps were
   built with GCC 13 `-flto`; GCC 15 refuses them (`lto1: fatal error: bytecode
   stream ... generated with LTO version 13.1 instead of the expected 15.1`).
@@ -241,7 +239,7 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
   Real digest written into `ops/plans/farmslicer-stack/pin.json` (ops still
   uncommitted). Workflow now skips docs-only pushes (`paths-ignore`).
 
-## Hand-off: what Cameron has to do (none of it is mine to do)
+## Hand-off: what the maintainer has to do (none of it is mine to do)
 
 1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much
    faster: the Emscripten toolchain/deps are in the Actions cache and the
@@ -250,8 +248,8 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
    `ghcr.io/cinderblock/farmslicer` is private too. Either make the package
    public (image is AGPL-3.0, redistributable) or grant `OWNER/ops` read
    access (Package settings → Manage Actions access).
-3. **ops**: `gh secret set BUILDHOST_FARMSLICER_PASSPHRASE --env buildhost` (the
-   old value redacted), then move `ops/plans/farmslicer-stack/` to
+3. **ops**: `gh secret set BUILDHOST_FARMSLICER_PASSPHRASE --env buildhost`
+   (superseded: accounts replaced the passphrase), then move `ops/plans/farmslicer-stack/` to
    `ops/servers/buildhost/stacks/farmslicer/` with the real `pin.json`, add the
    port-registry row + README entry, update the Caddy site comment — per
    `ops/plans/farmslicer-stack/NOTES.md`. I staged the files but did not
@@ -262,7 +260,7 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
    browsers may serve a stale engine after an upgrade until reloaded).
 - [ ] CI workflow, LICENSE, ops stack staging, README/CLAUDE.md updates, commit.
 
-## Open questions for Cameron
+## Open questions for the maintainer
 
 1. Keep `ADMIN_PASSPHRASE` auth as-is for the first deploy (secret via ops
    `env.json` → GitHub secret `BUILDHOST_FARMSLICER_ADMIN_PASSPHRASE`)? My plan:

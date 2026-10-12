@@ -56,8 +56,8 @@ profiles dir without a server. The `mt` variant needs cross-origin isolation
 
 ### Dev on buildhost
 
-buildhost (24 cores, Docker) is where native builds happen; no sudo/apt there
-without Cameron's per-change OK. Working dirs this project has used:
+The LAN build box, buildhost (24 cores, Docker), is where native builds happen; no sudo/apt there
+without the maintainer's per-change OK. Working dirs this project has used:
 `~/farmslicer-docker` (Docker build context), `~/farmslicer-wasm` (engine
 build with its own OrcaSlicer copy), `~/wasm-ref/wasm-deps` (Emscripten
 toolchain + deps). Dev containers run on **port 9338**; 9337 is production.
