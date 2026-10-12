@@ -239,6 +239,15 @@ Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocea
   Real digest written into `ops/plans/farmslicer-stack/pin.json` (ops still
   uncommitted). Workflow now skips docs-only pushes (`paths-ignore`).
 
+- [x] 2026-10-12: **accounts replace the passphrase** (`51978aa`, `plans/auth.md`):
+  first-run owner setup, users/roles, argon2id, hashed cookie sessions, API
+  keys. Tested end to end against a throwaway container on buildhost (removed
+  afterwards): setup/409 on repeat, login (case-insensitive username), 403 for
+  non-admins, bearer keys, logout → 401, owner undeletable, deleted user's key
+  dies. ops stack amended: no secret, no env.json (`a1fdc6a`, unpushed).
+- [x] 2026-10-12: personal details scrubbed from the current tree (names, local
+  path, old passphrase value). History still has them (see hand-off).
+
 ## Hand-off: what the maintainer has to do (none of it is mine to do)
 
 1. ~~GitHub Actions run~~ done; `pin.json` is filled in. Later runs are much
