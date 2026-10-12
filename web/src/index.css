@@ -999,3 +999,30 @@ body {
   font-family: "Consolas", "Monaco", monospace;
   font-size: 0.8rem;
 }
+
+/* Compute location (Slice page) and job source (Jobs page) */
+.compute-status {
+  margin-top: -0.25rem;
+  line-height: 1.4;
+}
+
+.slice-progress {
+  margin: 0.5rem 0;
+}
+
+.slice-progress .progress-bar {
+  margin-bottom: 0.25rem;
+}
+
+.source-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border, #444);
+}
+
+.source-browser {
+  color: var(--accent, #4a9eff);
+  border-color: var(--accent, #4a9eff);
+}

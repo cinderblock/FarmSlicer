@@ -1,0 +1,5 @@
+if(NOT TARGET cereal::cereal)
+  add_library(cereal::cereal INTERFACE IMPORTED GLOBAL)
+  set_target_properties(cereal::cereal PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${WASM_DEPS_PREFIX}/include")
+endif()
+set(cereal_FOUND TRUE)

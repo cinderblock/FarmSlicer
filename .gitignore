@@ -40,3 +40,21 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Added by cargo
 
 /target
+
+# WebAssembly engine: toolchain, deps and build trees live under wasm/ but are
+# never committed; the built engine is copied into web/public/wasm/ by
+# wasm/build.sh (also generated).
+/wasm/build-*
+/wasm/toolchain/emsdk
+/wasm/toolchain/downloads
+/wasm/toolchain/install
+/wasm/toolchain/install-mt
+/wasm/toolchain/src
+/wasm/toolchain/src-mt
+/wasm/toolchain/tools
+/wasm/toolchain/cmake
+/wasm/toolchain/cgal-*
+/wasm/toolchain/ccache-cache
+/wasm/toolchain/logs-mt
+/wasm/toolchain/*.log
+/web/public/wasm/

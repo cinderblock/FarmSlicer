@@ -1,0 +1,243 @@
+OrcaSlicer-WASM License and Attribution
+========================================
+
+This project is a WebAssembly port of OrcaSlicer and is distributed under 
+the GNU Affero General Public License v3.0 (AGPL-3.0), inherited from the 
+upstream OrcaSlicer project.
+
+================================================================================
+PRIMARY LICENSE: GNU AFFERO GENERAL PUBLIC LICENSE Version 3
+================================================================================
+
+Copyright (C) 2024-2025 Allan Wrench (allanwrench28)
+Copyright (C) 2023-2024 SoftFever (OrcaSlicer)
+Copyright (C) 2021-2023 Bambu Lab (Bambu Studio)
+Copyright (C) 2016-2021 Prusa Research (PrusaSlicer)
+Copyright (C) 2011-2018 Alessandro Ranellucci and contributors (Slic3r)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+IMPORTANT NOTICE: As a web-based application, the AGPL-3.0 license requires 
+that if you run a modified version of this software accessible over a network,
+you must make the complete source code of your modifications available to 
+users of that network service.
+
+Full text of AGPL-3.0: https://www.gnu.org/licenses/agpl-3.0.txt
+See also: orca/LICENSE.txt for the complete AGPL-3.0 license text
+
+================================================================================
+PROJECT ATTRIBUTION AND LINEAGE
+================================================================================
+
+OrcaSlicer-WASM is based on:
+
+1. OrcaSlicer (https://github.com/SoftFever/OrcaSlicer)
+   - License: AGPL-3.0
+   - Copyright: 2023-2024 SoftFever
+   - This project is directly derived from OrcaSlicer v2.3.1
+
+2. Bambu Studio (https://github.com/bambulab/BambuStudio)
+   - License: AGPL-3.0
+   - Copyright: 2021-2023 Bambu Lab
+   - OrcaSlicer is a fork of Bambu Studio
+
+3. PrusaSlicer (https://github.com/prusa3d/PrusaSlicer)
+   - License: AGPL-3.0
+   - Copyright: 2016-2021 Prusa Research
+   - Bambu Studio is a fork of PrusaSlicer
+
+4. Slic3r (https://github.com/slic3r/Slic3r)
+   - License: AGPL-3.0
+   - Copyright: 2011-2018 Alessandro Ranellucci and contributors
+   - PrusaSlicer is a fork of Slic3r
+
+================================================================================
+WASM PORT MODIFICATIONS
+================================================================================
+
+WASM-specific modifications for browser compatibility:
+Copyright (C) 2024-2025 Allan Wrench (allanwrench28)
+License: AGPL-3.0 (matching upstream)
+
+Modifications include:
+- Emscripten/WebAssembly compilation adaptations
+- Browser-based file system integration
+- Web Workers for asynchronous processing
+- JavaScript/TypeScript web interface
+- Removal of desktop-specific dependencies (OpenVDB, OpenCV, etc.)
+- Threading and concurrency adaptations for single-threaded WASM
+
+All modifications are tracked in: patches/orca-wasm.patch
+
+Source code repository: https://github.com/allanwrench28/orcaslicer-wasm
+
+================================================================================
+THIRD-PARTY LIBRARIES AND DEPENDENCIES
+================================================================================
+
+This project incorporates code from numerous open-source libraries.
+Each retains its original license and copyright. Major dependencies include:
+
+Core Libraries:
+---------------
+- CGAL (Computational Geometry Algorithms Library)
+  License: GPL-3.0 / LGPL-3.0
+  Website: https://www.cgal.org/
+
+- Boost C++ Libraries
+  License: Boost Software License 1.0
+  Website: https://www.boost.org/
+
+- Eigen (Linear algebra library)
+  License: MPL-2.0
+  Website: https://eigen.tuxfamily.org/
+
+- TBB (Threading Building Blocks) - DISABLED IN WASM BUILD
+  License: Apache-2.0
+  Website: https://github.com/oneapi-src/oneTBB
+
+- NLopt (Nonlinear optimization)
+  License: LGPL-2.1
+  Website: https://github.com/stevengj/nlopt
+
+- libslic3r (Core slicing algorithms)
+  License: AGPL-3.0
+  Part of: Slic3r/PrusaSlicer/OrcaSlicer
+
+UI and Graphics (DISABLED IN WASM BUILD):
+------------------------------------------
+- wxWidgets (Cross-platform GUI toolkit)
+  License: wxWindows Library Licence (LGPL-like)
+  Website: https://www.wxwidgets.org/
+
+- ImGui (Immediate mode GUI)
+  License: MIT
+  Website: https://github.com/ocornut/imgui
+
+- GLEW (OpenGL Extension Wrangler)
+  License: Modified BSD, MIT, and GLX Public License
+  Website: http://glew.sourceforge.net/
+
+File Format Libraries:
+----------------------
+- Cereal (C++ serialization)
+  License: BSD-3-Clause
+  Website: https://uscilab.github.io/cereal/
+
+- miniz (ZIP compression)
+  License: MIT
+  Website: https://github.com/richgel999/miniz
+
+- libnest2d (2D bin packing)
+  License: LGPL-3.0
+  Website: https://github.com/tamasmeszaros/libnest2d
+
+Image Libraries (STUBBED IN WASM BUILD):
+-----------------------------------------
+- libpng
+  License: PNG Reference Library License
+  Website: http://www.libpng.org/
+
+- libjpeg-turbo
+  License: BSD-3-Clause
+  Website: https://libjpeg-turbo.org/
+
+- Expat (XML parsing)
+  License: MIT
+  Website: https://libexpat.github.io/
+
+Disabled/Stubbed Libraries:
+---------------------------
+The following libraries are disabled or stubbed in the WASM build:
+- OpenVDB (VDB volume processing) - License: MPL-2.0
+- OpenCV (Computer vision) - License: Apache-2.0
+- OpenCASCADE (CAD kernel) - License: LGPL-2.1
+- libnoise (Procedural noise) - License: LGPL-2.1
+- OpenSSL (Cryptography) - License: Apache-2.0
+- CURL (Network transfers) - License: MIT-like
+
+Web UI Dependencies (npm/Node.js):
+-----------------------------------
+- React - License: MIT
+- TypeScript - License: Apache-2.0
+- Vite - License: MIT
+- Tailwind CSS - License: MIT
+
+See package.json for complete web dependency list.
+
+================================================================================
+BUILD TOOLS
+================================================================================
+
+- Emscripten (WASM compiler)
+  License: MIT / University of Illinois/NCSA Open Source License
+  Website: https://emscripten.org/
+
+- CMake (Build system)
+  License: BSD-3-Clause
+  Website: https://cmake.org/
+
+================================================================================
+PATENT AND TRADEMARK NOTICES
+================================================================================
+
+OrcaSlicer, Bambu Studio, PrusaSlicer, Bambu Lab, and Prusa Research are
+trademarks of their respective owners. This project is not affiliated with
+or endorsed by any of these entities.
+
+================================================================================
+CONTRIBUTION GUIDELINES
+================================================================================
+
+Contributions to this project must:
+1. Be compatible with AGPL-3.0
+2. Not introduce proprietary dependencies
+3. Include proper attribution for borrowed code
+4. Follow the project's coding standards
+
+See CONTRIBUTING.md for detailed guidelines.
+
+================================================================================
+SOURCE CODE AVAILABILITY
+================================================================================
+
+As required by AGPL-3.0, the complete source code for this project is
+publicly available at:
+
+  https://github.com/allanwrench28/orcaslicer-wasm
+
+If you receive a compiled version of this software and cannot access the
+source code at the above URL, please contact: allanwrench28@github.com
+
+================================================================================
+NO WARRANTY
+================================================================================
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+For 3D printing applications, always verify generated G-code before use.
+Improper G-code can damage printers or cause safety hazards.
+
+================================================================================
+
+Last Updated: October 27, 2025
+Project: OrcaSlicer-WASM
+Version: Beta v1.0
+Maintainer: Allan Wrench (allanwrench28)

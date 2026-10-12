@@ -1,0 +1,6 @@
+include(${CMAKE_CURRENT_LIST_DIR}/WasmStub.cmake)
+wasm_port_target(JPEG::JPEG -sUSE_LIBJPEG=1)
+set(JPEG_FOUND TRUE)
+set(JPEG_LIBRARIES JPEG::JPEG)
+set(JPEG_INCLUDE_DIRS "")
+set(JPEG_INCLUDE_DIR "")

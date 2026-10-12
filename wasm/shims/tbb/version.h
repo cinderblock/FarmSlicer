@@ -1,0 +1,6 @@
+#pragma once
+
+#define TBB_VERSION_MAJOR 2021
+#define TBB_VERSION_MINOR 0
+#define TBB_VERSION_PATCH 0
+#define TBB_INTERFACE_VERSION 12000

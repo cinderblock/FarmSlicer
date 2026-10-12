@@ -1,0 +1,7 @@
+include(${CMAKE_CURRENT_LIST_DIR}/WasmStub.cmake)
+wasm_port_target(PNG::PNG -sUSE_LIBPNG=1 -sUSE_ZLIB=1)
+set(PNG_FOUND TRUE)
+set(PNG_LIBRARIES PNG::PNG)
+set(PNG_LIBRARY PNG::PNG)
+set(PNG_INCLUDE_DIRS "")
+set(PNG_PNG_INCLUDE_DIR "")

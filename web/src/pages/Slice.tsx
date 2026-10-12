@@ -1,7 +1,37 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useNavigate } from "react-router";
 import ModelViewer from "../components/ModelViewer";
 import OverridesPanel from "../components/OverridesPanel";
+import {
+  BrowserEngine,
+  browserSupportsEngine,
+  canRunThreaded,
+  loadManifest,
+  pickVariant,
+} from "../engine/client";
+import type { EngineManifest } from "../engine/types";
+
+/** Where slicing runs. "auto" uses the browser engine when the server is busy. */
+type ComputeMode = "auto" | "server" | "browser";
+const COMPUTE_KEY = "farmslicer.compute";
+
+interface ServerStatus {
+  server_active_jobs: number;
+  slicer_busy: boolean;
+  cpus: number;
+  browser_engine_available: boolean;
+}
+
+interface JobRecord {
+  id: string;
+  config_json: string | null;
+}
+
+function formatDuration(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
 interface Printer {
   id: string;
@@ -102,6 +132,16 @@ export default function SlicePage() {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
   );
+  const [compute, setCompute] = useState<ComputeMode>(() => {
+    const saved = localStorage.getItem(COMPUTE_KEY);
+    return saved === "server" || saved === "browser" ? saved : "auto";
+  });
+  // undefined = still checking, null = no engine deployed
+  const [engineManifest, setEngineManifest] = useState<EngineManifest | null | undefined>(undefined);
+  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
+  const [progress, setProgress] = useState<{ percent: number; message: string } | null>(null);
+  const [browserJobId, setBrowserJobId] = useState<string | null>(null);
+  const engineRef = useRef<BrowserEngine | null>(null);
 
   useEffect(() => {
     fetch("/api/printers")
@@ -109,6 +149,62 @@ export default function SlicePage() {
       .then(setPrinters)
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(COMPUTE_KEY, compute);
+  }, [compute]);
+
+  // Is a browser engine deployed, and can this browser run it?
+  useEffect(() => {
+    loadManifest().then(setEngineManifest);
+  }, []);
+
+  // Server load, for the "auto" compute choice and the status line.
+  useEffect(() => {
+    const poll = () =>
+      fetch("/api/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s) => setServerStatus(s))
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Drop the engine worker (and its memory) when leaving the page.
+  useEffect(() => {
+    return () => {
+      engineRef.current?.dispose();
+      engineRef.current = null;
+    };
+  }, []);
+
+  const engineVariant = engineManifest ? pickVariant(engineManifest) : null;
+  const browserAvailable =
+    browserSupportsEngine() &&
+    engineVariant !== null &&
+    (engineVariant !== "mt" || canRunThreaded());
+
+  const engineStatusText = useMemo(() => {
+    if (engineManifest === undefined) return "Checking for a browser engine…";
+    if (engineManifest === null) return "No browser engine is deployed on this server.";
+    if (!browserSupportsEngine()) return "This browser can't run the slicing engine.";
+    if (!engineVariant) return "The deployed engine has no usable build.";
+    const mb = ((engineManifest.variants[engineVariant]?.bytes ?? 0) / 1024 / 1024).toFixed(0);
+    if (engineVariant === "mt") {
+      const threads = Math.max(2, Math.min(16, navigator.hardwareConcurrency || 4));
+      return `Browser engine: OrcaSlicer ${engineManifest.orca}, multithreaded (${threads} threads), ${mb} MB download, cached after first use.`;
+    }
+    return `Browser engine: OrcaSlicer ${engineManifest.orca}, single-threaded${canRunThreaded() ? "" : " (page is not cross-origin isolated)"}, ${mb} MB download.`;
+  }, [engineManifest, engineVariant]);
+
+  // Resolve "auto" to a concrete target for this click.
+  const chooseTarget = useCallback((): "server" | "browser" => {
+    if (compute === "server") return "server";
+    if (compute === "browser") return "browser";
+    if (browserAvailable && serverStatus?.slicer_busy) return "browser";
+    return "server";
+  }, [compute, browserAvailable, serverStatus]);
 
   // Unique machine profiles derived from configured printers
   const availableMachines = useMemo(() => {
@@ -282,13 +378,11 @@ export default function SlicePage() {
       .catch(() => setResolvedConfig(null));
   }, [resolvedMachine, process, filament]);
 
-  const handleSlice = useCallback(async () => {
-    if (!modelFile) return;
-    setSlicing(true);
-    setResult(null);
-
+  // Fields common to both compute targets. The server resolves the profiles
+  // into one merged config and stores it on the job; the browser path reads
+  // it back from the job record so both engines slice from identical input.
+  const buildJobForm = useCallback(() => {
     const formData = new FormData();
-    formData.append("model", modelFile);
     formData.append("routing", routing);
     if (printerId) formData.append("printer_id", printerId);
     if (resolvedMachine) formData.append("machine", resolvedMachine);
@@ -298,31 +392,121 @@ export default function SlicePage() {
     if (Object.keys(overrides).length > 0) {
       formData.append("overrides", JSON.stringify(overrides));
     }
+    return formData;
+  }, [routing, printerId, resolvedMachine, process, filament, color, overrides]);
+
+  const sliceOnServer = useCallback(async () => {
+    if (!modelFile) return;
+    const formData = buildJobForm();
+    formData.append("model", modelFile);
+    const res = await fetch("/api/jobs", { method: "POST", body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    setResult({ ok: true, message: "Slicing started on the server" });
+    setTimeout(() => navigate("/jobs"), 1500);
+  }, [modelFile, buildJobForm, navigate]);
+
+  const sliceInBrowser = useCallback(async () => {
+    if (!modelFile) return;
+    setProgress({ percent: 0, message: "Loading engine" });
+
+    // Boot (or reuse) the engine first so a missing/broken engine fails
+    // before a job record exists.
+    if (!engineRef.current) engineRef.current = await BrowserEngine.create();
+    const engine = engineRef.current;
+
+    // Register the job; the model itself never leaves this machine.
+    const formData = buildJobForm();
+    formData.append("source", "browser");
+    formData.append("model_name", modelFile.name);
+    const res = await fetch("/api/jobs", { method: "POST", body: formData });
+    const job: JobRecord & { error?: string } = await res.json();
+    if (!res.ok) throw new Error(job.error ?? `HTTP ${res.status}`);
+    setBrowserJobId(job.id);
+
+    let lastPost = 0;
+    const started = performance.now();
+    try {
+      const out = await engine.slice(modelFile, job.config_json ?? "{}", (percent, message) => {
+        setProgress({ percent, message });
+        const now = Date.now();
+        if (now - lastPost > 750) {
+          lastPost = now;
+          fetch(`/api/jobs/${job.id}/progress`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ percent, message }),
+          })
+            .then((r) => {
+              // 409: the job was cancelled from the Jobs page.
+              if (r.status === 409) engine.cancel();
+            })
+            .catch(() => {});
+        }
+      });
+
+      setProgress({ percent: 100, message: "Uploading G-code" });
+      const upload = new FormData();
+      upload.append("gcode", new Blob([out.gcode], { type: "text/plain" }), `${job.id}.gcode`);
+      upload.append("print_time_sec", String(out.report.stats.printTimeSec));
+      upload.append("filament_used_g", String(out.report.stats.filamentG));
+      upload.append("warnings", JSON.stringify(out.report.warnings));
+      const up = await fetch(`/api/jobs/${job.id}/result`, { method: "POST", body: upload });
+      if (!up.ok) {
+        const data = await up.json().catch(() => ({}));
+        throw new Error(data.error ?? `upload failed (HTTP ${up.status})`);
+      }
+      const secs = ((performance.now() - started) / 1000).toFixed(1);
+      setResult({
+        ok: true,
+        message: `Sliced in this browser in ${secs}s: ${out.report.stats.layers} layers, est. ${formatDuration(out.report.stats.printTimeSec)}, ${out.report.stats.filamentG.toFixed(1)} g`,
+      });
+      setTimeout(() => navigate("/jobs"), 2500);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "cancelled") {
+        await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" }).catch(() => {});
+      } else {
+        await fetch(`/api/jobs/${job.id}/fail`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ error: message }),
+        }).catch(() => {});
+      }
+      throw err;
+    } finally {
+      setBrowserJobId(null);
+    }
+  }, [modelFile, buildJobForm, navigate]);
+
+  const handleSlice = useCallback(async () => {
+    if (!modelFile) return;
+    setSlicing(true);
+    setResult(null);
+    setProgress(null);
 
     try {
-      const res = await fetch("/api/jobs", { method: "POST", body: formData });
-      const data = await res.json();
-      if (res.ok) {
-        setResult({ ok: true, message: "Slicing started" });
-        setTimeout(() => navigate("/jobs"), 1500);
+      const target = chooseTarget();
+      if (target === "browser" && !browserAvailable) {
+        throw new Error("The browser engine is not available here; choose Server.");
+      }
+      if (target === "browser") {
+        await sliceInBrowser();
       } else {
-        setResult({ ok: false, message: data.error });
+        await sliceOnServer();
       }
     } catch (err) {
-      setResult({ ok: false, message: `${err}` });
+      const message = err instanceof Error ? err.message : String(err);
+      setResult({ ok: false, message: message === "cancelled" ? "Cancelled" : message });
     } finally {
       setSlicing(false);
+      setProgress(null);
     }
-  }, [
-    modelFile,
-    printerId,
-    routing,
-    resolvedMachine,
-    process,
-    filament,
-    color,
-    navigate,
-  ]);
+  }, [modelFile, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
+
+  const handleCancelBrowserSlice = useCallback(() => {
+    engineRef.current?.cancel();
+  }, []);
 
   return (
     <div className="page slice-page">
@@ -490,6 +674,35 @@ export default function SlicePage() {
             </select>
           </label>
 
+          <label>
+            Compute
+            <select
+              value={compute}
+              onChange={(e) => setCompute(e.target.value as ComputeMode)}
+              disabled={slicing}
+            >
+              <option value="auto">Auto (this browser when the server is busy)</option>
+              <option value="server">Server</option>
+              <option value="browser" disabled={!browserAvailable}>
+                This browser{browserAvailable ? "" : " (unavailable)"}
+              </option>
+            </select>
+          </label>
+          <p className="hint compute-status">
+            {engineStatusText}
+            {serverStatus && (
+              <>
+                {" "}
+                Server: {serverStatus.server_active_jobs === 0
+                  ? "idle"
+                  : `${serverStatus.server_active_jobs} active job${serverStatus.server_active_jobs === 1 ? "" : "s"}`}
+                {compute === "auto" && (
+                  <> → will slice {chooseTarget() === "browser" ? "in this browser" : "on the server"}.</>
+                )}
+              </>
+            )}
+          </p>
+
           {modelFile && (
             <div className="model-info">
               <p>{modelFile.name}</p>
@@ -499,12 +712,31 @@ export default function SlicePage() {
             </div>
           )}
 
+          {progress && (
+            <div className="slice-progress">
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${progress.percent}%` }} />
+              </div>
+              <p className="hint">
+                {progress.percent}% · {progress.message}
+                {browserJobId && (
+                  <>
+                    {" "}
+                    <button className="btn-sm" onClick={handleCancelBrowserSlice}>
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
           <button
             className="btn-primary"
             disabled={!modelFile || slicing}
             onClick={handleSlice}
           >
-            {slicing ? "Submitting..." : "Slice"}
+            {slicing ? (progress ? "Slicing in browser…" : "Submitting…") : "Slice"}
           </button>
 
           {result && (
