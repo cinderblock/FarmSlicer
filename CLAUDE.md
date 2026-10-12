@@ -116,6 +116,13 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - SPA fallback serves `dist/web/index.html`; every response carries
   `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
+- Accounts (`src/auth.rs`, `plans/auth.md`): no configured secrets. First run
+  → `POST /api/auth/setup` creates the owner; then username/password login,
+  30-day cookie sessions (tokens stored as SHA-256), per-user API keys
+  (`Authorization: Bearer fsk_…`), roles owner/admin/user. Every `/api` route
+  except health/auth goes through `auth::require_auth`, which attaches
+  `CurrentUser`; admin handlers call `auth::require_admin`.
+  `FARMSLICER_NO_AUTH=1` short-circuits all of it for local dev.
 
 ## Known Issues
 
