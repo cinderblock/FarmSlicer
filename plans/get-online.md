@@ -275,6 +275,9 @@ Three things the maintainer asked for on 2026-10-11, in one push ("boil the ocea
   that account has no passkey, so nobody could sign in. Fix: an installation
   where no account can sign in (no passkeys, no live invite, no unused
   recovery code) offers first-run setup again and replaces those accounts.
+- [x] 2026-10-12: re-bootstrap build (`018600a`) deployed through ops (`eb5e7fe`,
+  run 38299333039). Live: `setup_required: true`, `rp_id` = the HTTPS LAN host.
+  The owner account can now be claimed with a passkey.
 
 ## Hand-off: what the maintainer has to do (none of it is mine to do)
 
