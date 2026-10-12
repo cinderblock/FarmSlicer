@@ -17,11 +17,13 @@
 
 #include <emscripten.h>
 #ifdef __EMSCRIPTEN_PTHREADS__
+#include <emscripten/eventloop.h>
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #include <pthread.h>
 #include <climits>
 #include <tbb/global_control.h>
+#include <tbb/task_arena.h>
 #endif
 
 #include <atomic>
@@ -228,6 +230,12 @@ int engine_threads()
 {
     static int n = 0;
     if (n == 0) {
+        // With pthreads, Emscripten's keepRuntimeAlive() is a counter even with
+        // EXIT_RUNTIME=0: once a proxied call / mailbox callback finishes on the
+        // main runtime thread with the counter at 0, the runtime "exits" and
+        // terminates every pthread — the slice silently hangs. The engine lives
+        // as long as its host keeps the instance; hold one keepalive forever.
+        emscripten_runtime_keepalive_push();
         n = fs_js_thread_count();
         if (n < 2) n = 2;
         // The slicing pthread + (n-1) TBB workers, all from the pre-created pool.
@@ -282,6 +290,21 @@ EMSCRIPTEN_KEEPALIVE int fs_slice(const char* model_name, const uint8_t* model, 
                                   const char* config_json, int config_len,
                                   uint8_t** out_gcode, int* out_gcode_len, char** out_report)
 {
+#ifdef __EMSCRIPTEN_PTHREADS__
+    // Called ON the main runtime thread of the pthreads build: that thread is
+    // blocked for the whole call, and a pthread whose creation is requested by
+    // another pthread only starts once the main runtime thread returns to its
+    // event loop, so TBB work that waits for its workers could deadlock. Run
+    // serially; parallel slicing goes through fs_slice_start().
+    if (emscripten_is_main_runtime_thread()) {
+        engine_threads();
+        tbb::task_arena serial(1);
+        return serial.execute([&] {
+            return do_slice(model_name, model, model_len, config_json, config_len,
+                            out_gcode, out_gcode_len, out_report);
+        });
+    }
+#endif
     return do_slice(model_name, model, model_len, config_json, config_len,
                     out_gcode, out_gcode_len, out_report);
 }

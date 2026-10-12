@@ -204,9 +204,19 @@ Three things Cameron asked for on 2026-10-11, in one push ("boil the ocean"):
   while the app used `react-router`, and the refreshed lockfile gave the two
   different versions (two React contexts). Unified on `react-router`, dropped
   `react-router-dom`.
+- [x] 2026-10-11: **MT engine hang diagnosed** (Chrome + Node): `fs_slice_start`
+  returned 0 but the slicing pthread never reported or finished. Reproduced on
+  the page main thread; the synchronous `fs_slice` in a Worker *did* complete
+  (1.4 s, 425 KB). Cause, per orcaslicer-wasm's bridge comments: with pthreads
+  Emscripten's `keepRuntimeAlive()` is a counter even with `EXIT_RUNTIME=0`;
+  after the first proxied callback finishes on the main runtime thread with
+  the counter at 0, the runtime exits and kills every pthread. Fix:
+  `emscripten_runtime_keepalive_push()` once in `engine_threads()`; also run
+  `fs_slice` on the main runtime thread inside a 1-slot `tbb::task_arena`.
 - [ ] Browser slice e2e in Chrome via `ssh -L 9338:127.0.0.1:9338 buildhost`
-  (localhost = secure context, so `mt` can run; `crossOriginIsolated` confirmed
-  true, manifest served). ← **current** (waiting on image rebuild)
+  (localhost = secure context; `crossOriginIsolated` true, manifest served,
+  ST and MT modules instantiate in-page). ← **current** (chain
+  `~/fs-chain.sh`: mt rebuild → image → container restart)
 - [ ] CI workflow, LICENSE, ops stack staging, README/CLAUDE.md updates, commit.
 
 ## Open questions for Cameron
