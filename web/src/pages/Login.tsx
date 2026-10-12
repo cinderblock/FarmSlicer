@@ -1,35 +1,24 @@
 import { useState } from "react";
+import { apiJson, useAuth } from "../auth";
 
-interface LoginPageProps {
-  onLogin: () => void;
-}
-
-export default function LoginPage({ onLogin }: LoginPageProps) {
-  const [passphrase, setPassphrase] = useState("");
+export default function LoginPage() {
+  const { refresh } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
-
+    setBusy(true);
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passphrase }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        onLogin();
-      } else {
-        setError(data.error || "Login failed");
-      }
-    } catch {
-      setError("Connection failed");
+      await apiJson("/api/auth/login", "POST", { username, password });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
@@ -37,19 +26,30 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     <div className="login-page">
       <div className="login-card">
         <h1>FarmSlicer</h1>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={submit}>
           <label>
-            Passphrase
+            Username
             <input
-              type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              placeholder="Enter passphrase"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
               autoFocus
+              required
             />
           </label>
-          <button className="btn-primary" type="submit" disabled={loading}>
-            {loading ? "Logging in..." : "Log In"}
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+          <button className="btn-primary" type="submit" disabled={busy}>
+            {busy ? "Logging in…" : "Log in"}
           </button>
           {error && <p className="login-error">{error}</p>}
         </form>

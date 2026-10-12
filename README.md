@@ -33,11 +33,23 @@ docker run -d --name farmslicer -p 9337:9337 \
 | Env var | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `9337` | HTTP port |
-| `ADMIN_PASSPHRASE` | unset | If set, the UI requires this passphrase (cookie session). Unset = no auth. |
 | `ORCA_RESOURCES_DIR` | `extern/OrcaSlicer/resources` | OrcaSlicer `resources/` tree (profiles, nozzle/flush tables) |
+| `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner |
 | `RUST_LOG` | — | Log level |
 
 Data (SQLite db, uploaded models, G-code) lives in `/app/data`.
+
+### Accounts
+
+There are no secrets to configure. On first run the web UI asks whoever opens
+it to create the **owner** account (so do that promptly after deploying). The
+owner and admins add further accounts on the Users page; roles are `owner`
+(fixed), `admin` (manage users and printers) and `user` (slice, view, own API
+keys). Passwords are stored as argon2id hashes; sessions are 30-day cookies.
+
+Scripts and other machines authenticate with an **API key** created on the
+Account page (shown once), sent as `Authorization: Bearer fsk_…`. A key has the
+permissions of the account that created it; revoke it there.
 
 ## Building
 

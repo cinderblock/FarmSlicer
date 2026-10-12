@@ -1,6 +1,6 @@
-import { StrictMode, useState, useEffect, useRef } from "react";
+import { StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import Layout from "./components/Layout";
 import SlicePage from "./pages/Slice";
 import JobsPage from "./pages/Jobs";
@@ -8,6 +8,10 @@ import PrintersPage from "./pages/Printers";
 import LibraryPage from "./pages/Library";
 import ProfilesPage from "./pages/Profiles";
 import LoginPage from "./pages/Login";
+import SetupPage from "./pages/Setup";
+import UsersPage from "./pages/Users";
+import AccountPage from "./pages/Account";
+import { AuthProvider, useAuth } from "./auth";
 import "./index.css";
 
 declare const __BUILD_VERSION__: string;
@@ -31,47 +35,25 @@ function useAutoRefresh(intervalMs = 30_000) {
   }, [intervalMs]);
 }
 
+function Splash({ text }: { text: string }) {
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <h1>FarmSlicer</h1>
+        <p className="hint">{text}</p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   useAutoRefresh();
+  const { status, offline, isAdmin } = useAuth();
 
-  const [authState, setAuthState] = useState<
-    "loading" | "authenticated" | "login"
-  >("loading");
-
-  const checkAuth = () => {
-    fetch("/api/auth/status")
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data.auth_required || data.authenticated) {
-          setAuthState("authenticated");
-        } else {
-          setAuthState("login");
-        }
-      })
-      .catch(() => {
-        // If we can't reach the server, show the app anyway
-        setAuthState("authenticated");
-      });
-  };
-
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  if (authState === "loading") {
-    return (
-      <div className="login-page">
-        <div className="login-card">
-          <h1>FarmSlicer</h1>
-          <p className="hint">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (authState === "login") {
-    return <LoginPage onLogin={() => setAuthState("authenticated")} />;
-  }
+  if (offline) return <Splash text="Cannot reach the server. Retrying…" />;
+  if (!status) return <Splash text="Loading…" />;
+  if (status.setup_required) return <SetupPage />;
+  if (!status.authenticated) return <LoginPage />;
 
   return (
     <BrowserRouter>
@@ -83,6 +65,8 @@ function App() {
           <Route path="printers" element={<PrintersPage />} />
           <Route path="profiles" element={<ProfilesPage />} />
           <Route path="library" element={<LibraryPage />} />
+          <Route path="account" element={<AccountPage />} />
+          <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
@@ -91,6 +75,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </StrictMode>,
 );

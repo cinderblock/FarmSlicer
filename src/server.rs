@@ -1,10 +1,10 @@
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State},
     http::{header, StatusCode},
-    middleware::{self, Next},
+    middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
-    Json, Router,
+    routing::{delete, get, post},
+    Extension, Json, Router,
 };
 use cxx::UniquePtr;
 use serde::Deserialize;
@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 
+use crate::auth::{self, CurrentUser};
 use crate::db::Db;
 use crate::discovery;
 use crate::profiles::ProfileStore;
@@ -30,8 +31,6 @@ pub struct AppState {
     slicer: Mutex<SlicerHandle>,
     pub profile_store: ProfileStore,
     pub discovered: Arc<discovery::DiscoveryMap>,
-    /// Random session token, set on successful login. None = auth disabled.
-    pub session_token: Option<String>,
 }
 
 impl AppState {
@@ -41,111 +40,291 @@ impl AppState {
         slicer: UniquePtr<slicer::Slicer>,
         profile_store: ProfileStore,
         discovered: Arc<discovery::DiscoveryMap>,
-        passphrase: Option<String>,
     ) -> Self {
-        let session_token = passphrase.map(|_| uuid::Uuid::new_v4().to_string());
         Self {
             db,
             data_dir,
             slicer: Mutex::new(SlicerHandle(slicer)),
             profile_store,
             discovered,
-            session_token,
         }
-    }
-
-    /// Returns the passphrase from env, if set.
-    pub fn passphrase() -> Option<String> {
-        std::env::var("ADMIN_PASSPHRASE").ok().filter(|s| !s.is_empty())
     }
 }
 
-// -- Auth --
+type ApiError = (StatusCode, Json<Value>);
 
-fn get_session_cookie(req: &Request) -> Option<String> {
-    let cookie_header = req.headers().get(header::COOKIE)?.to_str().ok()?;
-    for part in cookie_header.split(';') {
-        let part = part.trim();
-        if let Some(value) = part.strip_prefix("fs_session=") {
-            return Some(value.to_string());
-        }
-    }
-    None
+fn api_error(code: StatusCode, msg: impl Into<String>) -> ApiError {
+    (code, Json(json!({"error": msg.into()})))
 }
 
-async fn auth_middleware(
-    State(state): State<Arc<AppState>>,
-    req: Request,
-    next: Next,
-) -> impl IntoResponse {
-    // If no passphrase configured, auth is disabled
-    let Some(ref expected) = state.session_token else {
-        return next.run(req).await;
-    };
+// -- Auth (see src/auth.rs) --
 
-    match get_session_cookie(&req) {
-        Some(token) if token == *expected => next.run(req).await,
-        _ => StatusCode::UNAUTHORIZED.into_response(),
-    }
+fn user_json(user: &crate::db::User) -> Value {
+    json!({
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "created_at": user.created_at,
+        "last_login": user.last_login,
+    })
+}
+
+/// Public. Tells the SPA whether first-run setup is needed and who, if
+/// anyone, the request is authenticated as.
+async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
+    let setup_required = !auth::auth_disabled() && state.db.user_count() == 0;
+    let user = auth::resolve_user(&state, &req);
+    Json(json!({
+        "setup_required": setup_required,
+        "auth_disabled": auth::auth_disabled(),
+        "authenticated": user.is_some(),
+        "user": user.as_ref().map(user_json),
+    }))
 }
 
 #[derive(Deserialize)]
-struct LoginRequest {
-    passphrase: String,
+struct Credentials {
+    username: String,
+    password: String,
 }
 
-async fn login(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<LoginRequest>,
-) -> impl IntoResponse {
-    let passphrase = AppState::passphrase();
-
-    match (&passphrase, &state.session_token) {
-        (Some(expected), Some(token)) if body.passphrase == *expected => {
-            let cookie = format!(
-                "fs_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800"
-            );
-            (
-                StatusCode::OK,
-                [(header::SET_COOKIE, cookie)],
-                Json(json!({"ok": true})),
-            )
-                .into_response()
-        }
-        (None, None) => {
-            // Auth disabled
-            (StatusCode::OK, Json(json!({"ok": true}))).into_response()
-        }
-        _ => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"ok": false, "error": "Invalid passphrase"})),
-        )
-            .into_response(),
-    }
-}
-
-async fn logout() -> impl IntoResponse {
-    let cookie = "fs_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+fn start_session(state: &AppState, user: &crate::db::User) -> axum::response::Response {
+    let token = auth::random_token();
+    state
+        .db
+        .create_session(&auth::sha256_hex(&token), &user.id, auth::SESSION_DAYS);
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, cookie.to_string())],
+        [(header::SET_COOKIE, auth::session_cookie(&token))],
+        Json(json!({"ok": true, "user": user_json(user)})),
+    )
+        .into_response()
+}
+
+/// Public, first run only: creates the owner account and logs it in.
+async fn auth_setup(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Credentials>,
+) -> Result<axum::response::Response, ApiError> {
+    if state.db.user_count() > 0 {
+        return Err(api_error(StatusCode::CONFLICT, "setup already completed"));
+    }
+    if !auth::valid_username(&body.username) {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "username: 2-32 characters, letters, digits, . _ -",
+        ));
+    }
+    auth::valid_password(&body.password).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+    let hash = auth::hash_password(&body.password)
+        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let user = state
+        .db
+        .create_user(&body.username, "owner", &hash)
+        .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+    println!("first-run setup: owner account '{}' created", user.username);
+    Ok(start_session(&state, &user))
+}
+
+/// Public.
+async fn login(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Credentials>,
+) -> Result<axum::response::Response, ApiError> {
+    let Some((user, hash)) = state.db.get_user_credentials(&body.username) else {
+        // Same cost as a real check so usernames can't be probed by timing.
+        let _ = auth::verify_password("$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", &body.password);
+        return Err(api_error(StatusCode::UNAUTHORIZED, "invalid username or password"));
+    };
+    if !auth::verify_password(&hash, &body.password) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "invalid username or password"));
+    }
+    Ok(start_session(&state, &user))
+}
+
+/// Public (works whether or not the session is still valid).
+async fn logout(State(state): State<Arc<AppState>>, req: Request) -> impl IntoResponse {
+    if let Some(token) = auth::session_token_from_request(&req) {
+        state.db.delete_session(&auth::sha256_hex(&token));
+    }
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, auth::clear_session_cookie())],
         Json(json!({"ok": true})),
     )
 }
 
-async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
-    let auth_required = state.session_token.is_some();
-    let authenticated = if let Some(ref expected) = state.session_token {
-        get_session_cookie(&req)
-            .map(|t| t == *expected)
-            .unwrap_or(false)
-    } else {
-        true
+// -- Account (the authenticated user's own) --
+
+async fn me(Extension(CurrentUser(user)): Extension<CurrentUser>) -> Json<Value> {
+    Json(user_json(&user))
+}
+
+#[derive(Deserialize)]
+struct ChangePassword {
+    current_password: String,
+    new_password: String,
+}
+
+async fn change_password(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(body): Json<ChangePassword>,
+) -> Result<Json<Value>, ApiError> {
+    let Some((_, hash)) = state.db.get_user_credentials(&user.username) else {
+        return Err(api_error(StatusCode::NOT_FOUND, "user not found"));
     };
-    Json(json!({
-        "auth_required": auth_required,
-        "authenticated": authenticated,
-    }))
+    if !auth::verify_password(&hash, &body.current_password) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "current password is wrong"));
+    }
+    auth::valid_password(&body.new_password).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+    let new_hash = auth::hash_password(&body.new_password)
+        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    state.db.update_user_password(&user.id, &new_hash);
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn list_my_api_keys(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+) -> Json<Value> {
+    Json(json!(state.db.list_api_keys(&user.id)))
+}
+
+#[derive(Deserialize)]
+struct CreateApiKey {
+    name: String,
+}
+
+/// Returns the key itself exactly once.
+async fn create_my_api_key(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(body): Json<CreateApiKey>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if body.name.trim().is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "name is required"));
+    }
+    let key = format!("{}{}", auth::API_KEY_PREFIX, auth::random_token());
+    let prefix = format!("{}…", &key[..12]);
+    let record = state
+        .db
+        .create_api_key(&user.id, &body.name, &prefix, &auth::sha256_hex(&key));
+    Ok((StatusCode::CREATED, Json(json!({"key": key, "api_key": record}))))
+}
+
+async fn delete_my_api_key(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    if state.db.delete_api_key(&id, &user.id) {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+// -- Users (admin) --
+
+async fn list_users(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+) -> Result<Json<Value>, ApiError> {
+    auth::require_admin(&user)?;
+    let users: Vec<Value> = state.db.list_users().iter().map(user_json).collect();
+    Ok(Json(json!(users)))
+}
+
+#[derive(Deserialize)]
+struct CreateUser {
+    username: String,
+    password: String,
+    role: Option<String>,
+}
+
+async fn create_user(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(actor)): Extension<CurrentUser>,
+    Json(body): Json<CreateUser>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    auth::require_admin(&actor)?;
+    let role = body.role.as_deref().unwrap_or("user");
+    if !matches!(role, "admin" | "user") {
+        return Err(api_error(StatusCode::BAD_REQUEST, "role must be 'admin' or 'user'"));
+    }
+    if !auth::valid_username(&body.username) {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "username: 2-32 characters, letters, digits, . _ -",
+        ));
+    }
+    auth::valid_password(&body.password).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+    let hash = auth::hash_password(&body.password)
+        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let user = state
+        .db
+        .create_user(&body.username, role, &hash)
+        .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+    Ok((StatusCode::CREATED, Json(user_json(&user))))
+}
+
+#[derive(Deserialize)]
+struct UpdateUser {
+    role: Option<String>,
+    password: Option<String>,
+}
+
+async fn update_user(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(actor)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateUser>,
+) -> Result<Json<Value>, ApiError> {
+    auth::require_admin(&actor)?;
+    let Some(target) = state.db.get_user(&id) else {
+        return Err(api_error(StatusCode::NOT_FOUND, "user not found"));
+    };
+    if target.role == "owner" && actor.id != target.id {
+        return Err(api_error(StatusCode::FORBIDDEN, "the owner can only be changed by the owner"));
+    }
+    if let Some(role) = &body.role {
+        if target.role == "owner" {
+            return Err(api_error(StatusCode::BAD_REQUEST, "the owner's role is fixed"));
+        }
+        if !matches!(role.as_str(), "admin" | "user") {
+            return Err(api_error(StatusCode::BAD_REQUEST, "role must be 'admin' or 'user'"));
+        }
+        state.db.update_user_role(&id, role);
+    }
+    if let Some(password) = &body.password {
+        auth::valid_password(password).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        let hash = auth::hash_password(password)
+            .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        state.db.update_user_password(&id, &hash);
+        // A reset password logs the account out everywhere.
+        state.db.delete_user_sessions(&id);
+    }
+    Ok(Json(user_json(&state.db.get_user(&id).unwrap_or(target))))
+}
+
+async fn delete_user(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(actor)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    auth::require_admin(&actor)?;
+    let Some(target) = state.db.get_user(&id) else {
+        return Err(api_error(StatusCode::NOT_FOUND, "user not found"));
+    };
+    if target.role == "owner" {
+        return Err(api_error(StatusCode::FORBIDDEN, "the owner cannot be deleted"));
+    }
+    if target.id == actor.id {
+        return Err(api_error(StatusCode::BAD_REQUEST, "you cannot delete yourself"));
+    }
+    state.db.delete_user(&id);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // -- Health --
@@ -484,6 +663,7 @@ async fn list_jobs(State(state): State<Arc<AppState>>) -> Json<Value> {
 
 async fn create_job(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
     let models_dir = state.data_dir.join("models");
@@ -634,6 +814,7 @@ async fn create_job(
         Some(&config_json),
         overrides_json.as_deref(),
         &source,
+        Some(&user.id),
     );
 
     if source == "browser" {
@@ -933,12 +1114,20 @@ pub fn router(state: Arc<AppState>) -> Router {
     let public = Router::new()
         .route("/api/health", get(health))
         .route("/api/auth/status", get(auth_status))
+        .route("/api/auth/setup", post(auth_setup))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .with_state(state.clone());
 
-    // Protected routes — require auth when ADMIN_PASSPHRASE is set
+    // Protected routes — a session cookie or an API key (see src/auth.rs).
+    // Admin-only handlers check the role themselves.
     let protected = Router::new()
+        .route("/api/me", get(me))
+        .route("/api/me/password", post(change_password))
+        .route("/api/me/api-keys", get(list_my_api_keys).post(create_my_api_key))
+        .route("/api/me/api-keys/{id}", delete(delete_my_api_key))
+        .route("/api/users", get(list_users).post(create_user))
+        .route("/api/users/{id}", axum::routing::put(update_user).delete(delete_user))
         .route("/api/profiles/machine-models", get(list_machine_models))
         .route("/api/profiles/machines", get(list_machines))
         .route("/api/profiles/processes", get(list_processes))
@@ -967,7 +1156,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/slices", get(list_slices))
         .route("/api/slices/{id}/download", get(download_gcode))
         .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(state.clone(), auth::require_auth))
         .with_state(state);
 
     let static_files = ServeDir::new("dist/web")

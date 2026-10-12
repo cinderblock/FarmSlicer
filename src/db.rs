@@ -62,6 +62,27 @@ pub struct SliceRecord {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct User {
+    pub id: String,
+    pub username: String,
+    /// "owner" | "admin" | "user"
+    pub role: String,
+    pub created_at: String,
+    pub last_login: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ApiKey {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    /// First characters of the key, for display ("fsk_ab12…").
+    pub prefix: String,
+    pub created_at: String,
+    pub last_used: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CustomProfile {
     pub id: String,
     pub name: String,
@@ -153,7 +174,246 @@ impl Db {
             );"
         ).expect("failed to create custom_profiles table");
 
+        // Accounts (see src/auth.rs). Session tokens and API keys are stored
+        // as SHA-256 digests only.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                role TEXT NOT NULL DEFAULT 'user',
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_login TEXT
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                prefix TEXT NOT NULL,
+                key_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_used TEXT
+            );"
+        ).expect("failed to create account tables");
+        if conn.prepare("SELECT user_id FROM jobs LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE jobs ADD COLUMN user_id TEXT;").ok();
+        }
+
         Db { conn: Mutex::new(conn) }
+    }
+
+    // -- Users --
+
+    fn user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
+        Ok(User {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            role: row.get(2)?,
+            created_at: row.get(3)?,
+            last_login: row.get(4)?,
+        })
+    }
+
+    pub fn user_count(&self) -> i64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+            .unwrap_or(0)
+    }
+
+    pub fn list_users(&self) -> Vec<User> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, username, role, created_at, last_login FROM users ORDER BY created_at")
+            .unwrap();
+        stmt.query_map([], Self::user_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn get_user(&self, id: &str) -> Option<User> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, username, role, created_at, last_login FROM users WHERE id = ?1",
+            params![id],
+            Self::user_from_row,
+        )
+        .ok()
+    }
+
+    /// The user plus their password hash, for login.
+    pub fn get_user_credentials(&self, username: &str) -> Option<(User, String)> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, username, role, created_at, last_login, password_hash FROM users WHERE username = ?1",
+            params![username.trim()],
+            |row| Ok((Self::user_from_row(row)?, row.get::<_, String>(5)?)),
+        )
+        .ok()
+    }
+
+    pub fn create_user(&self, username: &str, role: &str, password_hash: &str) -> Result<User, String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO users (id, username, role, password_hash) VALUES (?1, ?2, ?3, ?4)",
+            params![id, username.trim(), role, password_hash],
+        )
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE") {
+                "that username is taken".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
+        conn.query_row(
+            "SELECT id, username, role, created_at, last_login FROM users WHERE id = ?1",
+            params![id],
+            Self::user_from_row,
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn update_user_role(&self, id: &str, role: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE users SET role = ?2 WHERE id = ?1", params![id, role])
+            .unwrap_or(0)
+            > 0
+    }
+
+    pub fn update_user_password(&self, id: &str, password_hash: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET password_hash = ?2 WHERE id = ?1",
+            params![id, password_hash],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    pub fn delete_user(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM users WHERE id = ?1", params![id])
+            .unwrap_or(0)
+            > 0
+    }
+
+    // -- Sessions --
+
+    pub fn create_session(&self, token_hash: &str, user_id: &str, ttl_days: i64) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, expires_at)
+             VALUES (?1, ?2, datetime('now', ?3 || ' days'))",
+            params![token_hash, user_id, format!("+{ttl_days}")],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE users SET last_login = datetime('now') WHERE id = ?1",
+            params![user_id],
+        )
+        .ok();
+        // Opportunistic cleanup of expired sessions.
+        conn.execute("DELETE FROM sessions WHERE expires_at < datetime('now')", [])
+            .ok();
+    }
+
+    pub fn session_user(&self, token_hash: &str) -> Option<User> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT u.id, u.username, u.role, u.created_at, u.last_login
+             FROM sessions s JOIN users u ON u.id = s.user_id
+             WHERE s.token_hash = ?1 AND s.expires_at > datetime('now')",
+            params![token_hash],
+            Self::user_from_row,
+        )
+        .ok()
+    }
+
+    pub fn delete_session(&self, token_hash: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?1", params![token_hash])
+            .ok();
+    }
+
+    pub fn delete_user_sessions(&self, user_id: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])
+            .ok();
+    }
+
+    // -- API keys --
+
+    fn api_key_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiKey> {
+        Ok(ApiKey {
+            id: row.get(0)?,
+            user_id: row.get(1)?,
+            name: row.get(2)?,
+            prefix: row.get(3)?,
+            created_at: row.get(4)?,
+            last_used: row.get(5)?,
+        })
+    }
+
+    pub fn create_api_key(&self, user_id: &str, name: &str, prefix: &str, key_hash: &str) -> ApiKey {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO api_keys (id, user_id, name, prefix, key_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, user_id, name.trim(), prefix, key_hash],
+        )
+        .unwrap();
+        conn.query_row(
+            "SELECT id, user_id, name, prefix, created_at, last_used FROM api_keys WHERE id = ?1",
+            params![id],
+            Self::api_key_from_row,
+        )
+        .unwrap()
+    }
+
+    pub fn list_api_keys(&self, user_id: &str) -> Vec<ApiKey> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, user_id, name, prefix, created_at, last_used FROM api_keys WHERE user_id = ?1 ORDER BY created_at")
+            .unwrap();
+        stmt.query_map(params![user_id], Self::api_key_from_row)
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn api_key_user(&self, key_hash: &str) -> Option<User> {
+        let conn = self.conn.lock().unwrap();
+        let user = conn
+            .query_row(
+                "SELECT u.id, u.username, u.role, u.created_at, u.last_login
+                 FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?1",
+                params![key_hash],
+                Self::user_from_row,
+            )
+            .ok()?;
+        conn.execute(
+            "UPDATE api_keys SET last_used = datetime('now') WHERE key_hash = ?1",
+            params![key_hash],
+        )
+        .ok();
+        Some(user)
+    }
+
+    pub fn delete_api_key(&self, id: &str, user_id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM api_keys WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id],
+        )
+        .unwrap_or(0)
+            > 0
     }
 
     // -- Printers --
@@ -285,13 +545,14 @@ impl Db {
         config_json: Option<&str>,
         overrides_json: Option<&str>,
         source: &str,
+        user_id: Option<&str>,
     ) -> Job {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source],
+            "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id],
         )
         .unwrap();
         let created_at: String = conn

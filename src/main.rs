@@ -1,3 +1,4 @@
+mod auth;
 mod db;
 mod discovery;
 mod profiles;
@@ -54,11 +55,12 @@ async fn main() {
         });
     }
 
-    let passphrase = server::AppState::passphrase();
-    if passphrase.is_some() {
-        println!("Auth enabled (ADMIN_PASSPHRASE set)");
+    if auth::auth_disabled() {
+        println!("Auth DISABLED (FARMSLICER_NO_AUTH is set): every request runs as owner");
+    } else if db.user_count() == 0 {
+        println!("First run: no accounts yet. Open the web UI to create the owner account.");
     } else {
-        println!("Auth disabled (no ADMIN_PASSPHRASE)");
+        println!("Auth enabled: {} account(s)", db.user_count());
     }
 
     let state = Arc::new(server::AppState::new(
@@ -67,7 +69,6 @@ async fn main() {
         slicer,
         profile_store,
         discovered,
-        passphrase,
     ));
 
     let app = server::router(state);

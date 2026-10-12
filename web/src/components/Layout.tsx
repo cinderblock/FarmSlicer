@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router";
+import { useAuth } from "../auth";
 
 const navItems = [
   { to: "/", label: "Printers" },
@@ -9,6 +10,9 @@ const navItems = [
 ];
 
 export default function Layout() {
+  const { user, isAdmin, status, logout } = useAuth();
+  const items = isAdmin ? [...navItems, { to: "/users", label: "Users" }] : navItems;
+
   return (
     <div className="app">
       <nav className="sidebar">
@@ -16,7 +20,7 @@ export default function Layout() {
           <h1>FarmSlicer</h1>
         </div>
         <ul className="nav-list">
-          {navItems.map((item) => (
+          {items.map((item) => (
             <li key={item.to}>
               <NavLink
                 to={item.to}
@@ -30,6 +34,23 @@ export default function Layout() {
             </li>
           ))}
         </ul>
+        <div className="sidebar-user">
+          {status?.auth_disabled ? (
+            <span className="hint" title="FARMSLICER_NO_AUTH is set on the server">
+              auth disabled
+            </span>
+          ) : (
+            <>
+              <NavLink to="/account" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
+                {user?.username ?? "account"}
+                <span className="hint"> · {user?.role}</span>
+              </NavLink>
+              <button className="btn-sm" onClick={() => logout()}>
+                Log out
+              </button>
+            </>
+          )}
+        </div>
       </nav>
       <main className="content">
         <Outlet />
