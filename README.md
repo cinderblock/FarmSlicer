@@ -25,7 +25,7 @@ reached at `https://farm.example.com` (LAN only).
 
 ```bash
 docker run -d --name farmslicer -p 9337:9337 \
-  -e ADMIN_PASSPHRASE=change-me \
+  -e FARMSLICER_ORIGINS=https://farm.example.com \
   -v farmslicer_data:/app/data \
   ghcr.io/cinderblock/farmslicer:latest
 ```
@@ -144,7 +144,9 @@ summary prints the `pin.json` to paste there.
 | --- | --- |
 | `GET /api/health` | liveness |
 | `GET /api/status` | server load + whether a browser engine is deployed |
-| `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/logout` | passphrase session |
+| `GET /api/auth/status`, `POST /api/auth/{setup,login,recover}/{start,finish}`, `GET /api/auth/invite/{token}`, `POST /api/auth/invite/{token}/{start,finish}`, `POST /api/auth/logout` | passkey ceremonies and sessions (see Accounts) |
+| `GET /api/me`, `GET/POST /api/me/passkeys…`, `GET/POST/DELETE /api/me/api-keys…`, `POST /api/me/recovery-code` | own account |
+| `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/invite` | user admin |
 | `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue |
 | `GET /api/profiles/resolve?machine=&process=&filament=` | merged config JSON (what the engines slice with) |
 | `GET /api/profiles/resolve-single?name=` | one profile with inheritance resolved |
