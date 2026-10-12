@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket};
+use socket2::{Domain, Protocol, Socket, Type};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -73,17 +74,38 @@ pub async fn run(discovered: Arc<DiscoveryMap>) {
                 // Evict stale entries
                 let mut map = discovered.lock().unwrap();
                 let now = Instant::now();
-                map.retain(|_, p| now.duration_since(p.last_seen) < STALE_TIMEOUT);
+                map.retain(|_, p| {
+                    let fresh = now.duration_since(p.last_seen) < STALE_TIMEOUT;
+                    if !fresh {
+                        println!(
+                            "Discovery: lost {} \"{}\" (serial {}) at {}: silent for {}s",
+                            p.model_name,
+                            p.name,
+                            p.serial,
+                            p.ip,
+                            STALE_TIMEOUT.as_secs()
+                        );
+                    }
+                    fresh
+                });
             }
         }
     }
 }
 
+/// Bind the SSDP port shared: Bambu Studio, Home Assistant's Bambu
+/// integration or another print-farm tool on the same host listen on it too,
+/// and printers broadcast their announcements, so every listener gets a copy.
 fn create_multicast_socket() -> std::io::Result<UdpSocket> {
-    let std_socket = StdUdpSocket::bind(("0.0.0.0", BAMBU_PORT))?;
-    std_socket.join_multicast_v4(&MULTICAST_ADDR, &Ipv4Addr::UNSPECIFIED)?;
-    std_socket.set_nonblocking(true)?;
-    UdpSocket::from_std(std_socket)
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    socket.set_broadcast(true)?;
+    socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, BAMBU_PORT).into())?;
+    socket.join_multicast_v4(&MULTICAST_ADDR, &Ipv4Addr::UNSPECIFIED)?;
+    socket.set_nonblocking(true)?;
+    UdpSocket::from_std(socket.into())
 }
 
 fn handle_packet(data: &[u8], src: SocketAddr, discovered: &DiscoveryMap) {
@@ -130,6 +152,17 @@ fn handle_packet(data: &[u8], src: SocketAddr, discovered: &DiscoveryMap) {
     };
 
     let mut map = discovered.lock().unwrap();
+    match map.get(&serial) {
+        None => println!(
+            "Discovery: found {} \"{}\" (serial {}, model code {}) at {}",
+            printer.model_name, printer.name, printer.serial, printer.model_code, printer.ip
+        ),
+        Some(prev) if prev.ip != printer.ip => println!(
+            "Discovery: {} \"{}\" (serial {}) moved from {} to {}",
+            printer.model_name, printer.name, printer.serial, prev.ip, printer.ip
+        ),
+        Some(_) => {}
+    }
     map.insert(serial, printer);
 }
 
@@ -143,18 +176,14 @@ fn parse_headers(text: &str) -> HashMap<String, String> {
     headers
 }
 
+/// Loopback and link-local addresses can't be a printer we can reach.
+/// (172.16.0.0/12 is deliberately not filtered: it is an ordinary private LAN
+/// range, not only Docker's.)
 fn is_virtual_ip(ip: &str) -> bool {
-    let addr: Ipv4Addr = match ip.parse() {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    let octets = addr.octets();
-    // 127.0.0.0/8
-    octets[0] == 127
-    // 169.254.0.0/16
-    || (octets[0] == 169 && octets[1] == 254)
-    // 172.16.0.0/12
-    || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+    match ip.parse::<Ipv4Addr>() {
+        Ok(addr) => addr.is_loopback() || addr.is_link_local(),
+        Err(_) => false,
+    }
 }
 
 fn model_name(code: &str) -> &str {

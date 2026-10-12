@@ -26,6 +26,8 @@ rand = "0.8"
 # Groups and quotas: UTC period boundaries, self-service identifier patterns.
 chrono = { version = "0.4", default-features = false, features = ["now", "std"] }
 regex = "1"
+# Discovery: share the SSDP port with other listeners (SO_REUSEADDR/PORT).
+socket2 = { version = "0.6", features = ["all"] }
 
 [build-dependencies]
 cxx-build = "1"
