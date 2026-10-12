@@ -247,18 +247,98 @@ async fn run_jpeg(
 
 // -- X1/H2: H.264 over RTSPS on 322 ------------------------------------------------
 
-/// Accept one local connection and splice it to the printer over TLS.
+/// Rewrite the URL in an RTSP request line: `from` prefix → `to`.
+fn rewrite_request_line(head: &[u8], from: &str, to: &str) -> Vec<u8> {
+    let line_end = head.iter().position(|&b| b == b'\n').map_or(head.len(), |i| i + 1);
+    let (line, rest) = head.split_at(line_end);
+    let line = String::from_utf8_lossy(line).replacen(from, to, 1);
+    let mut out = line.into_bytes();
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Client → printer: forward interleaved binary frames (`$`, channel, u16
+/// length) untouched, and RTSP requests with their request-line URL turned
+/// from our local address into the printer's `rtsps://` one. LIVE555 on the
+/// printers redirects any other URL; digest auth still works because it
+/// hashes the `uri=` in the Authorization header, which stays as it was.
+async fn forward_requests<R, W>(mut from: R, mut to: W, local: String, remote: String) -> std::io::Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let mut buf: Vec<u8> = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 8192];
+    loop {
+        // Forward everything complete in the buffer.
+        loop {
+            if buf.first() == Some(&b'$') {
+                if buf.len() < 4 {
+                    break;
+                }
+                let len = 4 + u16::from_be_bytes([buf[2], buf[3]]) as usize;
+                if buf.len() < len {
+                    break;
+                }
+                to.write_all(&buf[..len]).await?;
+                buf.drain(..len);
+            } else if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head_len = end + 4;
+                let head = String::from_utf8_lossy(&buf[..head_len]).to_ascii_lowercase();
+                let body_len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if buf.len() < head_len + body_len {
+                    break;
+                }
+                to.write_all(&rewrite_request_line(&buf[..head_len], &local, &remote)).await?;
+                to.write_all(&buf[head_len..head_len + body_len]).await?;
+                buf.drain(..head_len + body_len);
+            } else {
+                break;
+            }
+        }
+        to.flush().await?;
+        let n = from.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > 1 << 20 {
+            return Err(std::io::Error::other("RTSP request too large"));
+        }
+    }
+}
+
+/// Accept one local connection and splice it to the printer over TLS,
+/// rewriting request URLs (see `forward_requests`). Returns the local port.
 async fn tls_proxy(address: String) -> Result<(u16, tokio::task::JoinHandle<()>), String> {
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| format!("camera proxy: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let task = tokio::spawn(async move {
-        let Ok((mut local, _)) = listener.accept().await else { return };
+        let Ok((local, _)) = listener.accept().await else { return };
         drop(listener);
-        match tls_connect(&address, RTSP_PORT).await {
-            Ok(mut remote) => {
-                let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
+        let remote = match tls_connect(&address, RTSP_PORT).await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Camera proxy: {e}");
+                return;
             }
-            Err(e) => eprintln!("Camera proxy: {e}"),
+        };
+        let (local_read, mut local_write) = tokio::io::split(local);
+        let (mut remote_read, remote_write) = tokio::io::split(remote);
+        let up = forward_requests(
+            local_read,
+            remote_write,
+            format!("rtsp://127.0.0.1:{port}"),
+            format!("rtsps://{address}:{RTSP_PORT}"),
+        );
+        let down = tokio::io::copy(&mut remote_read, &mut local_write);
+        tokio::select! {
+            _ = up => {}
+            _ = down => {}
         }
     });
     Ok((port, task))
@@ -362,6 +442,29 @@ mod tests {
         assert_eq!(&p[16..20], b"bblp");
         assert_eq!(&p[48..56], b"12345678");
         assert!(p[56..].iter().all(|&b| b == 0));
+    }
+
+    #[tokio::test]
+    async fn proxy_rewrites_request_lines_only() {
+        let requests = b"DESCRIBE rtsp://127.0.0.1:5000/streaming/live/1 RTSP/1.0\r\nCSeq: 1\r\nAuthorization: Digest uri=\"rtsp://127.0.0.1:5000/streaming/live/1\"\r\n\r\n\
+$\x01\x00\x03abcSET_PARAMETER rtsp://127.0.0.1:5000/x RTSP/1.0\r\nContent-Length: 4\r\n\r\nbody";
+        let mut out = Vec::new();
+        // Feed it in awkward pieces.
+        let (mut w, r) = tokio::io::duplex(7);
+        let feeder = tokio::spawn(async move {
+            for piece in requests.chunks(5) {
+                w.write_all(piece).await.unwrap();
+            }
+        });
+        forward_requests(r, &mut out, "rtsp://127.0.0.1:5000".into(), "rtsps://10.0.0.5:322".into())
+            .await
+            .unwrap();
+        feeder.await.unwrap();
+        let out = String::from_utf8_lossy(&out);
+        assert!(out.starts_with("DESCRIBE rtsps://10.0.0.5:322/streaming/live/1 RTSP/1.0\r\n"), "{out}");
+        assert!(out.contains("uri=\"rtsp://127.0.0.1:5000/streaming/live/1\""), "digest uri kept: {out}");
+        assert!(out.contains("$\u{1}\u{0}\u{3}abcSET_PARAMETER rtsps://10.0.0.5:322/x RTSP/1.0"), "{out}");
+        assert!(out.ends_with("\r\n\r\nbody"), "{out}");
     }
 
     #[test]
