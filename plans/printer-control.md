@@ -96,26 +96,43 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 
 ## Plan / steps
 
-**Phase 0 — quick fixes** ← current
-- [ ] Discovery: `SO_REUSEADDR` (+ `SO_REUSEPORT` on Unix) via socket2 so it
-      coexists with other SSDP listeners; log each printer on first sighting
-      and on IP change; stop dropping 172.16.0.0/12 (a real LAN range here).
-- [ ] Slice page: Model + Nozzle dropdowns instead of combined machine names.
+**Phase 0 — quick fixes** (done)
+- [x] Discovery: `SO_REUSEADDR` (+ `SO_REUSEPORT` on Unix) via socket2 so it
+      coexists with other SSDP listeners; log each printer on first sighting,
+      on IP change and when lost; stop dropping 172.16.0.0/12. (`5a66319`)
+- [x] Slice page: Model + Nozzle dropdowns; machine-models API maps nozzle →
+      profile (`variants`); models from the farm, or all when no printers.
+      (`18ae6d3`)
 
-**Phase 1 — printer link (status only, read-only to printers)**
-- [ ] Printers page: edit address/serial/access code (admin only; never sent
-      to non-admins).
-- [ ] `src/bambu/mqtt.rs` + `status.rs`, manager wired to printer CRUD.
-- [ ] `GET /api/printers/status`, SSE stream; Printers page live cards.
+**Phase 1 — printer link (status only)** (done, `6e592c2`)
+- [x] Printer CRUD admin-only (README already said so), access code
+      write-only (`access_code_set`), serial admin-only, PATCH to edit.
+- [x] `src/bambu/{hub,status,tls}.rs`; `sync()` after every printer change.
+- [x] `GET /api/printers/status`, SSE `/api/printers/events`, raw report;
+      Printers page live cards (progress, temps, AMS swatches, HMS links),
+      edit form, "Address Changed" from discovery.
+- [x] `tests/printers-e2e.mjs`; verified against the fake printer.
 
-**Phase 2 — sending**
-- [ ] `src/bambu/ftps.rs` with session reuse; a test FTPS server in tests that
-      enforces reuse.
-- [ ] `prints` table (job/upload, printer, user, group, state, timestamps,
-      final outcome from MQTT transitions).
-- [ ] Upload pre-sliced `.gcode.3mf` (parse plate gcode, slice_info, png).
-- [ ] Send + start with AMS mapping (type + colour match, user choice honoured);
-      pause/resume/stop/speed with per-print permissions.
+**Phase 2 — sending** ← current
+- [ ] `src/bambu/ftps.rs`: implicit FTPS with data-channel session reuse;
+      in-process test server that refuses non-resumed data connections;
+      check against vsftpd (`require_ssl_reuse=YES`) in Docker.
+- [ ] `src/bambu/package.rs`: read a `.gcode.3mf` — plates
+      (`Metadata/plate_N.gcode`, `.md5`, `plate_N.png`), `slice_info.config`
+      (printer_model_id, nozzle_diameters, prediction, weight, filaments
+      id/type/color/used_g).
+- [ ] DB: `jobs.package_path` (+ `source = 'upload'` for pre-sliced files);
+      `prints` table (job, plate, printer, user, group, file name on the
+      printer, AMS mapping, options, status, error, timestamps).
+- [ ] API: upload a `.gcode.3mf` as a job; `POST /api/jobs/{id}/print`;
+      `GET /api/prints`; pause/resume/stop/speed; job thumbnail.
+- [ ] Print tracker: follow the printer's reports to printing / paused /
+      finished / failed / cancelled.
+- [ ] UI: upload, send dialog (compatible printers with live state, AMS
+      mapping editor pre-filled by type + nearest colour), prints history,
+      controls on printer cards.
+- [ ] Fake printer: vsftpd + responder that walks PREPARE → RUNNING → FINISH;
+      e2e test.
 
 **Phase 3 — thumbnails and packaging**
 - [ ] Software rasteriser + thumbnail callback; config `thumbnails` sizes.
@@ -174,10 +191,40 @@ which we must not copy):
   holds without `SO_REUSEADDR`, so it couldn't be checked from outside the
   process; production discovery is unverified until it logs sightings.
 
+### Sending details (from OrcaSlicer's GUI source)
+
+- `ams_mapping` (v0): one entry per project filament (0-based filament
+  index), value = global tray id (`unit*4+slot`), `-1` for unused filaments
+  and for external spools. `ams_mapping2` (v1): one
+  `{"ams_id", "slot_id"}` per filament, `255/255` for unused
+  (`SelectMachineDialog::get_ams_mapping_result`). `use_ams` false when only
+  external spools are used. Send both.
+- The `project_file` JSON itself is built by Bambu's closed network plugin;
+  field list from the old app and community docs (see Findings).
+- `project_file` ack: `result` "FAIL" means failure (DeviceManager.cpp).
+- Bambu model ids (machine_model JSON `model_id`): A1 mini `N1`, A1 `N2S`,
+  H2D `O1D`, H2D Pro `O1E`, H2S `O1S`, P1P `C11`, P1S `C12`, P2S `N7`,
+  X1 Carbon `BL-P001`, X1 `BL-P002`, X1E `C13`, X2D `N6`. Read them from
+  the profiles, don't hard-code.
+- Compatibility: same model and nozzle; X1/X1 Carbon/X1E and P1P/P1S are
+  interchangeable (the old app's rule).
+- SD file name: `<model name>-<print id prefix>.gcode.3mf`, unique, so
+  matching reports to our print is unambiguous and stale thumbnails can't
+  happen.
+- A stopped print reports `gcode_state` FAILED with `print_error`
+  0x0300400C ("cancelled") — to verify on hardware.
+
 ## Progress log
 
 - [x] Surveyed the old print station (protocols, data model, bugs).
 - [x] Plan written.
+- [x] Phase 0 and Phase 1 committed; side fix: deleting a printer that jobs
+      reference no longer panics (`7b0c4d6`).
+- Dev setup: stub server on buildhost `127.0.0.1:9340`
+  (`~/farmslicer-printer-control/pc-dev.sh`, auth off), reached with
+  `ssh -L 9340:127.0.0.1:9340`; fake printer = Docker `fake-printer`
+  (mosquitto TLS on its bridge IP:8883, `bblp`/`12345678`, serial
+  `FAKE00000000001`, `~/fake-printer/responder.sh` answers pushall/commands).
 
 ## Open questions for the user
 
