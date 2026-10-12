@@ -13,6 +13,20 @@ export interface Printer {
   serial_number: string | null;
   access_code_set: boolean;
   current_job: string | null;
+  area: string;
+}
+
+/** Limits on prints sent without approval (src/groups.rs `PrintRules`). */
+export interface PrintRules {
+  max_minutes?: number;
+  materials?: string[];
+}
+
+export function describeRules(r: PrintRules): string {
+  const parts: string[] = [];
+  if (r.max_minutes) parts.push(`up to ${formatMinutes(r.max_minutes)}`);
+  if (r.materials?.length) parts.push(r.materials.join(", ") + " only");
+  return parts.length ? parts.join("; ") : "no limits";
 }
 
 export interface Temperature {
@@ -187,7 +201,18 @@ export interface PrintRecord {
   /** null when the caller can't see the job (only that the printer is busy). */
   name: string | null;
   ams_mapping: string | null;
-  status: "uploading" | "starting" | "printing" | "paused" | "finished" | "failed" | "cancelled";
+  status:
+    | "pending_approval"
+    | "uploading"
+    | "starting"
+    | "printing"
+    | "paused"
+    | "finished"
+    | "failed"
+    | "cancelled"
+    | "rejected";
+  approval_reason: string | null;
+  decided_by: string | null;
   progress: number;
   error: string | null;
   created_at: string;
@@ -195,6 +220,7 @@ export interface PrintRecord {
   finished_at: string | null;
   updated_at: string;
   can_control: boolean;
+  can_approve: boolean;
 }
 
 export const ACTIVE_PRINT = ["uploading", "starting", "printing", "paused"];

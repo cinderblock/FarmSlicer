@@ -3,12 +3,15 @@ import { apiJson } from "../auth";
 import { errorText, useJson } from "../api";
 import { QuotaRulesEditor } from "../components/Quota";
 import type { Rule } from "../groups";
+import PrintRulesEditor from "../components/PrintRulesEditor";
+import type { PrintRules } from "../printers";
 
 interface SiteSettings {
   season_start: string;
   default_user_quotas: Rule[];
   default_guest_quotas: Rule[];
   guest_session_days: number;
+  print_rules: PrintRules;
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -76,6 +79,10 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
           />
           <span className="hint">Applies to new guest sign-ins.</span>
         </label>
+
+        <h3>Print rules</h3>
+        <p className="hint">For personal jobs and for groups that set none.</p>
+        <PrintRulesEditor rules={s.print_rules ?? {}} onChange={(r) => setS({ ...s, print_rules: r })} />
 
         <button className="btn-primary" type="submit">
           Save

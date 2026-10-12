@@ -1,4 +1,6 @@
 import { useState } from "react";
+import PrintRulesEditor from "../components/PrintRulesEditor";
+import { describeRules } from "../printers";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { errorText, localDate, useJson } from "../api";
@@ -740,6 +742,26 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
       </label>
 
       <LogoSetting group={group} />
+
+      <div className="rules-setting">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={s.print_rules !== undefined}
+            onChange={(e) => setS({ ...s, print_rules: e.target.checked ? { ...eff.print_rules } : undefined })}
+          />
+          Set print rules here
+          {s.print_rules === undefined && (
+            <span className="hint">
+              {" "}
+              (inheriting from {sourceName("print_rules")}: {describeRules(eff.print_rules)})
+            </span>
+          )}
+        </label>
+        {s.print_rules !== undefined && (
+          <PrintRulesEditor rules={s.print_rules} onChange={(r) => setS({ ...s, print_rules: r })} />
+        )}
+      </div>
 
       <h3>This group only</h3>
       {group.is_admin && (

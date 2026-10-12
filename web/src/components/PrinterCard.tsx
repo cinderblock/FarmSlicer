@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import { apiJson } from "../auth";
+import { errorText } from "../api";
 import CameraView from "./CameraView";
 import PrintControls from "./PrintControls";
 import {
@@ -8,6 +10,7 @@ import {
   printErrorCode,
   type Printer,
   type PrinterStatus,
+  loadedTrays,
   type PrintRecord,
   type Tray,
 } from "../printers";
@@ -39,6 +42,7 @@ export default function PrinterCard({
   status,
   print,
   isAdmin,
+  openReports,
   actions,
 }: {
   printer: Printer;
@@ -46,11 +50,46 @@ export default function PrinterCard({
   /** The FarmSlicer print using this printer, if any. */
   print?: PrintRecord;
   isAdmin?: boolean;
+  /** Open problem reports (admins). */
+  openReports?: number;
   /** Admin buttons. */
   actions?: ReactNode;
 }) {
   const { label, tone } = describeState(status);
   const [camera, setCamera] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [report, setReport] = useState("");
+  const [note, setNote] = useState("");
+  const [heatSlot, setHeatSlot] = useState("");
+
+  const sendReport = async () => {
+    try {
+      await apiJson(`/api/printers/${printer.id}/reports`, "POST", { description: report });
+      setReporting(false);
+      setReport("");
+      setNote("Thanks, an admin will have a look.");
+    } catch (e) {
+      setNote(errorText(e));
+    }
+  };
+
+  const heat = async (slot: string) => {
+    setNote("");
+    try {
+      if (slot === "off") {
+        await apiJson(`/api/printers/${printer.id}/cooldown`, "POST", {});
+        setNote("Cooling down.");
+      } else {
+        const r = await apiJson<{ nozzle: number; bed: number }>(`/api/printers/${printer.id}/preheat`, "POST", {
+          slot: Number(slot),
+        });
+        setNote(`Heating: nozzle ${r.nozzle} °C, bed ${r.bed} °C.`);
+      }
+    } catch (e) {
+      setNote(errorText(e));
+    }
+    setHeatSlot("");
+  };
   const configured = printer.protocol !== "bambu" || (printer.address && printer.access_code_set);
   const busy = status?.online && ["RUNNING", "PREPARE", "PAUSE"].includes(status.state ?? "");
 
@@ -104,9 +143,15 @@ export default function PrinterCard({
                   .join(" · ")}
               </div>
               {print?.can_control ? (
-                <PrintControls print={print} state={status.state} />
+                <PrintControls print={print} state={status.state} speed={status.speed_level} />
               ) : (
-                isAdmin && <PrintControls url={`/api/printers/${printer.id}/control`} state={status.state} />
+                isAdmin && (
+                  <PrintControls
+                    url={`/api/printers/${printer.id}/control`}
+                    state={status.state}
+                    speed={status.speed_level}
+                  />
+                )
               )}
             </div>
           )}
@@ -173,10 +218,59 @@ export default function PrinterCard({
         </>
       )}
 
+      {status?.online &&
+        !busy &&
+        !print &&
+        (loadedTrays(status).length > 0 || status.nozzles.some((n) => n.target > 0) || (status.bed?.target ?? 0) > 0) && (
+        <label className="preheat">
+          <select value={heatSlot} onChange={(e) => heat(e.target.value)}>
+            <option value="">Pre-heat for…</option>
+            {loadedTrays(status).map((t) => (
+                <option key={t.slot} value={t.slot}>
+                  {t.name ?? t.material} ({t.slot >= 254 ? "external" : `slot ${t.slot + 1}`})
+                </option>
+              ))}
+            {(status.nozzles.some((n) => n.target > 0) || (status.bed?.target ?? 0) > 0) && (
+              <option value="off">Cool down</option>
+            )}
+          </select>
+        </label>
+      )}
+      {note && <p className="hint">{note}</p>}
+      {isAdmin && !!openReports && (
+        <p className="printer-error">
+          {openReports} open problem report{openReports === 1 ? "" : "s"}
+        </p>
+      )}
+      {reporting && (
+        <div className="report-form">
+          <textarea
+            value={report}
+            onChange={(e) => setReport(e.target.value)}
+            placeholder="What's wrong? (clogged nozzle, plate missing, odd noise…)"
+            rows={3}
+            maxLength={2000}
+          />
+          <span className="print-controls">
+            <button className="btn-sm" disabled={!report.trim()} onClick={sendReport}>
+              Send report
+            </button>
+            <button className="btn-sm" onClick={() => setReporting(false)}>
+              Cancel
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="printer-actions">
         {printer.protocol === "bambu" && printer.address && printer.access_code_set && (
           <button className="btn-sm" onClick={() => setCamera(true)}>
             Camera
+          </button>
+        )}
+        {!reporting && (
+          <button className="btn-sm" onClick={() => setReporting(true)} title="Tell the admins something is wrong">
+            Report a problem
           </button>
         )}
         {actions}

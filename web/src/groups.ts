@@ -30,6 +30,8 @@ export interface GroupSettings {
   season_start?: string;
   /** Thumbnail label template: {key} = the nearest group's identifier, {group} = its name. "" = none. */
   thumbnail_label?: string;
+  /** Limits on prints without approval; inherited as a whole. */
+  print_rules?: import("./printers").PrintRules;
   shared_library?: boolean;
   keep_models?: boolean;
   allow_guests?: boolean;
@@ -42,6 +44,7 @@ export interface GroupSettings {
 export interface EffectiveSettings {
   season_start: string;
   thumbnail_label: string;
+  print_rules: import("./printers").PrintRules;
   shared_library: boolean;
   keep_models: boolean;
   allow_guests: boolean;

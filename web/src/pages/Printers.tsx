@@ -33,6 +33,7 @@ interface Draft {
   serial: string;
   accessCode: string;
   accessCodeSet: boolean;
+  area: string;
 }
 
 const EMPTY: Draft = {
@@ -46,6 +47,7 @@ const EMPTY: Draft = {
   serial: "",
   accessCode: "",
   accessCodeSet: false,
+  area: "",
 };
 
 function defaultNozzle(m: MachineModel | undefined): string {
@@ -62,6 +64,12 @@ export default function PrintersPage() {
   const models = useMemo(() => modelsData ?? [], [modelsData]);
   const statuses = usePrinterStatuses();
   const activePrints = useActivePrints();
+  const reports = useJson<{ printer_id: string | null }[]>(isAdmin ? "/api/printer-reports?open=1" : null, rev).data;
+  const openReports = (id: string) => (reports ?? []).filter((r) => r.printer_id === id).length;
+  // Cards by area (as entered), unnamed last.
+  const areas = [...new Set(printers.map((p) => p.area))].sort((a, b) =>
+    a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, undefined, { numeric: true }),
+  );
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState("");
@@ -122,6 +130,7 @@ export default function PrintersPage() {
       serial: p.serial_number ?? "",
       accessCode: "",
       accessCodeSet: p.access_code_set,
+      area: p.area,
     });
   };
 
@@ -134,6 +143,7 @@ export default function PrintersPage() {
       protocol: draft.protocol,
       address: draft.address,
       serial_number: draft.serial,
+      area: draft.area,
     };
     // Write-only: an empty field on edit keeps the stored code.
     if (draft.accessCode || !draft.id) body.access_code = draft.accessCode;
@@ -290,6 +300,22 @@ export default function PrintersPage() {
             </label>
 
             <label>
+              Area
+              <input
+                type="text"
+                list="area-list"
+                value={draft.area}
+                onChange={(e) => set({ area: e.target.value })}
+                placeholder="e.g. Bay 1 (optional)"
+              />
+              <datalist id="area-list">
+                {areas.filter(Boolean).map((a) => (
+                  <option key={a} value={a} />
+                ))}
+              </datalist>
+            </label>
+
+            <label>
               IP Address
               <input
                 type="text"
@@ -385,29 +411,37 @@ export default function PrintersPage() {
       {printersQuery.data && printers.length === 0 && (!isAdmin || newDiscovered.length === 0) ? (
         <p className="empty-state">No printers configured yet.</p>
       ) : (
-        <div className="card-grid printer-grid">
-          {printers.map((printer) => (
-            <PrinterCard
-              key={printer.id}
-              printer={printer}
-              status={statuses[printer.id]}
-              print={activePrints[printer.id]}
-              isAdmin={isAdmin}
-              actions={
-                isAdmin && (
-                  <>
-                    <button className="btn-sm" onClick={() => startEdit(printer)}>
-                      Edit
-                    </button>
-                    <button className="btn-sm btn-danger" onClick={() => handleDelete(printer)}>
-                      Remove
-                    </button>
-                  </>
-                )
-              }
-            />
-          ))}
-        </div>
+        areas.map((area) => (
+          <section key={area} className="printer-area">
+            {(areas.length > 1 || area) && <h3>{area || "Elsewhere"}</h3>}
+            <div className="card-grid printer-grid">
+              {printers
+                .filter((p) => p.area === area)
+                .map((printer) => (
+                  <PrinterCard
+                    key={printer.id}
+                    printer={printer}
+                    status={statuses[printer.id]}
+                    print={activePrints[printer.id]}
+                    isAdmin={isAdmin}
+                    openReports={openReports(printer.id)}
+                    actions={
+                      isAdmin && (
+                        <>
+                          <button className="btn-sm" onClick={() => startEdit(printer)}>
+                            Edit
+                          </button>
+                          <button className="btn-sm btn-danger" onClick={() => handleDelete(printer)}>
+                            Remove
+                          </button>
+                        </>
+                      )
+                    }
+                  />
+                ))}
+            </div>
+          </section>
+        ))
       )}
     </div>
   );

@@ -15,6 +15,8 @@ import {
 interface Targets {
   plates: Plate[];
   targets: Target[];
+  /** Why this plate needs approval for the caller (empty = it doesn't). */
+  needs_approval: string[];
 }
 
 const OPTION_LABELS: [keyof PrintOptions, string, string][] = [
@@ -81,7 +83,9 @@ export default function SendDialog({
 
   const currentPlate = data?.plates.find((p) => p.index === plate) ?? data?.plates[0];
   const targets = useMemo(() => data?.targets ?? [], [data]);
-  const usable = targets.filter((t) => !t.incompatible && !t.busy);
+  // A request that needs approval can name a busy printer: it's sent when approved.
+  const waits = (data?.needs_approval.length ?? 0) > 0;
+  const usable = targets.filter((t) => !t.incompatible && (waits || !t.busy));
   // Default: the first free, fitting printer.
   const selected = targets.find((t) => t.printer_id === printerId) ?? usable[0];
   const mapping = selected ? (mappings[selected.printer_id] ?? selected.ams_mapping) : [];
@@ -182,7 +186,7 @@ export default function SendDialog({
             <div className="target-list">
               {targets.length === 0 && <p className="hint">No printers configured.</p>}
               {targets.map((t) => {
-                const disabled = !!(t.incompatible || t.busy);
+                const disabled = !!(t.incompatible || (t.busy && !waits));
                 const { label, tone } = describeState(t.status ?? undefined);
                 return (
                   <label key={t.printer_id} className={`target${disabled ? " target-disabled" : ""}`}>
@@ -209,7 +213,7 @@ export default function SendDialog({
               })}
             </div>
 
-            {selected && !selected.incompatible && !selected.busy && (
+            {selected && !selected.incompatible && (waits || !selected.busy) && (
               <>
                 <h4>Filaments</h4>
                 <table className="mapping-table">
@@ -283,6 +287,12 @@ export default function SendDialog({
               </>
             )}
 
+            {data.needs_approval.length > 0 && (
+              <div className="send-approval">
+                <strong>Needs approval:</strong> {data.needs_approval.join("; ")}. Sending asks an admin or a
+                manager of the job's group; it prints once they approve.
+              </div>
+            )}
             {error && <p className="printer-error">{error}</p>}
             <div className="modal-actions">
               <button className="btn-sm" onClick={onClose}>
@@ -291,10 +301,22 @@ export default function SendDialog({
               <button
                 className="btn-primary"
                 style={{ width: "auto" }}
-                disabled={!selected || !!selected.incompatible || !!selected.busy || sending || (problems.length > 0 && !force)}
+                disabled={
+                  !selected ||
+                  !!selected.incompatible ||
+                  (!!selected.busy && data.needs_approval.length === 0) ||
+                  sending ||
+                  (problems.length > 0 && !force && data.needs_approval.length === 0)
+                }
                 onClick={send}
               >
-                {sending ? "Sending…" : selected ? `Print on ${selected.name}` : "Print"}
+                {sending
+                  ? "Sending…"
+                  : data.needs_approval.length > 0
+                    ? `Ask to print on ${selected?.name ?? "…"}`
+                    : selected
+                      ? `Print on ${selected.name}`
+                      : "Print"}
               </button>
             </div>
           </>

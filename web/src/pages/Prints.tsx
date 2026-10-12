@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { localDateTime, useJson } from "../api";
+import { apiJson } from "../auth";
+import { errorText, localDateTime, useJson } from "../api";
 import PrintControls from "../components/PrintControls";
 import { ACTIVE_PRINT, type PrintRecord } from "../printers";
 
 const STATUS_LABELS: Record<PrintRecord["status"], string> = {
+  pending_approval: "Waiting for approval",
+  rejected: "Not approved",
   uploading: "Uploading",
   starting: "Starting",
   printing: "Printing",
@@ -17,9 +20,27 @@ const STATUS_LABELS: Record<PrintRecord["status"], string> = {
 export default function PrintsPage() {
   const [rev, setRev] = useState(0);
   const prints = useJson<PrintRecord[]>("/api/prints?limit=200", rev).data;
+  const [error, setError] = useState("");
 
-  // Poll while anything is in flight.
-  const live = prints?.some((p) => ACTIVE_PRINT.includes(p.status));
+  // Poll while anything is in flight or waiting.
+  const live = prints?.some((p) => ACTIVE_PRINT.includes(p.status) || p.status === "pending_approval");
+
+  const decide = async (p: PrintRecord, approve: boolean) => {
+    setError("");
+    try {
+      if (approve) {
+        await apiJson(`/api/prints/${p.id}/approve`, "POST", {});
+      } else {
+        const own = !p.can_approve;
+        const note = own ? "" : (window.prompt(`Why not? (shown to ${p.username ?? "the sender"}; optional)`) ?? null);
+        if (note === null) return;
+        await apiJson(`/api/prints/${p.id}/reject`, "POST", { note });
+      }
+    } catch (err) {
+      setError(errorText(err));
+    }
+    setRev((r) => r + 1);
+  };
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => setRev((r) => r + 1), 3000);
@@ -33,6 +54,7 @@ export default function PrintsPage() {
         Jobs sent to printers. Send one from the Jobs page; prints of jobs you can't see show only
         their printer and status.
       </p>
+      {error && <p className="login-error">{error}</p>}
       {prints && prints.length === 0 && <p className="empty-state">Nothing has been printed yet.</p>}
       {prints && prints.length > 0 && (
         <table className="data-table">
@@ -70,6 +92,9 @@ export default function PrintsPage() {
                 <td>{p.username ?? "—"}</td>
                 <td>
                   <span className={`status-badge print-${p.status}`}>{STATUS_LABELS[p.status] ?? p.status}</span>
+                  {p.status === "pending_approval" && p.approval_reason && (
+                    <div className="hint">{p.approval_reason}</div>
+                  )}
                   {p.error && <div className="printer-error">{p.error}</div>}
                 </td>
                 <td>
@@ -79,6 +104,8 @@ export default function PrintsPage() {
                     </div>
                   ) : p.status === "finished" ? (
                     "100%"
+                  ) : p.status === "pending_approval" || p.status === "rejected" ? (
+                    "—"
                   ) : (
                     `${p.progress}%`
                   )}
@@ -88,6 +115,20 @@ export default function PrintsPage() {
                 <td>
                   {p.can_control && ["printing", "paused"].includes(p.status) && (
                     <PrintControls print={p} onChange={() => setRev((r) => r + 1)} />
+                  )}
+                  {p.status === "pending_approval" && (
+                    <span className="print-controls">
+                      {p.can_approve && (
+                        <button className="btn-sm" onClick={() => decide(p, true)}>
+                          Approve &amp; send
+                        </button>
+                      )}
+                      {(p.can_approve || p.can_control) && (
+                        <button className="btn-sm btn-danger" onClick={() => decide(p, false)}>
+                          {p.can_approve ? "Reject" : "Withdraw"}
+                        </button>
+                      )}
+                    </span>
                   )}
                 </td>
               </tr>
