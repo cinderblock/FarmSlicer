@@ -146,15 +146,30 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 - [x] Fixed on the way: Slice page sent jobs without process/filament
       (`4ae2116`).
 
-**Phase 4 — camera** ← current
-- [ ] RTSP (`rtsps://bblp:<code>@<ip>:322/streaming/live/1`) via ffmpeg for
-      X1/H2/P2S; native port-6000 JPEG protocol for A1/P1 (the old app never
-      had it). ffmpeg in the runtime image.
+**Phase 4 — camera** (done, `99f53ef`)
+- [x] `src/bambu/camera.rs`: X1/H2-class RTSPS via `retina` behind a local
+      TLS proxy (no ffmpeg; the access code stays in-process), H.264 access
+      units over a WebSocket to WebCodecs in the browser; A1/P1 JPEG over TLS
+      on 6000 (80-byte login). On demand, 20 s linger, late joiners get the
+      GOP. Camera button + modal on printer cards.
+- [x] Fake printer cameras: `jpeg6000.py` + mediamtx RTSPS sidecar
+      (`tests/fake-printer/run.sh`). Verified in Chrome (both kinds).
+- [ ] On hardware: LAN liveview must be on for X1 RTSPS; check P1/A1 frame
+      rate and the H2D's stream.
 
-**Phase 5 — farm workflow**
-- [ ] Print rules per group (max time, allowed materials) with an approval
-      queue whose approval actually sends.
-- [ ] Preheat/cooldown, equipment reports, printer areas.
+**Phase 5 — farm workflow** ← current
+- [ ] Printer areas: `printers.area`, cards grouped by area.
+- [ ] Equipment reports: `printer_reports` table; anyone reports from a
+      printer card, admins see open ones and resolve them.
+- [ ] Preheat / cool down from a chosen tray (nozzle = tray max temp, bed by
+      material), only on an idle printer with no active print.
+- [ ] Speed control in the print controls.
+- [ ] Print rules (inherited group setting `print_rules`: max minutes,
+      allowed materials; site default for personal jobs). A send that breaks
+      them becomes a print in `pending_approval` with the reason; admins and
+      the group's managers approve (which really sends, with the stored plate,
+      mapping and options) or reject. Admins and the group's managers aren't
+      held to the rules.
 
 ## Findings / gotchas
 
