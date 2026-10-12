@@ -37,11 +37,34 @@ other machines. Done 2026-10-12 (v1); teams/guest scoping are not implemented.
   management is role-gated. Guest teams (the original design's team-scoped
   visibility) are deferred until there is a need.
 
+## Next: passkeys + HTTPS for admin access (asked 2026-10-12)
+
+Direction from the maintainer: secure admin access with **passkeys** (WebAuthn)
+on an **HTTPS domain** rather than passwords alone.
+
+- WebAuthn requires a secure context and a stable RP ID = the domain the UI is
+  served on. The LAN deployment is already HTTPS behind the reverse proxy, so
+  the RP ID would be that hostname; `localhost` works for dev. Plain-http LAN
+  access would not support passkeys (the server could refuse admin actions
+  over http, or redirect).
+- Candidate implementation: `webauthn-rs` on the server (registration +
+  authentication ceremonies, challenge state in the DB or a short-lived table),
+  `navigator.credentials` on the client; `passkeys` table (user_id, credential
+  id, public key, sign count, name, created_at).
+- Policy sketch: any account may add passkeys on the Account page; admins and
+  the owner must have at least one passkey, and admin actions (Users page,
+  printer management) require a session that was authenticated with a passkey
+  (step-up); password stays as the fallback for non-admin users and for
+  recovery with a one-time code printed in the server log.
+- Open: whether to drop passwords entirely for admins once a passkey exists;
+  whether API keys should be scoped (read-only vs slice vs admin).
+
 ## Open questions
 
 1. Should `user` accounts be allowed to add/delete printers? Today: yes
    (only the Users page is admin-only). Tighten if the farm gets guests.
 2. Team scoping (see original design below) when non-household users appear.
+3. Passkey policy details above (step-up only for admin actions, or always?).
 
 ## Original design notes (kept for the team feature)
 
