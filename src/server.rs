@@ -383,7 +383,7 @@ struct JobQuery {
     #[serde(default)]
     group: Option<String>,
     /// Only the caller's own jobs.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::query::flag")]
     mine: Option<bool>,
 }
 
