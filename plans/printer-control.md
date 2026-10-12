@@ -113,28 +113,24 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
       edit form, "Address Changed" from discovery.
 - [x] `tests/printers-e2e.mjs`; verified against the fake printer.
 
-**Phase 2 — sending** ← current
-- [ ] `src/bambu/ftps.rs`: implicit FTPS with data-channel session reuse;
-      in-process test server that refuses non-resumed data connections;
-      check against vsftpd (`require_ssl_reuse=YES`) in Docker.
-- [ ] `src/bambu/package.rs`: read a `.gcode.3mf` — plates
-      (`Metadata/plate_N.gcode`, `.md5`, `plate_N.png`), `slice_info.config`
-      (printer_model_id, nozzle_diameters, prediction, weight, filaments
-      id/type/color/used_g).
-- [ ] DB: `jobs.package_path` (+ `source = 'upload'` for pre-sliced files);
-      `prints` table (job, plate, printer, user, group, file name on the
-      printer, AMS mapping, options, status, error, timestamps).
-- [ ] API: upload a `.gcode.3mf` as a job; `POST /api/jobs/{id}/print`;
-      `GET /api/prints`; pause/resume/stop/speed; job thumbnail.
-- [ ] Print tracker: follow the printer's reports to printing / paused /
-      finished / failed / cancelled.
-- [ ] UI: upload, send dialog (compatible printers with live state, AMS
-      mapping editor pre-filled by type + nearest colour), prints history,
-      controls on printer cards.
-- [ ] Fake printer: vsftpd + responder that walks PREPARE → RUNNING → FINISH;
-      e2e test.
+**Phase 2 — sending** (done; hardware check pending)
+- [x] `src/bambu/ftps.rs` (`375d735`): session reuse works only with a
+      rustls session cache bigger than one server (see Findings); in-process
+      test server refuses non-resumed data connections; 5 MB upload to real
+      vsftpd (`require_ssl_reuse=YES`) passes.
+- [x] `tests/fake-printer/`: mosquitto TLS + vsftpd + responder walking
+      PREPARE → RUNNING → FINISH.
+- [x] `src/bambu/package.rs` (`657a3cb`), `src/bambu/models.rs` fallback.
+- [x] DB: `jobs.package_path/package_json`, `prints` table (`793a6d3`).
+- [x] API: uploads, thumbnail, targets, send, prints, control; tracker.
+- [x] UI (`f72a80f`): upload, send dialog with AMS mapping editor, Prints
+      page, controls on printer cards. Verified in the browser end to end
+      against the fake printer.
+- [ ] **On real hardware** (needs the user's go-ahead per print): md5
+      accepted?, `ftp://<name>` url on each model, stop → `FAILED` +
+      0300_400C?, H2D AMS mapping (`ams_mapping2`), P1/A1 delta reports.
 
-**Phase 3 — thumbnails and packaging**
+**Phase 3 — thumbnails and packaging** ← current
 - [ ] Software rasteriser + thumbnail callback; config `thumbnails` sizes.
 - [ ] `.gcode.3mf` via `store_bbs_3mf`; wasm bridge parity.
 - [ ] Group setting for label/logo overlay; UI to set it.
@@ -151,6 +147,22 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 - [ ] Preheat/cooldown, equipment reports, printer areas.
 
 ## Findings / gotchas
+
+- **rustls session cache sizing**: `Resumption::in_memory_sessions(n)`
+  holds `ceil(n/8)` servers; with one server slot the cache evicts each entry
+  right after inserting it ("ensure next insertion does not require a
+  realloc"), so nothing ever resumed and vsftpd answered `522 SSL connection
+  failed: session reuse required`. Use 64.
+- After an FTPS upload, read the data channel to EOF after `shutdown()`:
+  unread TLS 1.3 session tickets turn the close into a TCP reset otherwise.
+- vsftpd in the fake printer needs `chroot_local_user=YES` so `/name` lands
+  in the storage root, like the printers.
+- `prints.user_id` has no FK (like `jobs.user_id`): with
+  `FARMSLICER_NO_AUTH` the stand-in owner has no users row, and a failed
+  insert panicked and poisoned the DB mutex.
+- The Chrome extension's screenshots time out now and then on the dev
+  server; the page itself has no long tasks (checked with a
+  PerformanceObserver). Retry.
 
 From a full read of the old print-station app (protocol facts and its bugs,
 which we must not copy):
@@ -220,6 +232,8 @@ which we must not copy):
 - [x] Plan written.
 - [x] Phase 0 and Phase 1 committed; side fix: deleting a printer that jobs
       reference no longer panics (`7b0c4d6`).
+- Phase 2 sending committed (`793a6d3`, `f72a80f`); all unit + e2e tests
+  pass (`tests/printers-e2e.mjs` covers uploads, targets, refused sends).
 - Dev setup: stub server on buildhost `127.0.0.1:9340`
   (`~/farmslicer-printer-control/pc-dev.sh`, auth off), reached with
   `ssh -L 9340:127.0.0.1:9340`; fake printer = Docker `fake-printer`
