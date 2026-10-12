@@ -3,6 +3,7 @@
 
 pub mod ftps;
 pub mod hub;
+pub mod package;
 pub mod status;
 mod tls;
 
