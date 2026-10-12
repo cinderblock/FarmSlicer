@@ -676,6 +676,7 @@ async fn create_job(
         job.progress_message = Some("Slicing in browser".to_string());
         let mut body = json!(job);
         body["keep_model"] = json!(keep_model);
+        body["slice_options"] = browser_slice_options(&state, &job, &config_json);
         return Ok((StatusCode::CREATED, Json(body)));
     }
 
@@ -753,15 +754,33 @@ pub(crate) fn package_output_path(state: &AppState, job_id: &str) -> String {
     dir.join(format!("{job_id}.gcode.3mf")).to_string_lossy().to_string()
 }
 
+/// Is the config for a Bambu Lab printer? (Sliced projects are their format.)
+fn is_bambu_config(config_json: &str) -> bool {
+    serde_json::from_str::<Value>(config_json)
+        .ok()
+        .and_then(|c| c.get("printer_model")?.as_str().map(|m| m.starts_with("Bambu Lab")))
+        .unwrap_or(false)
+}
+
+/// What the browser engine should produce besides G-code for this job
+/// (see `SliceOptions` in web/src/engine/types.ts).
+fn browser_slice_options(state: &AppState, job: &Job, config_json: &str) -> Value {
+    let bambu = is_bambu_config(config_json);
+    let overlay = crate::overlay::overlay_for_job(state, job);
+    json!({
+        "package": bambu,
+        "printer_model_id": if bambu { printer_model_id(state, config_json).unwrap_or_default() } else { String::new() },
+        "model_name": job.model_name,
+        "label": overlay.label,
+        "logo_url": overlay.logo.as_ref().and(job.group_id.as_ref()).map(|g| format!("/api/groups/{g}/overlay/logo")),
+    })
+}
+
 /// Package (Bambu printers only: the format is theirs) and thumbnail
 /// overlay for a server slice.
 fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::SliceOptions {
     let mut options = slicer::SliceOptions::default();
-    let bambu = serde_json::from_str::<Value>(config_json)
-        .ok()
-        .and_then(|c| c.get("printer_model")?.as_str().map(|m| m.starts_with("Bambu Lab")))
-        .unwrap_or(false);
-    if bambu {
+    if is_bambu_config(config_json) {
         options.package_path = package_output_path(state, job_id);
         options.printer_model_id = printer_model_id(state, config_json).unwrap_or_default();
     }
@@ -926,6 +945,7 @@ async fn upload_job_result(
     }
 
     let mut gcode: Option<axum::body::Bytes> = None;
+    let mut package: Option<axum::body::Bytes> = None;
     let mut model: Option<(String, axum::body::Bytes)> = None;
     let mut print_time_sec = 0.0_f64;
     let mut filament_used_g = 0.0_f64;
@@ -940,6 +960,14 @@ async fn upload_job_result(
         match name.as_str() {
             "gcode" => {
                 gcode = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?,
+                );
+            }
+            "package" => {
+                package = Some(
                     field
                         .bytes()
                         .await
@@ -996,6 +1024,13 @@ async fn upload_job_result(
     }
 
     finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
+    if let Some(pkg) = package.filter(|p| !p.is_empty()) {
+        let path = package_output_path(&state, &id);
+        match std::fs::write(&path, &pkg) {
+            Ok(()) => record_package(&state, &id, &path),
+            Err(e) => eprintln!("job {id}: can't store the sliced project: {e}"),
+        }
+    }
     println!(
         "job {id}: browser slice uploaded ({} bytes, {:.0} s, {:.1} g)",
         gcode.len(),

@@ -552,6 +552,40 @@ body {
   align-items: center;
 }
 
+/* Group thumbnail logo */
+.logo-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.logo-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.logo-preview {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: repeating-conic-gradient(var(--bg-card) 0 25%, var(--bg-surface) 0 50%) 0 0 / 12px 12px;
+}
+
+.logo-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.file-button {
+  cursor: pointer;
+  display: inline-block;
+}
+
 /* Modal dialogs */
 .modal-backdrop {
   position: fixed;

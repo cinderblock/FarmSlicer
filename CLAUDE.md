@@ -123,7 +123,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `cxx/nanosvg_impl.cpp` — NanoSVG implementation shim (lives in GUI code upstream)
 - `wasm/` — Emscripten superbuild (`CMakeLists.txt`), C bridge
   (`bridge/farmslicer_wasm.cpp`: `fs_version`, `fs_slice`, `fs_slice_start` (mt),
-  `fs_cancel`, `fs_free`), vendored find-modules/shims/patch, `build.sh`, tests
+  `fs_set_options` (package + thumbnail overlay for the next slice; the
+  package lands in MEMFS at the report's `package` path), `fs_cancel`,
+  `fs_free`), vendored find-modules/shims/patch, `build.sh`, tests
 - `web/src/engine/` — browser engine: `client.ts` (main thread API),
   `worker.ts` (Web Worker hosting the module), `types.ts`
 - `web/src/pages/Slice.tsx` — upload, profile cascade, overrides, **Compute**
@@ -188,9 +190,8 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   differ from the browser's. CI smoke-tests `st` only.
 - libslic3r's GCodeProcessor logs `Invalid T command (T1000)` for Bambu start
   G-code on every slice; harmless.
-- Browser (WebAssembly) slices don't produce thumbnails or a `.gcode.3mf`
-  yet, so only server slices and uploaded projects can be sent
-  (plans/printer-control.md, phase 3).
+- Engines built before `fs_set_options` existed slice without a package;
+  their jobs can't be sent until re-sliced (the worker skips the options).
 - Jobs tagged `printer_id` at slicing time are not sent automatically;
   sending is an explicit `POST /api/jobs/{id}/print`.
 

@@ -523,6 +523,77 @@ const BOOL_SETTINGS: { key: "shared_library" | "keep_models" | "allow_registrati
   { key: "allow_guests", label: "Guest accounts", help: "The join flow may create guest accounts (no passkey; limited)." },
 ];
 
+/** The group's thumbnail logo: upload, replace, remove (managers). */
+function LogoSetting({ group }: { group: GroupDetail }) {
+  const [rev, setRev] = useState(0);
+  const [error, setError] = useState("");
+  const overlay = useJson<{ label: string; logo_group: string | null }>(`/api/groups/${group.id}/overlay`, rev).data;
+  const own = overlay?.logo_group === group.id;
+  const from = overlay?.logo_group
+    ? overlay.logo_group === group.id
+      ? null
+      : (group.ancestors.find((a) => a.id === overlay.logo_group)?.name ?? "a parent group")
+    : null;
+
+  const upload = async (file: File) => {
+    setError("");
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`/api/groups/${group.id}/logo`, { method: "PUT", body: form });
+    if (!res.ok) setError((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
+    setRev((r) => r + 1);
+  };
+  const remove = async () => {
+    setError("");
+    await fetch(`/api/groups/${group.id}/logo`, { method: "DELETE" });
+    setRev((r) => r + 1);
+  };
+
+  return (
+    <div className="logo-setting">
+      <span>Thumbnail logo</span>
+      <div className="logo-row">
+        {overlay?.logo_group && (
+          <img
+            className="logo-preview"
+            src={`/api/groups/${group.id}/overlay/logo?rev=${rev}`}
+            alt="Logo drawn on thumbnails"
+          />
+        )}
+        <div>
+          <p className="hint">
+            {own
+              ? "Drawn in the corner of every thumbnail of jobs charged here and in subgroups without their own."
+              : from
+                ? `Inherited from ${from}. Upload one to use your own.`
+                : "None. PNG or JPEG; it's shrunk to 256 px."}
+            {overlay?.label && <> Label: <strong>{overlay.label}</strong>.</>}
+          </p>
+          {group.can_manage && (
+            <span className="logo-actions">
+              <label className="btn-sm file-button">
+                {own ? "Replace…" : "Upload…"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  hidden
+                  onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
+                />
+              </label>
+              {own && (
+                <button type="button" className="btn-sm btn-danger" onClick={remove}>
+                  Remove
+                </button>
+              )}
+            </span>
+          )}
+          {error && <p className="login-error">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => void }) {
   const navigate = useNavigate();
   const [s, setS] = useState<GroupSettings>(group.settings);
@@ -645,6 +716,30 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
         />
         <span className="hint">The library shows this season first and earlier seasons separately.</span>
       </label>
+      <label>
+        Thumbnail label
+        <input
+          value={s.thumbnail_label ?? ""}
+          disabled={s.thumbnail_label === ""}
+          onChange={(e) => setS({ ...s, thumbnail_label: e.target.value || undefined })}
+          placeholder={inheritLabel("thumbnail_label", eff.thumbnail_label || "none")}
+          maxLength={64}
+        />
+        <span className="hint">
+          Drawn on the plate thumbnail of every job charged here. <code>{"{key}"}</code> is the
+          identifier the group was created under (e.g. a team number), <code>{"{group}"}</code> its name.
+        </span>
+      </label>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={s.thumbnail_label === ""}
+          onChange={(e) => setS({ ...s, thumbnail_label: e.target.checked ? "" : undefined })}
+        />
+        No label here (don't inherit one)
+      </label>
+
+      <LogoSetting group={group} />
 
       <h3>This group only</h3>
       {group.is_admin && (

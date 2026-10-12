@@ -28,6 +28,8 @@ export interface SubgroupPolicy {
 /** Stored settings: absent keys are inherited. */
 export interface GroupSettings {
   season_start?: string;
+  /** Thumbnail label template: {key} = the nearest group's identifier, {group} = its name. "" = none. */
+  thumbnail_label?: string;
   shared_library?: boolean;
   keep_models?: boolean;
   allow_guests?: boolean;
@@ -39,6 +41,7 @@ export interface GroupSettings {
 
 export interface EffectiveSettings {
   season_start: string;
+  thumbnail_label: string;
   shared_library: boolean;
   keep_models: boolean;
   allow_guests: boolean;

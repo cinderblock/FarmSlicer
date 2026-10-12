@@ -323,6 +323,23 @@ Outcome slice_file(const std::string& model_path,
             params.thumbnail_data = {&plate_thumbnail};
             params.strategy = SaveStrategy::Silence | SaveStrategy::SkipModel | SaveStrategy::WithGcode |
                               SaveStrategy::SkipAuxiliary | SaveStrategy::Zip64;
+            // The exporter gives the model a scratch "backup" directory, which
+            // ~Model would hand to libslic3r's backup manager thread: a hang
+            // in the single-threaded WebAssembly build, a stray thread and
+            // temp dir on the server. Remove it here, synchronously.
+            struct DropBackup {
+                Model& m;
+                ~DropBackup()
+                {
+                    const std::filesystem::path dir = m.get_backup_path();
+                    m.remove_backup_path_if_exist();
+                    // Its parents (orcaslicer_model/<day>/) too, once empty;
+                    // removing a non-empty directory just fails.
+                    std::error_code ec;
+                    std::filesystem::remove(dir.parent_path(), ec);
+                    std::filesystem::remove(dir.parent_path().parent_path(), ec);
+                }
+            } drop_backup{model};
             if (!store_bbs_3mf(params) || !std::filesystem::exists(options.package_path))
                 throw std::runtime_error("could not write the sliced project " + options.package_path);
             out.package_path = options.package_path;

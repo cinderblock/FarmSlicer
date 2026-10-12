@@ -139,6 +139,19 @@ check(r.status === 409, "controlling an offline printer fails cleanly", json(r))
 r = await user.post(`/api/printers/${id}/control`, { action: "pause" });
 check(r.status === 403, "printer-level control is admin-only", json(r));
 
+// A browser slice uploads its sliced project with the G-code.
+r = await user.form("/api/jobs", { source: "browser", model_name: "bracket.stl" });
+check(r.status === 201 && r.json.slice_options && r.json.slice_options.model_name === "bracket.stl", "browser jobs say what to produce", json(r));
+const browserJob = r.json.id;
+r = await user.form(`/api/jobs/${browserJob}/result`, {
+  gcode: [new Blob(["G28\n"]), "out.gcode"],
+  package: [new Blob([pkg]), "out.gcode.3mf"],
+  print_time_sec: "3600",
+  filament_used_g: "12.5",
+});
+check(r.status === 200 && r.json.status === "done", "the browser result is filed", json(r));
+check(JSON.parse(r.json.package_json ?? "null")?.plates?.length === 1, "the uploaded package makes the job sendable", r.json.package_json);
+
 // A printer that jobs were tagged with can still be removed.
 r = await user.form("/api/jobs", { source: "browser", model_name: "tagged.stl", printer_id: mini });
 check(r.status === 201, "a job tagged with a printer", json(r));

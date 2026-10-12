@@ -166,7 +166,8 @@ endif()
 add_executable(farmslicer_engine
   bridge/farmslicer_wasm.cpp
   bridge/fast_strtod.cpp
-  ../cxx/slice_core.cpp)
+  ../cxx/slice_core.cpp
+  ../cxx/thumbnail.cpp)
 set_target_properties(farmslicer_engine PROPERTIES OUTPUT_NAME "${_engine_name}" SUFFIX ".mjs")
 target_include_directories(farmslicer_engine PRIVATE
   ${ORCA_SRC_DIR}/src
@@ -202,12 +203,14 @@ set(_link
   # (MM flush matrices) at slice time — ~40 KB. Profiles are resolved by the
   # server and arrive as the merged config JSON.
   "--preload-file=${ORCA_SRC_DIR}/resources/info@/resources/info"
+  # The thumbnail label font (SIL OFL, 90 KB).
+  "--preload-file=${CMAKE_CURRENT_LIST_DIR}/../resources/fonts/Sarabun-SemiBold.ttf@/resources/fonts/Sarabun-SemiBold.ttf"
 )
 if(EXISTS "${ORCA_SRC_DIR}/resources/flush")
   list(APPEND _link "--preload-file=${ORCA_SRC_DIR}/resources/flush@/resources/flush")
 endif()
 set(_incoming "'locateFile','print','printErr','instantiateWasm','wasmBinary','getPreloadedPackage','onAbort','monitorRunDependencies','setStatus'")
-set(_exports "'_fs_version','_fs_slice','_fs_cancel','_fs_free','_malloc','_free'")
+set(_exports "'_fs_version','_fs_slice','_fs_set_options','_fs_cancel','_fs_free','_malloc','_free'")
 if(ORCA_WASM_THREADS)
   # Worker pool. The host's engine Web Worker is the main runtime thread; it
   # starts each slice on a dedicated pthread (fs_slice_start) and returns to

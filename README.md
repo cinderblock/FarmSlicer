@@ -207,7 +207,7 @@ summary prints the `pin.json` to paste there.
 | `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
 | `GET /api/printers/{id}/report` | the printer's merged raw MQTT report (admins) |
 | `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level}` on whatever the printer runs (admins) |
-| `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
+| `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay`, `GET /api/groups/{id}/overlay/logo` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems}`: upload and start |
@@ -219,7 +219,7 @@ summary prints the `pin.json` to paste there.
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
 | `GET /api/jobs/{id}/model` | the job's source model, when kept |
 | `POST /api/jobs/{id}/progress` | browser engine progress tick |
-| `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `model`) | browser engine result upload |
+| `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `model`, optional `package`) | browser engine result upload (the `.gcode.3mf` makes the job sendable) |
 | `POST /api/jobs/{id}/fail`, `POST /api/jobs/{id}/cancel` | browser failure / cancel either kind |
 | `GET /api/slices?group=&mine=1`, `GET /api/slices/{id}/download` | slice library, G-code download |
 | `GET/POST /api/groups`, `GET/PUT/DELETE /api/groups/{id}` | groups (settings, quotas, moving) |

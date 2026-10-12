@@ -174,6 +174,15 @@ async fn delete_logo(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `GET /api/groups/{id}/overlay/logo`: the logo a job charged to the group
+/// gets (the nearest group's), for the browser engine.
+async fn effective_logo(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let tree = Tree::load(&state.db);
+    let group = logo_group(&state, &tree, &id).ok_or_else(|| err(StatusCode::NOT_FOUND, "no logo"))?;
+    let bytes = std::fs::read(logo_path(&state, &group)).map_err(|_| err(StatusCode::NOT_FOUND, "no logo"))?;
+    Ok(png_response(bytes))
+}
+
 /// `GET /api/groups/{id}/overlay`: what a job charged to the group gets:
 /// `{label, logo_group}` (`logo_group` = whose logo applies, or null).
 async fn group_overlay(
@@ -194,6 +203,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/groups/{id}/logo", get(get_logo).put(put_logo).delete(delete_logo))
         .route("/api/groups/{id}/overlay", get(group_overlay))
+        .route("/api/groups/{id}/overlay/logo", get(effective_logo))
 }
 
 #[cfg(test)]

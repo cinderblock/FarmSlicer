@@ -12,6 +12,7 @@
 import type {
   EngineManifest,
   EngineVariant,
+  SliceOptions,
   SliceOutput,
   WorkerRequest,
   WorkerResponse,
@@ -122,7 +123,12 @@ export class BrowserEngine {
       case "done":
         if (msg.id === p.id) {
           this.pending = null;
-          p.resolve({ gcode: new Uint8Array(msg.gcode), report: msg.report, elapsedMs: msg.elapsedMs });
+          p.resolve({
+            gcode: new Uint8Array(msg.gcode),
+            package: msg.package ? new Uint8Array(msg.package) : null,
+            report: msg.report,
+            elapsedMs: msg.elapsedMs,
+          });
         }
         break;
       case "error":
@@ -139,13 +145,19 @@ export class BrowserEngine {
   }
 
   /** Slice one model file with a merged OrcaSlicer config (JSON object). One slice at a time. */
-  async slice(file: File, configJson: string, onProgress?: ProgressFn): Promise<SliceOutput> {
+  async slice(
+    file: File,
+    configJson: string,
+    onProgress?: ProgressFn,
+    options?: SliceOptions,
+  ): Promise<SliceOutput> {
     if (this.pending) throw new Error("engine is busy");
     const model = await file.arrayBuffer();
     const id = this.nextId++;
     return new Promise<SliceOutput>((resolve, reject) => {
       this.pending = { id, onProgress, resolve, reject };
-      const req: WorkerRequest = { type: "slice", id, modelName: file.name, model, config: configJson };
+      const req: WorkerRequest = { type: "slice", id, modelName: file.name, model, config: configJson, options };
+      // The logo is small; it's copied rather than transferred so the caller keeps it.
       this.worker.postMessage(req, [model]);
     });
   }

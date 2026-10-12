@@ -9,7 +9,7 @@ import {
   loadManifest,
   pickVariant,
 } from "../engine/client";
-import type { EngineManifest } from "../engine/types";
+import type { EngineManifest, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
@@ -35,6 +35,25 @@ interface JobRecord {
   config_json: string | null;
   /** The job's group keeps models: upload it with the result. */
   keep_model?: boolean;
+  /** Browser jobs: what to produce besides G-code (server-decided). */
+  slice_options?: Omit<SliceOptions, "logo"> & { logo_url: string | null };
+}
+
+/** Decode the group logo to RGBA for the engine's thumbnail overlay. */
+async function loadLogo(url: string): Promise<SliceOptions["logo"]> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return undefined;
+    const bitmap = await createImageBitmap(await res.blob());
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.drawImage(bitmap, 0, 0);
+    const data = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+    return { rgba: data.data.buffer.slice(0) as ArrayBuffer, width: bitmap.width, height: bitmap.height };
+  } catch {
+    return undefined;
+  }
 }
 
 function formatDuration(sec: number): string {
@@ -488,6 +507,11 @@ export default function SlicePage() {
     let lastPost = 0;
     const started = performance.now();
     try {
+      let options: SliceOptions | undefined;
+      if (job.slice_options) {
+        const { logo_url, ...rest } = job.slice_options;
+        options = { ...rest, logo: logo_url ? await loadLogo(logo_url) : undefined };
+      }
       const out = await engine.slice(modelFile, job.config_json ?? "{}", (percent, message) => {
         setProgress({ percent, message });
         const now = Date.now();
@@ -504,7 +528,7 @@ export default function SlicePage() {
             })
             .catch(() => {});
         }
-      });
+      }, options);
 
       setProgress({ percent: 100, message: "Uploading G-code" });
       const upload = new FormData();
@@ -513,6 +537,7 @@ export default function SlicePage() {
       upload.append("filament_used_g", String(out.report.stats.filamentG));
       upload.append("warnings", JSON.stringify(out.report.warnings));
       if (job.keep_model) upload.append("model", modelFile, modelFile.name);
+      if (out.package) upload.append("package", new Blob([out.package]), `${job.id}.gcode.3mf`);
       const up = await fetch(`/api/jobs/${job.id}/result`, { method: "POST", body: upload });
       if (!up.ok) {
         const data = await up.json().catch(() => ({}));

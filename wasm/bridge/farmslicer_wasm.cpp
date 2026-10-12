@@ -6,14 +6,20 @@
 //                       pthreads build when the caller wants to block)
 //   fs_slice_start()  → pthreads build only: slice on a dedicated pthread,
 //                       completion signalled through `state` (see below)
+//   fs_set_options()  → what the next slice produces besides G-code: a Bambu
+//                       sliced project (.gcode.3mf) and the thumbnail overlay
 //   fs_cancel()       → abort the running slice at its next checkpoint
 //   fs_free(p)        → free a buffer returned through an out-parameter
 //
 // Progress: Module.fsProgress(percent, message) if the host installed it.
 // The report out-parameter is JSON: {ok, cancelled, error, warnings[],
-// stats{printTimeSec, filamentG, filamentMm, layers}}.
+// stats{printTimeSec, filamentG, filamentMm, layers}, package}; `package` is
+// the MEMFS path of the sliced project (the host reads and unlinks it) or
+// null.
 
 #include "slice_core.hpp"
+
+#include <nlohmann/json.hpp>
 
 #include <emscripten.h>
 #ifdef __EMSCRIPTEN_PTHREADS__
@@ -38,6 +44,11 @@
 namespace {
 
 std::atomic<bool> g_cancel{false};
+
+/// Options for the next slice (fs_set_options); consumed by it.
+farmslicer::core::Options g_next_options;
+std::mutex g_options_mutex;
+const char* const PACKAGE_PATH = "/tmp/out.gcode.3mf";
 
 void ensure_runtime()
 {
@@ -134,6 +145,7 @@ std::string build_report(const farmslicer::core::Outcome& o)
                   ",\"stats\":{\"printTimeSec\":%.3f,\"filamentG\":%.4f,\"filamentMm\":%.3f,\"layers\":%u}",
                   o.print_time_sec, o.filament_used_g, o.filament_used_mm, o.layer_count);
     r += stats;
+    r += ",\"package\":" + (o.package_path.empty() ? std::string("null") : "\"" + json_escape(o.package_path) + "\"");
     r += "}";
     return r;
 }
@@ -181,13 +193,21 @@ int do_slice(const char* model_name, const uint8_t* model, int model_len,
         outcome.error = "could not stage the model in memory";
     }
 
+    farmslicer::core::Options options;
+    {
+        std::lock_guard<std::mutex> lock(g_options_mutex);
+        options = std::move(g_next_options);
+        g_next_options = {};
+    }
+    ::unlink(PACKAGE_PATH);
+
     if (outcome.error.empty()) {
         farmslicer::core::Callbacks cb;
         cb.progress = [](int percent, const std::string& message) { progress(percent, message); };
         cb.cancelled = []() { return g_cancel.load(); };
         outcome = farmslicer::core::slice_file(
             model_path, std::string(config_json ? config_json : "", config_len > 0 ? size_t(config_len) : 0),
-            gcode_path, cb);
+            gcode_path, cb, options);
     }
     ::unlink(model_path.c_str());
 
@@ -307,6 +327,33 @@ EMSCRIPTEN_KEEPALIVE int fs_slice(const char* model_name, const uint8_t* model, 
 #endif
     return do_slice(model_name, model, model_len, config_json, config_len,
                     out_gcode, out_gcode_len, out_report);
+}
+
+// Options for the next fs_slice / fs_slice_start, as JSON:
+// {package: bool, printer_model_id, model_name, label, logo_width,
+// logo_height}, plus the logo as RGBA (rows top-down; may be null). Returns
+// 0, or 1 when the JSON doesn't parse or the logo size doesn't match.
+EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const uint8_t* logo, int logo_len)
+{
+    farmslicer::core::Options o;
+    try {
+        const auto j = nlohmann::json::parse(std::string(json ? json : "", json_len > 0 ? size_t(json_len) : 0));
+        if (j.value("package", false)) o.package_path = PACKAGE_PATH;
+        o.printer_model_id = j.value("printer_model_id", std::string());
+        o.model_name = j.value("model_name", std::string());
+        o.overlay.label = j.value("label", std::string());
+        o.overlay.logo_width = j.value("logo_width", 0u);
+        o.overlay.logo_height = j.value("logo_height", 0u);
+    } catch (...) {
+        return 1;
+    }
+    if (logo && logo_len > 0) {
+        if (size_t(logo_len) != size_t(o.overlay.logo_width) * o.overlay.logo_height * 4) return 1;
+        o.overlay.logo_rgba.assign(logo, logo + logo_len);
+    }
+    std::lock_guard<std::mutex> lock(g_options_mutex);
+    g_next_options = std::move(o);
+    return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE void fs_cancel() { g_cancel.store(true); }

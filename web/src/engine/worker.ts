@@ -7,7 +7,7 @@
 // needs in order to hand pool workers to TBB.
 
 /// <reference lib="webworker" />
-import type { SliceReport, WorkerRequest, WorkerResponse } from "./types";
+import type { SliceOptions, SliceReport, WorkerRequest, WorkerResponse } from "./types";
 
 interface EngineModule {
   HEAPU8: Uint8Array;
@@ -28,6 +28,9 @@ interface EngineModule {
     outGcode: number, outGcodeLen: number, outReport: number, state: number,
   ): number;
   _fs_thread_count?(): number;
+  /** Engines built before packaging lack it. */
+  _fs_set_options?(json: number, jsonLen: number, logo: number, logoLen: number): number;
+  FS: { readFile(path: string): Uint8Array; unlink(path: string): void };
   _fs_cancel(): void;
   _fs_free(ptr: number): void;
   fsSyncHeap?(): void;
@@ -99,7 +102,30 @@ function waitForState(m: EngineModule, statePtr: number): Promise<void> {
   });
 }
 
-async function slice(id: number, modelName: string, model: ArrayBuffer, config: string) {
+/** Hand the next slice its options. False if this engine can't take them. */
+function setOptions(m: EngineModule, options: SliceOptions): boolean {
+  if (!m._fs_set_options) return false;
+  const { logo, ...rest } = options;
+  const json = writeString(
+    m,
+    JSON.stringify({ ...rest, logo_width: logo?.width ?? 0, logo_height: logo?.height ?? 0 }),
+  );
+  let logoPtr = 0;
+  let logoLen = 0;
+  if (logo) {
+    const bytes = new Uint8Array(logo.rgba);
+    logoPtr = m._malloc(bytes.length);
+    heap(m).HEAPU8.set(bytes, logoPtr);
+    logoLen = bytes.length;
+  }
+  const rc = m._fs_set_options(json.ptr, json.len, logoPtr, logoLen);
+  m._free(json.ptr);
+  if (logoPtr) m._free(logoPtr);
+  if (rc !== 0) console.warn("[engine] slice options rejected");
+  return rc === 0;
+}
+
+async function slice(id: number, modelName: string, model: ArrayBuffer, config: string, options?: SliceOptions) {
   if (!engine) {
     post({ type: "error", id, error: "engine not initialised" });
     return;
@@ -107,6 +133,7 @@ async function slice(id: number, modelName: string, model: ArrayBuffer, config: 
   const m = engine;
   currentId = id;
   const started = performance.now();
+  if (options) setOptions(m, options);
 
   const modelBytes = new Uint8Array(model);
   const modelPtr = m._malloc(Math.max(1, modelBytes.length));
@@ -154,6 +181,15 @@ async function slice(id: number, modelName: string, model: ArrayBuffer, config: 
   if (rc === 0 && gcodePtr && gcodeLen > 0) {
     gcode = m.HEAPU8.slice(gcodePtr, gcodePtr + gcodeLen).buffer;
   }
+  let pkg: ArrayBuffer | null = null;
+  if (report.package) {
+    try {
+      pkg = m.FS.readFile(report.package).slice().buffer;
+      m.FS.unlink(report.package);
+    } catch (e) {
+      console.warn("[engine] could not read the sliced project", e);
+    }
+  }
 
   if (gcodePtr) m._fs_free(gcodePtr);
   if (reportPtr) m._fs_free(reportPtr);
@@ -167,7 +203,7 @@ async function slice(id: number, modelName: string, model: ArrayBuffer, config: 
 
   const elapsedMs = performance.now() - started;
   if (rc === 0 && gcode) {
-    post({ type: "done", id, gcode, report, elapsedMs }, [gcode]);
+    post({ type: "done", id, gcode, package: pkg, report, elapsedMs }, pkg ? [gcode, pkg] : [gcode]);
   } else {
     post({ type: "error", id, error: report.error ?? (rc === 2 ? "cancelled" : "slicing failed"), report });
   }
@@ -182,7 +218,7 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       );
       break;
     case "slice":
-      void slice(msg.id, msg.modelName, msg.model, msg.config);
+      void slice(msg.id, msg.modelName, msg.model, msg.config, msg.options);
       break;
     case "cancel":
       engine?._fs_cancel();
