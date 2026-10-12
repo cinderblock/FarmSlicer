@@ -1,0 +1,186 @@
+name: Build image
+
+# Push to master → typecheck, build the WebAssembly engine, build the container
+# image, push it to GHCR. That is the whole job: this repo publishes a
+# *candidate*, it does not deploy.
+#
+# What runs on buildhost is decided in the ops repo (OWNER/ops) by
+# servers/buildhost/stacks/farmslicer/pin.json, which names an image digest.
+# Shipping a build therefore takes two steps:
+#
+#   1. push here → CI publishes ghcr.io/cinderblock/farmslicer:<sha>
+#   2. edit pin.json in ops to that image's digest, commit, push
+#
+# This repo has no self-hosted runner and no access to buildhost.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR image names must be lowercase; github.repository is "cinderblock/FarmSlicer".
+  IMAGE_NAME: cinderblock/farmslicer
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast gates: frontend typecheck + build, Rust typecheck (without the C++
+  # bridge; FARMSLICER_SKIP_CXX makes build.rs a no-op).
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Frontend install
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Frontend typecheck + build
+        working-directory: web
+        run: bun run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust typecheck
+        run: cargo check --locked
+        env:
+          FARMSLICER_SKIP_CXX: "1"
+
+  # libslic3r → WebAssembly (single-threaded + pthreads variants). The
+  # Emscripten toolchain and the cross-compiled deps (Boost, CGAL, GMP, MPFR,
+  # oneTBB, ...) are cached between runs; the engine itself goes through ccache.
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Host tools
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache m4 unzip xz-utils python3
+
+      - name: Cache Emscripten toolchain + cross-compiled deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            wasm/toolchain/emsdk
+            wasm/toolchain/cmake
+            wasm/toolchain/tools
+            wasm/toolchain/install
+            wasm/toolchain/install-mt
+            wasm/toolchain/cgal-5.6.3
+            wasm/toolchain/cgal-6.1
+          key: wasm-toolchain-v1-${{ hashFiles('wasm/toolchain/bootstrap.sh', 'wasm/toolchain/build-deps.sh', 'wasm/toolchain/env.sh') }}
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: wasm/toolchain/ccache-cache
+          key: wasm-ccache-${{ hashFiles('extern/OrcaSlicer/version.inc', 'wasm/patches/**', 'wasm/CMakeLists.txt', 'wasm/bridge/**', 'cxx/**') }}-${{ github.sha }}
+          restore-keys: |
+            wasm-ccache-${{ hashFiles('extern/OrcaSlicer/version.inc', 'wasm/patches/**', 'wasm/CMakeLists.txt', 'wasm/bridge/**', 'cxx/**') }}-
+            wasm-ccache-
+
+      - name: Toolchain (emsdk, cmake, ninja; no-op when cached)
+        run: bash wasm/toolchain/bootstrap.sh
+
+      - name: Cross-compiled deps (no-op when cached)
+        run: |
+          NPROC=4 bash wasm/toolchain/build-deps.sh all
+          WASM_THREADS=1 NPROC=4 bash wasm/toolchain/build-deps.sh all-mt
+
+      - name: Build engine (st + mt)
+        run: NPROC=4 bash wasm/build.sh all
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-engine
+          path: web/public/wasm
+          if-no-files-found: error
+          retention-days: 7
+
+  image:
+    needs: [check, wasm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Reclaim runner disk
+        # The OrcaSlicer deps stage alone is ~4 GB; the stock runner has ~14 GB free.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-engine
+          path: web/public/wasm
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          # Pin-able sha tag for reproducible deploys + a moving latest.
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # ops verifies this label against the commit its pin claims, so a
+          # hand-edited pin.json can't quietly ship a different build than the
+          # one that was reviewed. Required — the deploy fails without it.
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          # Registry build cache: the deps and libslic3r stages take ~1 h cold
+          # and only change when the submodule moves. GHA's cache is too small.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Summarize how to deploy this build
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo '```json'
+            echo '{'
+            echo '  "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}",'
+            echo '  "digest": "${{ steps.push.outputs.digest }}",'
+            echo '  "source": {'
+            echo '    "repo": "${{ github.repository }}",'
+            echo '    "commit": "${{ github.sha }}"'
+            echo '  }'
+            echo '}'
+            echo '```'
+            echo
+            echo "Paste that into \`servers/buildhost/stacks/farmslicer/pin.json\`"
+            echo "in OWNER/ops and push. Nothing reaches buildhost until you do."
+          } >> "$GITHUB_STEP_SUMMARY"

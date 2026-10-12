@@ -1,0 +1,35 @@
+# Build context for the Dockerfile. Everything heavy that the image stages
+# rebuild themselves is excluded so the context stays small and the deps
+# layer cache keys on source, not on local build output.
+.git
+.claude
+.github
+target
+dist
+data
+web/node_modules
+web/dist
+plans
+issues
+*.md
+!README.md
+extern/OrcaSlicer/.git
+extern/OrcaSlicer/build
+extern/OrcaSlicer/build-*
+extern/OrcaSlicer/deps/build
+extern/OrcaSlicer/deps/build-*
+extern/OrcaSlicer/deps/DL_CACHE
+extern/OrcaSlicer/sandboxes
+extern/OrcaSlicer/tests
+extern/OrcaSlicer/localization
+extern/OrcaSlicer/SoftFever_doc
+extern/OrcaSlicer/doc
+extern/OrcaSlicer/resources/images
+extern/OrcaSlicer/resources/videos
+extern/OrcaSlicer/resources/web
+extern/OrcaSlicer/resources/i18n
+extern/OrcaSlicer/resources/fonts
+extern/OrcaSlicer/resources/shaders
+extern/OrcaSlicer/resources/icons
+wasm/build-*
+wasm/toolchain
