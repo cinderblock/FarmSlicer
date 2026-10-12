@@ -176,17 +176,18 @@ and `keep_models` on the teams. Exact names live outside this repo.
 2. ~~Stub slicer + e2e harness~~ so the API can be tested without libslic3r.
 3. ~~Backend~~: schema, groups/members/links/library/usage/settings API, join
    flow, guests, quotas, visibility, kept models; `tests/groups-e2e.mjs`.
-4. **[current]** Frontend: Groups list + group page (library by season,
+4. ~~Frontend~~: Groups list + group page (library by season,
    members/approval, subgroups, links, settings, quotas + usage), group
    picker on Slice (+ model upload when the group keeps models), Jobs and
-   Library show creator/group, Join page (`/join/:code`, `/join/group/:id`),
-   sign-in page buttons + guest sign-in, Account (groups, usage, guest
-   sign-in code, upgrade), Users (kind, groups, quota override), Settings.
-5. Typecheck/lint/build; exercise the UI in a browser against the stub
-   server (browser engine not needed for the flows; slicing itself needs
-   the wasm engine or the real image).
-6. Maintainer configures the league on the deployed instance (deploy through
-   ops; needs their go-ahead).
+   Library show creator/group (jobs can be moved between groups), Join page
+   (`/join/:code`, `/join/group/:id`), sign-in page buttons + guest sign-in,
+   Account (groups, usage, guest sign-in code), Users (kind, groups, limits),
+   Settings.
+5. ~~UI check in a browser~~ against the stub server on the build box
+   (tunnelled to localhost:9339, seeded by a script).
+6. **[current]** Deploy and configure the league on the real instance:
+   push → CI image → ops pin (needs the maintainer's go-ahead for the push
+   and the ops change), then create the groups in the UI.
 
 ## Findings / gotchas
 
@@ -208,6 +209,9 @@ and `keep_models` on the teams. Exact names live outside this repo.
   quoting; edit scripts went through files in a scratch dir instead.
 - Join link codes are stored in plain text on purpose (re-shareable, like a
   chat invite); session/API/invite/recovery secrets stay hashed.
+- `tests/run-e2e.sh` on a port another server already uses tested that
+  server instead (every check failed with "setup already completed"); it
+  now refuses to start when the port answers.
 - Possible follow-ups, not built: rate limiting guest/account creation on
   public links; per-member usage table in the UI beyond the usage endpoint;
   re-slicing a kept model from the library.
@@ -218,9 +222,19 @@ and `keep_models` on the teams. Exact names live outside this repo.
 - [x] Stub slicer, `HOST`, `tests/run-e2e.sh`, CI runs unit + e2e tests (`6f6a58c`)
 - [x] Backend: groups, members, links, join flow, guests, quotas, settings,
       visibility, seasons, kept models; `tests/groups-e2e.mjs` 80 checks pass
-- [ ] Frontend
-- [ ] UI check in a browser
-- [ ] League configured on the deployed instance (maintainer + ops)
+- [x] Frontend (pages above); `tsc` + build pass; the touched pages are
+      lint-clean (pre-existing lint errors logged in `ISSUES.md`)
+- [x] UI walked through in a browser: sign-in page join button, join wizard
+      (choose program → bad/good team number → guest → sign-in code →
+      pending), owner's group page (library, members + approve, inherited
+      settings with sources, quotas + members' usage), Slice group picker,
+      Users, Settings, Account (full and guest), Jobs, Library
+- [ ] Not exercised in a real browser: passkey registration through the
+      join page (covered by the API test with a software authenticator) and
+      a browser-engine slice uploading its model (the stub build has no
+      engine; the upload itself is covered by the API test)
+- [ ] Pushed / deployed (waiting for the maintainer)
+- [ ] League configured on the deployed instance
 
 ## Open questions for the user
 

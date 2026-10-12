@@ -7,11 +7,17 @@ const navItems = [
   { to: "/jobs", label: "Jobs" },
   { to: "/profiles", label: "Profiles" },
   { to: "/library", label: "Library" },
+  { to: "/groups", label: "Groups" },
+];
+
+const adminItems = [
+  { to: "/users", label: "Users" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export default function Layout() {
   const { user, isAdmin, status, logout } = useAuth();
-  const items = isAdmin ? [...navItems, { to: "/users", label: "Users" }] : navItems;
+  const items = isAdmin ? [...navItems, ...adminItems] : navItems;
 
   return (
     <div className="app">
@@ -43,7 +49,7 @@ export default function Layout() {
             <>
               <NavLink to="/account" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
                 {user?.username ?? "account"}
-                <span className="hint"> · {user?.role}</span>
+                <span className="hint"> · {user?.kind === "guest" ? "guest" : user?.role}</span>
               </NavLink>
               <button className="btn-sm" onClick={() => logout()}>
                 Log out

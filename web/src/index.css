@@ -1068,3 +1068,260 @@ body {
 .login-card .btn-primary + p {
   margin-top: 1rem;
 }
+
+/* Groups, joining, quotas */
+.page h3 {
+  margin: 1.75rem 0 0.75rem;
+  font-weight: 600;
+}
+
+.page h4 {
+  margin: 1.25rem 0 0.5rem;
+  font-weight: 500;
+}
+
+.breadcrumb {
+  margin-bottom: 0.5rem;
+}
+
+.breadcrumb a,
+.data-table a:not(.btn-sm),
+.join-list a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover,
+.data-table a:not(.btn-sm):hover,
+.join-list a:hover {
+  text-decoration: underline;
+}
+
+.group-page h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.role-badge {
+  background: #2a2a4e;
+  color: var(--accent);
+}
+
+.group-description {
+  margin-bottom: 0.25rem;
+}
+
+.group-page .profile-tabs {
+  margin-top: 1rem;
+}
+
+a.btn-sm {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.inline-form {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  max-width: 900px;
+}
+
+.inline-form label {
+  flex: 1 1 180px;
+}
+
+.inline-form .btn-primary {
+  width: auto;
+}
+
+.settings-form {
+  max-width: 640px;
+}
+
+.settings-form h3 {
+  margin-bottom: 0;
+}
+
+.settings-form .btn-primary {
+  width: auto;
+  align-self: flex-start;
+}
+
+.printer-form .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+}
+
+.printer-form .checkbox-label input {
+  width: auto;
+}
+
+.row-disabled td {
+  opacity: 0.5;
+}
+
+.link-url {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.quota-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.quota-rule {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.quota-rule select,
+.quota-rule input {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.quota-rule input {
+  width: 6rem;
+}
+
+.quota-editor > .btn-sm {
+  align-self: flex-start;
+}
+
+.quota-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem 2rem;
+  margin-bottom: 1rem;
+}
+
+.quota-sections h4 {
+  margin-top: 0;
+}
+
+.usage-bar-cell {
+  width: 30%;
+}
+
+.progress-fill.progress-full {
+  background: var(--error);
+}
+
+.past-season {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.past-season summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.season-library > .hint:last-child {
+  margin-top: 1rem;
+}
+
+.join-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.join-card {
+  max-width: 440px;
+  text-align: left;
+}
+
+.join-card h1 {
+  text-align: center;
+}
+
+.join-title {
+  font-size: 1.15rem;
+  margin-bottom: 0.25rem;
+}
+
+.join-path {
+  margin: 0.75rem 0;
+  color: var(--text-dim);
+}
+
+.join-step,
+.join-finish {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.join-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.join-option {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text);
+  margin: 0;
+}
+
+.join-guest {
+  padding: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.login-join {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.btn-primary.btn-inline {
+  width: auto;
+}
+
+.data-table select {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.25rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.join-option,
+.join-guest {
+  font: inherit;
+}
+
+.login-card a {
+  color: var(--accent);
+}
+
+.hint a {
+  color: var(--accent);
+}

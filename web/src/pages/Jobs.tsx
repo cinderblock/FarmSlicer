@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { apiJson, useAuth } from "../auth";
+import { errorText, useJson } from "../api";
 
 interface Job {
   id: string;
@@ -15,6 +17,10 @@ interface Job {
   warnings: string | null;
   source: "server" | "browser";
   created_at: string;
+  user_id: string | null;
+  username: string | null;
+  group_id: string | null;
+  group_name: string | null;
 }
 
 function parseWarnings(raw: string | null): string[] {
@@ -35,27 +41,38 @@ function formatTime(sec: number): string {
 }
 
 export default function JobsPage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const { user } = useAuth();
+  const [rev, setRev] = useState(0);
+  const [error, setError] = useState("");
+  const jobs = useJson<Job[]>("/api/jobs", rev).data ?? [];
+  const chargeable = useJson<{ chargeable: { id: string; path: string }[] }>("/api/me").data?.chargeable ?? [];
 
-  const fetchJobs = useCallback(async () => {
-    const res = await fetch("/api/jobs");
-    setJobs(await res.json());
-  }, []);
-
+  // Poll while the page is open.
   useEffect(() => {
-    fetchJobs();
-    const interval = setInterval(fetchJobs, 3000);
+    const interval = setInterval(() => setRev((r) => r + 1), 3000);
     return () => clearInterval(interval);
-  }, [fetchJobs]);
+  }, []);
 
   const handleCancel = async (id: string) => {
     await fetch(`/api/jobs/${id}/cancel`, { method: "POST" });
-    fetchJobs();
+    setRev((r) => r + 1);
+  };
+
+  const moveJob = async (id: string, groupId: string) => {
+    setError("");
+    try {
+      await apiJson(`/api/jobs/${id}`, "PUT", { group_id: groupId || null });
+      setRev((r) => r + 1);
+    } catch (err) {
+      setError(errorText(err));
+    }
   };
 
   return (
     <div className="page">
       <h2>Jobs</h2>
+      <p className="hint">Your jobs, and the jobs of groups whose library you can see.</p>
+      {error && <p className="login-error">{error}</p>}
       {jobs.length === 0 ? (
         <p className="empty-state">No jobs yet. Start by slicing a model.</p>
       ) : (
@@ -63,6 +80,8 @@ export default function JobsPage() {
           <thead>
             <tr>
               <th>Model</th>
+              <th>By</th>
+              <th>Group</th>
               <th>Status</th>
               <th>Progress</th>
               <th>Sliced on</th>
@@ -77,6 +96,28 @@ export default function JobsPage() {
               return (
                 <tr key={job.id}>
                   <td>{job.model_name}</td>
+                  <td>{job.username ?? "—"}</td>
+                  <td>
+                    {job.user_id === user?.id ? (
+                      <select
+                        value={job.group_id ?? ""}
+                        onChange={(e) => moveJob(job.id, e.target.value)}
+                        title="Move this job to one of your groups"
+                      >
+                        <option value="">Personal</option>
+                        {job.group_id && !chargeable.some((g) => g.id === job.group_id) && (
+                          <option value={job.group_id}>{job.group_name}</option>
+                        )}
+                        {chargeable.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.path}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      (job.group_name ?? "Personal")
+                    )}
+                  </td>
                   <td>
                     <span className={`status-badge status-${job.status}`}>
                       {job.status}
@@ -98,7 +139,7 @@ export default function JobsPage() {
                       className={`source-badge source-${job.source}`}
                       title={
                         job.source === "browser"
-                          ? "Sliced by the WebAssembly engine in the user's browser; the model never reached the server."
+                          ? "Sliced by the WebAssembly engine in the user's browser; the model stays there unless the job's group keeps models."
                           : "Sliced by libslic3r on the server."
                       }
                     >

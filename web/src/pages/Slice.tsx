@@ -10,10 +10,18 @@ import {
   pickVariant,
 } from "../engine/client";
 import type { EngineManifest } from "../engine/types";
+import { useJson } from "../api";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
 type ComputeMode = "auto" | "server" | "browser";
 const COMPUTE_KEY = "farmslicer.compute";
+/** The group jobs are charged to, remembered per browser. */
+const GROUP_KEY = "farmslicer.group";
+
+interface MeGroups {
+  chargeable: { id: string; path: string }[];
+  groups: { group_id: string; keep_models: boolean }[];
+}
 
 interface ServerStatus {
   server_active_jobs: number;
@@ -25,6 +33,8 @@ interface ServerStatus {
 interface JobRecord {
   id: string;
   config_json: string | null;
+  /** The job's group keeps models: upload it with the result. */
+  keep_model?: boolean;
 }
 
 function formatDuration(sec: number): string {
@@ -129,6 +139,12 @@ export default function SlicePage() {
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [resolvedConfig, setResolvedConfig] = useState<Record<string, string> | null>(null);
   const [routing, setRouting] = useState("auto");
+  const [groupChoice, setGroupChoice] = useState(() => localStorage.getItem(GROUP_KEY) ?? "");
+  const me = useJson<MeGroups>("/api/me").data;
+  const chargeable = me?.chargeable ?? [];
+  // A remembered group the user has since left falls back to personal.
+  const groupId = chargeable.some((g) => g.id === groupChoice) ? groupChoice : "";
+  const groupKeepsModels = !!me?.groups.find((g) => g.group_id === groupId)?.keep_models;
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
   );
@@ -392,8 +408,9 @@ export default function SlicePage() {
     if (Object.keys(overrides).length > 0) {
       formData.append("overrides", JSON.stringify(overrides));
     }
+    if (groupId) formData.append("group_id", groupId);
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, color, overrides]);
+  }, [routing, printerId, resolvedMachine, process, filament, color, overrides, groupId]);
 
   const sliceOnServer = useCallback(async () => {
     if (!modelFile) return;
@@ -415,7 +432,8 @@ export default function SlicePage() {
     if (!engineRef.current) engineRef.current = await BrowserEngine.create();
     const engine = engineRef.current;
 
-    // Register the job; the model itself never leaves this machine.
+    // Register the job. The model stays on this machine unless the job's
+    // group keeps models (then it goes up with the result).
     const formData = buildJobForm();
     formData.append("source", "browser");
     formData.append("model_name", modelFile.name);
@@ -451,6 +469,7 @@ export default function SlicePage() {
       upload.append("print_time_sec", String(out.report.stats.printTimeSec));
       upload.append("filament_used_g", String(out.report.stats.filamentG));
       upload.append("warnings", JSON.stringify(out.report.warnings));
+      if (job.keep_model) upload.append("model", modelFile, modelFile.name);
       const up = await fetch(`/api/jobs/${job.id}/result`, { method: "POST", body: upload });
       if (!up.ok) {
         const data = await up.json().catch(() => ({}));
@@ -673,6 +692,28 @@ export default function SlicePage() {
               <option value="lock">Lock to selected printer</option>
             </select>
           </label>
+
+          <label>
+            Group
+            <select
+              value={groupId}
+              onChange={(e) => {
+                setGroupChoice(e.target.value);
+                localStorage.setItem(GROUP_KEY, e.target.value);
+              }}
+              disabled={slicing}
+            >
+              <option value="">Personal (only you and admins see it)</option>
+              {chargeable.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.path}
+                </option>
+              ))}
+            </select>
+          </label>
+          {groupId && groupKeepsModels && (
+            <p className="hint">This group keeps models: the model file is stored with the job.</p>
+          )}
 
           <label>
             Compute

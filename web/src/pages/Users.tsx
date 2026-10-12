@@ -1,30 +1,33 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import type { User } from "../auth";
+import { useJson } from "../api";
+import { QuotaRulesEditor } from "../components/Quota";
+import type { Rule } from "../groups";
+import { ruleText } from "../groups";
 
 interface AdminUser extends User {
   passkeys: number;
   invite_expires_at: string | null;
+  /** Per-user limits; null = the site default for the account kind. */
+  quotas: Rule[] | null;
+  groups: { group_id: string; path: string; role: string; status: string }[];
 }
 
 /** Admin page: accounts and invite links. Admins cannot touch the owner; nobody can delete it. */
 export default function UsersPage() {
   const { user: me } = useAuth();
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [rev, setRev] = useState(0);
+  const users = useJson<AdminUser[]>("/api/users", rev).data ?? [];
+  const load = async () => setRev((r) => r + 1);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Rule[]>([]);
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<"user" | "admin">("user");
   const [busy, setBusy] = useState(false);
   const [inviteLink, setInviteLink] = useState<{ username: string; url: string; expires: string } | null>(null);
-
-  const load = useCallback(async () => {
-    const res = await fetch("/api/users");
-    if (res.ok) setUsers(await res.json());
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +74,17 @@ export default function UsersPage() {
     }
   };
 
+  const saveQuotas = async (u: AdminUser, quotas: Rule[] | null) => {
+    setError("");
+    try {
+      await apiJson(`/api/users/${u.id}`, "PUT", { quotas });
+      setEditing(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const remove = async (u: AdminUser) => {
     if (!window.confirm(`Delete account "${u.username}"? Their passkeys and API keys stop working.`)) return;
     setError("");
@@ -88,7 +102,10 @@ export default function UsersPage() {
       <p className="hint">
         Sign-in is passkey-only. Adding a user gives you an invite link; send it to them and
         they enrol their own passkey. Owner: the first account, fixed. Admins manage users and
-        printers. Users slice and manage their own passkeys and API keys.
+        printers. Users slice and manage their own passkeys and API keys. Guests joined through a
+        group's link without a passkey; they sign in with one-time codes and can't change printers,
+        profiles or API keys. People can also join on their own through{" "}
+        <Link to="/groups">group join links</Link>.
       </p>
 
       {inviteLink && (
@@ -118,6 +135,8 @@ export default function UsersPage() {
             <th>Username</th>
             <th>Role</th>
             <th>Passkeys</th>
+            <th>Groups</th>
+            <th>Limits</th>
             <th>Last login</th>
             <th>Actions</th>
           </tr>
@@ -130,6 +149,7 @@ export default function UsersPage() {
                 <td>
                   {u.username}
                   {u.id === me?.id && <span className="hint"> (you)</span>}
+                  {u.kind === "guest" && <span className="source-badge"> guest</span>}
                 </td>
                 <td>
                   {u.role === "owner" ? (
@@ -143,11 +163,54 @@ export default function UsersPage() {
                 </td>
                 <td>
                   {u.passkeys}
-                  {u.passkeys === 0 && (
+                  {u.passkeys === 0 && u.kind === "guest" && <span className="hint"> · signs in with codes</span>}
+                  {u.passkeys === 0 && u.kind !== "guest" && (
                     <span className="hint">
                       {" "}
                       {u.invite_expires_at ? `· invite pending until ${u.invite_expires_at}` : "· no invite"}
                     </span>
+                  )}
+                </td>
+                <td>
+                  {u.groups.length === 0
+                    ? "—"
+                    : u.groups.map((g, i) => (
+                        <span key={g.group_id}>
+                          {i > 0 && ", "}
+                          <Link to={`/groups/${g.group_id}`}>{g.path}</Link>
+                          {g.role === "manager" ? " (manager)" : ""}
+                          {g.status === "pending" ? " (pending)" : ""}
+                        </span>
+                      ))}
+                </td>
+                <td>
+                  {editing === u.id ? (
+                    <div>
+                      <QuotaRulesEditor rules={draft} onChange={setDraft} />
+                      <button className="btn-sm" onClick={() => saveQuotas(u, draft)}>
+                        Save
+                      </button>
+                      <button className="btn-sm" onClick={() => saveQuotas(u, null)}>
+                        Use site default
+                      </button>
+                      <button className="btn-sm" onClick={() => setEditing(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="hint">{u.quotas ? u.quotas.map(ruleText).join("; ") || "none" : "site default"}</span>{" "}
+                      <button
+                        className="btn-sm"
+                        disabled={locked}
+                        onClick={() => {
+                          setDraft(u.quotas ?? []);
+                          setEditing(u.id);
+                        }}
+                      >
+                        Customize
+                      </button>
+                    </>
                   )}
                 </td>
                 <td>{u.last_login ?? "—"}</td>

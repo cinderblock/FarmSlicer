@@ -7,6 +7,8 @@ export interface User {
   id: string;
   username: string;
   role: "owner" | "admin" | "user";
+  /** "guest": no passkey; signs in with one-time sign-in codes. */
+  kind: "full" | "guest";
   created_at: string;
   last_login: string | null;
 }
@@ -16,6 +18,8 @@ export interface AuthStatus {
   auth_disabled: boolean;
   authenticated: boolean;
   user: User | null;
+  /** Groups offered on the sign-in page. */
+  join_groups: { id: string; name: string; description: string }[];
 }
 
 interface AuthContextValue {
@@ -25,6 +29,7 @@ interface AuthContextValue {
   offline: boolean;
   user: User | null;
   isAdmin: boolean;
+  isGuest: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -62,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       offline,
       user,
       isAdmin: user?.role === "owner" || user?.role === "admin",
+      isGuest: user?.kind === "guest",
       refresh,
       logout,
     };

@@ -13,6 +13,10 @@ import InvitePage from "./pages/Invite";
 import RecoverPage from "./pages/Recover";
 import UsersPage from "./pages/Users";
 import AccountPage from "./pages/Account";
+import GroupsPage from "./pages/Groups";
+import GroupPage from "./pages/Group";
+import JoinPage from "./pages/Join";
+import SettingsPage from "./pages/Settings";
 import { AuthProvider, useAuth } from "./auth";
 import "./index.css";
 
@@ -48,7 +52,7 @@ function Splash({ text }: { text: string }) {
   );
 }
 
-/** Everything except the invite and recovery pages: setup → login → the app. */
+/** Everything except the invite, recovery and join pages: setup → login → the app. */
 function Gate() {
   const { status, offline, isAdmin } = useAuth();
 
@@ -67,7 +71,10 @@ function Gate() {
         <Route path="profiles" element={<ProfilesPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route path="account" element={<AccountPage />} />
+        <Route path="groups" element={<GroupsPage />} />
+        <Route path="groups/:id" element={<GroupPage />} />
         <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
+        <Route path="settings" element={isAdmin ? <SettingsPage /> : <Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
@@ -81,6 +88,8 @@ function App() {
       <Routes>
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="/recover" element={<RecoverPage />} />
+        <Route path="/join/group/:id" element={<JoinPage />} />
+        <Route path="/join/:code" element={<JoinPage />} />
         <Route path="/*" element={<Gate />} />
       </Routes>
     </BrowserRouter>
