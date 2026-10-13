@@ -209,6 +209,14 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
   (digest auth hashes the header's `uri=`, so it still passes).
 - Outside prints: Bambu Studio/cloud projects sit on the printer under the
   job name in `/cache/` (found there for the X1C and H2D).
+- **The printer switches `subtask_name` to the new job about a second before
+  `gcode_state` leaves the previous job's FINISH.** The first real test print
+  was marked finished at once. Until a print has been seen running, only
+  start-type states (PREPARE/RUNNING/SLICING/PAUSE) move it; fixed and
+  verified with a second real print (starting → printing → cancelled).
+- **Without `curr_bed_type` libslic3r slices for the Cool Plate** (35 °C bed
+  for PLA). Printers now carry `plate_type`; slicing defaults to it and
+  sending refuses a package sliced for a different plate.
 
 - **rustls session cache sizing**: `Resumption::in_memory_sessions(n)`
   holds `ceil(n/8)` servers; with one server slot the cache evicts each entry
@@ -307,7 +315,8 @@ which we must not copy):
   matching reports to our print is unambiguous and stale thumbnails can't
   happen.
 - A stopped print reports `gcode_state` FAILED with `print_error`
-  0x0300400C ("cancelled") — to verify on hardware.
+  50348044 = 0x0300400C ("cancelled"); confirmed on an X1C. The error
+  resets to 0 about 5 s later, so read it on the first FAILED report.
 
 ## Progress log
 
@@ -320,6 +329,12 @@ which we must not copy):
 - Phases 3-5 committed; all unit tests (29), the three e2e suites and the
   libslic3r end-to-end (slice → package with overlay → print on the fake
   printer) pass as of `a5b8c72`.
+- Real hardware (dev server on buildhost `127.0.0.1:9341` with the farm's
+  printers): status for three X1Cs and an H2D, both camera kinds, outside-
+  print pictures, and two test prints (sent, started, stopped during
+  calibration) all work.
+- Plate type + tracker race fix committed; then pushed, CI image built and
+  deployed through the ops repo.
 - Dev setup: stub server on buildhost `127.0.0.1:9340`
   (`~/farmslicer-printer-control/pc-dev.sh`, auth off), reached with
   `ssh -L 9340:127.0.0.1:9340`; fake printer = Docker `fake-printer`
@@ -328,13 +343,12 @@ which we must not copy):
 
 ## Open questions for the user
 
-1. Who may send prints, and to which printers? Recommendation: a group setting
-   `printers` (allowed printer ids, inherited down the tree) plus a site-wide
-   default; admins always.
-2. May a dev instance connect to the real printers read-only (MQTT status) for
-   testing? Later: a test print on a printer you pick, at a time you say.
-3. Run both systems side by side during migration? Printers cap concurrent
-   LAN MQTT clients (a handful), so each extra client costs a slot.
+None open. Answered: no limits on who may send where (yet); real-printer
+testing allowed (test prints on the empty printers, cancelled partway);
+deploy through the ops repo.
+
+After deploy, the user sets each printer's build plate on the Printers page
+(unknown for existing printers).
 
 ## Things not to do
 
