@@ -345,14 +345,14 @@ async fn session(shared: &Arc<Shared>, ws: Ws, requests: &mut mpsc::Receiver<Req
     let (mut write, mut read) = ws.split();
     let mut next_id: u64 = 1;
     let mut pending: HashMap<u64, Pending> = HashMap::new();
+    let mut identify = json!({"client_name": "FarmSlicer", "version": env!("CARGO_PKG_VERSION"), "type": "other",
+                              "url": "https://github.com/cinderblock/FarmSlicer"});
+    // Only with a key: Moonraker calls a null one invalid.
+    if let Some(key) = &shared.config.api_key {
+        identify["api_key"] = json!(key);
+    }
     let mut outbox: Vec<(String, Value, Pending)> = vec![
-        (
-            "server.connection.identify".into(),
-            json!({"client_name": "FarmSlicer", "version": env!("CARGO_PKG_VERSION"), "type": "other",
-                   "url": "https://github.com/cinderblock/FarmSlicer",
-                   "api_key": shared.config.api_key}),
-            Pending::Identify,
-        ),
+        ("server.connection.identify".into(), identify, Pending::Identify),
         ("server.info".into(), json!({}), Pending::ServerInfo),
     ];
     let mut ping = tokio::time::interval(PING_INTERVAL);

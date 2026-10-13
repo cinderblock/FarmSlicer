@@ -2,6 +2,7 @@ mod auth;
 mod auth_api;
 mod cost;
 mod bambu;
+mod camera;
 mod db;
 mod discovery;
 mod farm_api;

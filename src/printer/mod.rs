@@ -69,7 +69,7 @@ impl Protocol {
                 stop: true,
                 speed: Some(SpeedControl::Percent),
                 heat: true,
-                camera: false,
+                camera: true,
                 filament_mapping: false,
                 print_options: &[],
                 package: PackageFormat::Gcode,

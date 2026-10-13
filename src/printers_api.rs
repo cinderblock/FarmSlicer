@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::auth::{self, CurrentUser};
-use crate::bambu::camera::{CameraKind, CameraSource, Frame};
+use crate::camera::{CameraKind, CameraSource, Frame};
 use crate::db::{Printer, User};
 use crate::printer::{Protocol, protocol_of};
 use crate::server::AppState;
@@ -215,44 +215,49 @@ async fn raw_report(
     Ok(Json(state.printers.report(&id).unwrap_or(Value::Null)))
 }
 
-/// What kind of camera a printer has, from its model.
-pub fn camera_kind(state: &AppState, p: &Printer) -> CameraKind {
-    let model_id = state
-        .profile_store
-        .machine_model(&p.machine_profile)
-        .and_then(|m| m.model_id.clone())
-        .or_else(|| crate::bambu::models::id_for(&p.machine_profile).map(String::from));
-    CameraKind::for_model_id(model_id.as_deref())
+/// Where a printer's camera pictures come from, or why there are none.
+async fn camera_kind(state: &AppState, p: &Printer) -> Result<CameraKind, String> {
+    match protocol_of(p) {
+        Some(Protocol::Bambu) => {
+            if p.address.trim().is_empty() || p.access_code.trim().is_empty() {
+                return Err("the printer has no address or access code set".into());
+            }
+            let model_id = state
+                .profile_store
+                .machine_model(&p.machine_profile)
+                .and_then(|m| m.model_id.clone())
+                .or_else(|| crate::bambu::models::id_for(&p.machine_profile).map(String::from));
+            Ok(crate::camera::bambu_kind(model_id.as_deref(), p.address.trim(), p.access_code.trim()))
+        }
+        Some(Protocol::Moonraker) => crate::moonraker::camera(p).await,
+        None => Err("FarmSlicer can't show this printer's camera".into()),
+    }
 }
 
 /// `GET /api/printers/{id}/camera` (WebSocket): the live camera. First a
 /// text message `{"type":"hello","kind":"h264"|"jpeg"}`; then, for H.264, a
 /// text `{"type":"h264-init",codec,description(base64 avcC),width,height}`
 /// and binary access units `[key u8][timestamp µs i64 LE][AVC data]`; for
-/// JPEG, binary JPEG frames. `{"type":"error",message}` ends the stream.
+/// JPEG, binary JPEG frames. `{"type":"error",message}` ends the stream
+/// (also when the printer has no camera FarmSlicer can show).
 async fn camera(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     let p = state.db.get_printer(&id).ok_or_else(not_found)?;
-    if protocol_of(&p) != Some(Protocol::Bambu) {
-        return Err((StatusCode::CONFLICT, Json(json!({"error": "FarmSlicer can't show this printer's camera"}))));
-    }
-    if p.address.trim().is_empty() || p.access_code.trim().is_empty() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(json!({"error": "the printer has no address or access code set"})),
-        ));
-    }
-    let source = CameraSource {
-        printer_id: p.id.clone(),
-        name: p.name.clone(),
-        address: p.address.trim().to_string(),
-        access_code: p.access_code.trim().to_string(),
-        kind: camera_kind(&state, &p),
-    };
-    Ok(ws.on_upgrade(move |socket| serve_camera(state, source, socket)).into_response())
+    let kind = camera_kind(&state, &p).await;
+    Ok(ws
+        .on_upgrade(move |mut socket| async move {
+            match kind {
+                Ok(kind) => serve_camera(state, CameraSource { printer_id: p.id, name: p.name, kind }, socket).await,
+                Err(message) => {
+                    let _ = socket.send(text(json!({"type": "error", "message": message}))).await;
+                    let _ = socket.send(Message::Close(None)).await;
+                }
+            }
+        })
+        .into_response())
 }
 
 fn text(v: Value) -> Message {
@@ -282,10 +287,7 @@ fn encode(frame: &Frame) -> Message {
 }
 
 async fn serve_camera(state: Arc<AppState>, source: CameraSource, mut socket: WebSocket) {
-    let kind = match source.kind {
-        CameraKind::Rtsp => "h264",
-        CameraKind::Jpeg => "jpeg",
-    };
+    let kind = source.kind.browser_kind();
     if socket.send(text(json!({"type": "hello", "kind": kind}))).await.is_err() {
         return;
     }

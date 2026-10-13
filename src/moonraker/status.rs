@@ -112,10 +112,13 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
     let o = s.objects;
     let webhooks = o.get("webhooks");
     let klippy = webhooks.and_then(|w| w["state"].as_str()).unwrap_or(s.klippy_state);
-    let klippy_message = webhooks
-        .and_then(|w| w["state_message"].as_str())
-        .unwrap_or(s.klippy_message)
-        .trim();
+    // Klipper's messages run on with advice; the first line says what happened.
+    let first_line = |m: &str| m.trim().lines().next().unwrap_or("").trim().to_string();
+    let klippy_message = first_line(
+        webhooks
+            .and_then(|w| w["state_message"].as_str())
+            .unwrap_or(s.klippy_message),
+    );
     let stats = o.get("print_stats").cloned().unwrap_or(Value::Null);
     let print_state = stats["state"].as_str().unwrap_or("");
     let print_duration = stats["print_duration"].as_f64().unwrap_or(0.0);
@@ -133,13 +136,13 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
                 "error" => Some(state::FAILED),
                 _ => None,
             };
-            let msg = stats["message"].as_str().map(str::trim).filter(|m| !m.is_empty() && print_state == "error");
-            (st, msg.map(String::from))
+            let msg = stats["message"].as_str().map(first_line).filter(|m| !m.is_empty() && print_state == "error");
+            (st, msg)
         }
         // An emergency stop or MCU error ends whatever was printing.
         "shutdown" | "error" => (
             Some(state::FAILED),
-            Some(if klippy_message.is_empty() { format!("Klipper {klippy}") } else { klippy_message.to_string() }),
+            Some(if klippy_message.is_empty() { format!("Klipper {klippy}") } else { klippy_message }),
         ),
         _ => (None, None),
     };
@@ -271,10 +274,12 @@ mod tests {
 
     #[test]
     fn klipper_down_or_shut_down() {
-        let o = objects(json!({"webhooks": {"state": "shutdown", "state_message": "MCU 'mcu' shutdown: Timer too close"}, "print_stats": {"state": "printing"}}));
+        let o = objects(json!({"webhooks": {"state": "shutdown", "state_message": "MCU 'mcu' shutdown: Timer too close
+This often indicates the host computer is overloaded. Check
+for other processes"}, "print_stats": {"state": "printing"}}));
         let s = snap(&o, None);
         assert_eq!((s.state.as_deref(), s.vendor_state.as_deref()), (Some("FAILED"), Some("Klipper shutdown")));
-        assert!(s.message.unwrap().contains("Timer too close"));
+        assert_eq!(s.message.as_deref(), Some("MCU 'mcu' shutdown: Timer too close"));
         let empty = Map::new();
         let s = summarize(&Snapshot {
             connected: true,

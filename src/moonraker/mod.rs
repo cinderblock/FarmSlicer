@@ -19,6 +19,7 @@ use futures_util::StreamExt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::camera::CameraKind;
 use crate::db::{PrintRecord, Printer};
 use crate::package::Image;
 use crate::printer::{CommandError, DriverHandle, http};
@@ -115,6 +116,62 @@ pub async fn send(
     }
 }
 
+/// A webcam URL as Moonraker stores it, made reachable from here: relative
+/// ones are served by the web server in front of Moonraker (port 80 on the
+/// printer's host); `localhost` means the printer.
+fn webcam_url(base: &url::Url, raw: Option<&str>) -> Option<url::Url> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let host = base.host_str()?;
+    if raw.starts_with('/') {
+        let mut root = base.clone();
+        root.set_port(None).ok()?;
+        root.set_path("/");
+        return root.join(raw).ok();
+    }
+    let mut url = url::Url::parse(raw).ok()?;
+    if matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1" | "[::1]")) {
+        url.set_host(Some(host)).ok()?;
+    }
+    matches!(url.scheme(), "http" | "https").then_some(url)
+}
+
+/// The printer's camera: the first enabled webcam in Moonraker's list
+/// that serves MJPEG or snapshots.
+pub async fn camera(printer: &Printer) -> Result<CameraKind, String> {
+    let config = link::Config::from_printer(printer).ok_or("the printer has no address")?;
+    let r = config
+        .request(reqwest::Method::GET, "server/webcams/list")
+        .send()
+        .await
+        .map_err(|e| format!("can't ask Moonraker for its webcams: {}", http::explain(&e)))?;
+    let list = body(r).await.map_err(|e| format!("can't ask Moonraker for its webcams: {e}"))?;
+    let webcams = list["webcams"].as_array().cloned().unwrap_or_default();
+    for w in webcams.iter().filter(|w| w["enabled"].as_bool() != Some(false)) {
+        let service = w["service"].as_str().unwrap_or("");
+        let stream = webcam_url(&config.base, w["stream_url"].as_str());
+        let snapshot = webcam_url(&config.base, w["snapshot_url"].as_str());
+        let kind = match service {
+            // Mainsail's "adaptive" mode polls snapshots.
+            "mjpegstreamer-adaptive" => CameraKind::Mjpeg { stream: None, snapshot },
+            "mjpegstreamer" | "uv4l-mjpeg" | "ipstream" => CameraKind::Mjpeg { stream, snapshot },
+            // WebRTC, HLS, ...: only their snapshots.
+            _ => CameraKind::Mjpeg { stream: None, snapshot },
+        };
+        if matches!(&kind, CameraKind::Mjpeg { stream: None, snapshot: None }) {
+            continue;
+        }
+        return Ok(kind);
+    }
+    Err(if webcams.is_empty() {
+        "no webcam is set up in Moonraker (Mainsail/Fluidd: Settings → Webcams)".to_string()
+    } else {
+        "Moonraker's webcams have neither an MJPEG stream nor a snapshot URL".to_string()
+    })
+}
+
 /// The picture of a file on the printer: the largest thumbnail Moonraker
 /// extracted from it (`.thumbs/` next to the file).
 pub async fn picture(printer: &Printer, filename: &str) -> Result<Option<Image>, String> {
@@ -149,4 +206,20 @@ pub async fn picture(printer: &Printer, filename: &str) -> Result<Option<Image>,
     let content_type = if relative.ends_with(".jpg") || relative.ends_with(".jpeg") { "image/jpeg" } else { "image/png" };
     let bytes = response.bytes().await.map_err(|e| http::explain(&e))?;
     Ok(Some(Image { bytes: bytes.to_vec(), content_type }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webcam_urls_point_at_the_printer() {
+        let base = url::Url::parse("http://10.0.0.7:7125/").unwrap();
+        let u = |raw| webcam_url(&base, raw).map(|u| u.to_string());
+        assert_eq!(u(Some("/webcam/?action=stream")).as_deref(), Some("http://10.0.0.7/webcam/?action=stream"));
+        assert_eq!(u(Some("http://localhost:8080/?action=snapshot")).as_deref(), Some("http://10.0.0.7:8080/?action=snapshot"));
+        assert_eq!(u(Some("http://cam.lan/mjpg")).as_deref(), Some("http://cam.lan/mjpg"));
+        assert_eq!(u(Some("")), None);
+        assert_eq!(u(None), None);
+    }
 }

@@ -42,7 +42,7 @@ pub struct AppState {
     /// Live links to the farm's printers (src/printer/).
     pub printers: PrinterHub,
     /// Camera feeds, started while someone watches.
-    pub cameras: crate::bambu::camera::CameraHub,
+    pub cameras: crate::camera::CameraHub,
     /// Pictures of prints started outside FarmSlicer, fetched from printers.
     pub printer_thumbs: crate::printer_thumbs::PrinterThumbs,
     /// WebAuthn relying party + in-flight ceremonies (src/auth.rs).
