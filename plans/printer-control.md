@@ -172,21 +172,43 @@ pre-sliced `.gcode.3mf` files), and do it for files FarmSlicer slices itself:
 - [x] Fixed on the way: `?active=1`/`?mine=1` query flags were rejected
       (`src/query.rs`; Library "My jobs", `e0a1f16`).
 
-**Not replicated from the old station (ask before doing):**
-- Its step-by-step "Instructions" page (installing Bambu Studio, exporting,
-  plate handling) — content, not code.
-- Estimated filament cost per print ($/kg table).
-- Thumbnails for prints started outside FarmSlicer (it downloaded the
-  running project from the printer over FTPS).
+**Old-station extras** (done, user asked 2026-10-12)
+- [x] Pictures of outside prints (`c615dff`), cost estimates (`6750f7e`),
+      Guide page with farm notes (`32f03c9`).
 
-**Next (needs the user):**
-- [ ] Hardware check on one real printer, one print, at a time the user
-      picks (see the per-phase "On hardware" items).
-- [ ] Merge `printer-control` into master (master has moved; the Slice and
-      Group pages were touched on both sides) and push; CI builds the image;
-      ops pins it.
+**Hardware** (status-only checks done on all four farm printers)
+- [x] MQTT status: X1C ×3 and H2D connect; states, temps (H2D's two
+      nozzles), AMS trays/humidity, external spools, HMS come through.
+- [x] Cameras: X1C 1760x1080, H2D 1680x1080 H.264 High @30 fps (`7216790`).
+- [x] Outside-print pictures fetched over FTPS from an X1C and the H2D.
+- [ ] **One real print** (approved): test tile sliced (10 min, 1.7 g PLA,
+      fits the X1Cs). Waiting for the user to name the printer and confirm
+      its plate is clear.
+- [ ] After that print: md5 accepted?, `ftp://` URL, stop → 0300_400C?
+
+**Next**
+- [ ] Push the newest commits (approved), CI builds the image; ops pin/deploy
+      needs its own approval.
+
+**Ideas (not started)**
+- Pin each printer's certificate on first contact (TOFU).
+- "Plate clear" state: block sending to a printer whose last print hasn't
+  been collected (FINISH/FAILED) until someone at the farm confirms.
 
 ## Findings / gotchas
+
+- **Real printers present X.509 v1 certificates.** webpki can't parse them
+  (`UnsupportedCertVersion`), so even "accept any cert" verifiers that check
+  handshake signatures through webpki fail. Fixed in `18ac288`; the fake
+  printer now makes a v1 cert (`make_v1_cert.py`; OpenSSL 3 only writes v3).
+- **Reports' `gcode_file` is the extracted plate** (`/data/Metadata/
+  plate_1.gcode`), not the uploaded file. Prints are matched by the unique
+  `subtask_name` we send (the file stem).
+- **The printers' RTSP server is LIVE555** and 301-redirects any URL that
+  isn't `rtsps://<printer>/...`; the camera proxy rewrites request lines
+  (digest auth hashes the header's `uri=`, so it still passes).
+- Outside prints: Bambu Studio/cloud projects sit on the printer under the
+  job name in `/cache/` (found there for the X1C and H2D).
 
 - **rustls session cache sizing**: `Resumption::in_memory_sessions(n)`
   holds `ceil(n/8)` servers; with one server slot the cache evicts each entry
