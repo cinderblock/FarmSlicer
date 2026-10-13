@@ -219,13 +219,17 @@ function crc32(bytes) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** entries: { "path/in/zip": string | Uint8Array } → Uint8Array */
+/**
+ * entries: { "path/in/zip": string | Uint8Array }, or a list of
+ * [path, content] pairs (which may repeat a path) → Uint8Array
+ */
 export function zip(entries) {
+  const list = Array.isArray(entries) ? entries : Object.entries(entries);
   const enc = new TextEncoder();
   const locals = [];
   const centrals = [];
   let offset = 0;
-  for (const [name, content] of Object.entries(entries)) {
+  for (const [name, content] of list) {
     const nameBytes = enc.encode(name);
     const data = typeof content === "string" ? enc.encode(content) : content;
     const crc = crc32(data);
@@ -252,8 +256,8 @@ export function zip(entries) {
   const centralSize = centrals.reduce((n, a) => n + a.length, 0);
   const end = new DataView(new ArrayBuffer(22));
   end.setUint32(0, 0x06054b50, true);
-  end.setUint16(8, Object.keys(entries).length, true);
-  end.setUint16(10, Object.keys(entries).length, true);
+  end.setUint16(8, list.length, true);
+  end.setUint16(10, list.length, true);
   end.setUint32(12, centralSize, true);
   end.setUint32(16, offset, true);
   const parts = [...locals, ...centrals, new Uint8Array(end.buffer)];

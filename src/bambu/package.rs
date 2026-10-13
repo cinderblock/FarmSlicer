@@ -53,6 +53,9 @@ pub struct Plate {
     /// The build plate it was sliced for (`curr_bed_type`), when known.
     #[serde(default)]
     pub bed_type: Option<String>,
+    /// What the G-code check found (src/gcode/), once it has run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<crate::gcode::PlateCheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -152,6 +155,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
             has_thumbnail: names.iter().any(|n| n == &thumbnail_entry(index)),
             gcode_md5: md5,
             bed_type: bed_type.clone(),
+            check: None,
         });
     }
     Ok(Package { plates })

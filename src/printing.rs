@@ -116,7 +116,9 @@ fn minutes_text(m: u32) -> String {
 /// Why `plate` breaks `rules` (empty = it doesn't).
 pub fn rule_violations(rules: &crate::groups::PrintRules, plate: &Plate) -> Vec<String> {
     let mut out = Vec::new();
-    if let (Some(max), Some(secs)) = (rules.max_minutes, plate.print_time_sec) {
+    // The time the G-code check settled on: the package's own, unless its
+    // G-code takes clearly longer.
+    if let (Some(max), Some(secs)) = (rules.max_minutes, crate::gcode::effective_time(plate)) {
         let minutes = (secs / 60.0).ceil() as u32;
         if minutes > max {
             out.push(format!(
@@ -643,6 +645,7 @@ mod tests {
             has_thumbnail: false,
             gcode_md5: "X".into(),
             bed_type: None,
+            check: None,
         }
     }
 
@@ -698,6 +701,7 @@ mod tests {
             options: None,
             approval_reason: None,
             decided_by: None,
+            safety_review: false,
             status: status.into(),
             progress: 0,
             error: None,

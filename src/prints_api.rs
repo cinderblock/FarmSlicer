@@ -3,7 +3,9 @@
 //!
 //! Who may do what:
 //! - send a job: anyone who can see it (its creator, the group, managers,
-//!   admins), to an online, idle, compatible printer;
+//!   admins), to an online, idle, compatible printer. Every plate's G-code
+//!   is checked first (src/safety.rs): what can't be read safely is never
+//!   sent, and what needs review waits for an admin;
 //! - pause/resume/stop a print: whoever sent it, managers of its group,
 //!   admins; anything on a printer (prints from elsewhere too): admins.
 
@@ -19,12 +21,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::auth::{self, CurrentUser};
-use crate::bambu::package;
+use crate::bambu::package::{self, Package};
 use crate::db::{Job, PrintRecord, Printer, User};
 use crate::groups::{PrintRules, Tree, Viewer};
 use crate::printing::{self, PrintOptions};
 use crate::server::{AppState, finish_job};
-use crate::{groups_api, quota};
+use crate::{groups_api, quota, safety};
 
 type ApiError = (StatusCode, Json<Value>);
 
@@ -82,6 +84,13 @@ async fn upload_package(
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
         }
     }
+    let exempt = viewer.admin || group_id.as_deref().is_some_and(|g| viewer.can_manage(&tree, g));
+    if upload_policy(&tree, group_id.as_deref()) == "deny" && !exempt {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "sliced files can't be uploaded here: slice the model in FarmSlicer instead",
+        ));
+    }
     quota::check(&state.db, &tree, &user, group_id.as_deref())
         .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e))?;
 
@@ -89,7 +98,11 @@ async fn upload_package(
     std::fs::create_dir_all(&dir).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let staging = dir.join(format!("upload-{}.gcode.3mf", uuid::Uuid::new_v4()));
     std::fs::write(&staging, &data).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let pkg = match package::inspect(&staging) {
+    let inspect_path = staging.clone();
+    let inspected = tokio::task::spawn_blocking(move || package::inspect(&inspect_path))
+        .await
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let pkg = match inspected {
         Ok(p) => p,
         Err(e) => {
             std::fs::remove_file(&staging).ok();
@@ -115,6 +128,12 @@ async fn upload_package(
         first.weight_g.unwrap_or(0.0),
         &[],
     );
+    // Check the G-code now, so the uploader sees what it found.
+    let checker = state.clone();
+    let job_id = job.id.clone();
+    if let Ok(Err(e)) = tokio::task::spawn_blocking(move || safety::check_job(&checker, &job_id)).await {
+        eprintln!("job {}: can't check its G-code: {e}", job.id);
+    }
     println!(
         "job {}: uploaded sliced project {name} ({} bytes, {} plate(s))",
         job.id,
@@ -168,6 +187,51 @@ fn rules_for(tree: &Tree, viewer: &Viewer, job: &Job) -> Option<PrintRules> {
     })
 }
 
+/// The upload policy for jobs charged to `group` (personal: the site's).
+fn upload_policy(tree: &Tree, group: Option<&str>) -> String {
+    match group {
+        Some(g) if tree.get(g).is_some() => tree.effective(g).uploads,
+        _ => tree.site_uploads().to_string(),
+    }
+}
+
+/// Why an uploaded job's prints need approval, or can't be sent, under the
+/// upload policy (admins and the group's managers are exempt).
+fn upload_hold(tree: &Tree, viewer: &Viewer, job: &Job) -> Result<Option<String>, ApiError> {
+    if job.source != "upload" || viewer.admin || job.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)) {
+        return Ok(None);
+    }
+    match upload_policy(tree, job.group_id.as_deref()).as_str() {
+        "deny" => Err(api_err(StatusCode::FORBIDDEN, "uploaded files can't be printed here any more")),
+        "review" => Ok(Some("uploaded files need approval here".to_string())),
+        _ => Ok(None),
+    }
+}
+
+/// The job's package, every plate's G-code checked.
+async fn checked(state: &Arc<AppState>, job: &Job) -> Result<Package, ApiError> {
+    if printing::package_of(job).is_none() {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "this job has no printable package (re-slice it, or upload a .gcode.3mf)",
+        ));
+    }
+    safety::checked_package(state, job).await.map_err(|e| api_err(StatusCode::CONFLICT, e))
+}
+
+/// What the plate's G-code check says against sending it: findings that
+/// stop it outright, and findings an admin must review.
+fn check_holds(plate: &package::Plate) -> (Vec<String>, Vec<String>) {
+    use crate::gcode::Severity;
+    let Some(c) = &plate.check else {
+        return (vec!["its G-code hasn't been checked".to_string()], Vec::new());
+    };
+    let of = |s: Severity| -> Vec<String> {
+        c.findings.iter().filter(|f| f.severity == s).map(|f| f.message.clone()).collect()
+    };
+    (of(Severity::Block), of(Severity::Review))
+}
+
 fn tree_site_rules(tree: &Tree) -> PrintRules {
     // A personal job: the site default (what a group without rules inherits).
     tree.site_print_rules().clone()
@@ -211,15 +275,18 @@ async fn job_targets(
     Query(q): Query<PlateQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
-    let pkg = printing::package_of(&job).ok_or_else(|| {
-        api_err(StatusCode::CONFLICT, "this job has no printable package (re-slice it, or upload a .gcode.3mf)")
-    })?;
+    let pkg = checked(&state, &job).await?;
     let plate = pkg
         .plate(q.plate.unwrap_or(pkg.plates[0].index))
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "no such plate"))?;
-    let needs_approval = rules_for(&tree, &viewer, &job)
+    let mut needs_approval = rules_for(&tree, &viewer, &job)
         .map(|r| printing::rule_violations(&r, plate))
         .unwrap_or_default();
+    let upload = upload_hold(&tree, &viewer, &job);
+    if let Ok(Some(why)) = &upload {
+        needs_approval.push(why.clone());
+    }
+    let (blocked, needs_review) = check_holds(plate);
     let targets: Vec<Value> = state
         .db
         .list_printers()
@@ -248,6 +315,12 @@ async fn job_targets(
         "plates": pkg.plates,
         "targets": targets,
         "needs_approval": needs_approval,
+        // G-code findings (src/gcode/): `blocked` can't be sent at all,
+        // `needs_review` waits for an admin (who acknowledges it instead).
+        "blocked": blocked,
+        "needs_review": needs_review,
+        "uploads_denied": upload.err().map(|(_, e)| e.0["error"].clone()),
+        "gcode_check": plate.check,
         "estimated_cost": prices.plate(plate),
         "currency": prices.currency,
     })))
@@ -265,6 +338,10 @@ struct SendRequest {
     /// Send even though the mapping doesn't match what's loaded.
     #[serde(default)]
     ignore_mapping_problems: bool,
+    /// Admins: send even though the G-code check wants a review (recorded
+    /// on the print).
+    #[serde(default)]
+    acknowledge_review: bool,
 }
 
 /// `POST /api/jobs/{id}/print`: upload the job's package to a printer and
@@ -276,9 +353,7 @@ async fn send_job(
     Json(body): Json<SendRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
-    let pkg = printing::package_of(&job).ok_or_else(|| {
-        api_err(StatusCode::CONFLICT, "this job has no printable package (re-slice it, or upload a .gcode.3mf)")
-    })?;
+    let pkg = checked(&state, &job).await?;
     let package_path = job
         .package_path
         .clone()
@@ -296,10 +371,38 @@ async fn send_job(
     if let Some(why) = printing::incompatibility(&state.profile_store, &printer, &plate) {
         return Err(api_err(StatusCode::CONFLICT, format!("can't print here: {why}")));
     }
+    let (blocked, review) = check_holds(&plate);
+    if !blocked.is_empty() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"error": format!("this plate can't be sent: {}", blocked.join("; ")), "blocked": blocked})),
+        ));
+    }
+    if viewer.admin && !review.is_empty() && !body.acknowledge_review {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": format!("the G-code needs review: {}", review.join("; ")),
+                "needs_review": review,
+            })),
+        ));
+    }
     let violations = rules_for(&tree, &viewer, &job)
         .map(|r| printing::rule_violations(&r, &plate))
         .unwrap_or_default();
-    let reason = (!violations.is_empty()).then(|| violations.join("; "));
+    let mut reasons = Vec::new();
+    if !review.is_empty() {
+        reasons.push(format!("G-code review: {}", review.join("; ")));
+    }
+    reasons.extend(violations);
+    if let Some(why) = upload_hold(&tree, &viewer, &job)? {
+        reasons.push(why);
+    }
+    let safety_review = !review.is_empty();
+    // An admin who acknowledged the review sends it now, on the record.
+    let decided_by = (viewer.admin && safety_review).then(|| user.username.clone());
+    let reason = (!reasons.is_empty()).then(|| reasons.join("; "));
+    let waits = reason.is_some() && decided_by.is_none();
 
     // A request that waits for approval doesn't need the printer now: the
     // approver's send checks availability and the trays again.
@@ -308,7 +411,7 @@ async fn send_job(
         .ams_mapping
         .clone()
         .unwrap_or_else(|| printing::suggest_mapping(&plate, status.as_ref()));
-    if reason.is_none() {
+    if !waits {
         if let Some(why) = busy_reason(&state, &printer) {
             return Err(api_err(StatusCode::CONFLICT, why));
         }
@@ -338,13 +441,22 @@ async fn send_job(
         &serde_json::to_string(&mapping).expect("mappings serialize"),
         &serde_json::to_string(&body.options).expect("options serialize"),
         reason.as_deref(),
+        safety_review,
+        decided_by.as_deref(),
     );
-    if let Some(reason) = reason {
+    if waits {
         println!(
-            "Print {}: {} asks to print {} on {}; needs approval: {reason}",
-            print.id, user.username, job.model_name, printer.name
+            "Print {}: {} asks to print {} on {}; needs approval: {}",
+            print.id,
+            user.username,
+            job.model_name,
+            printer.name,
+            reason.as_deref().unwrap_or("")
         );
         return Ok((StatusCode::ACCEPTED, Json(json!(print))));
+    }
+    if decided_by.is_some() {
+        println!("Print {}: {} sends it despite the G-code review: {}", print.id, user.username, review.join("; "));
     }
     println!(
         "Print {}: {} sends {} (plate {}) to {}, AMS mapping {:?}",
@@ -366,9 +478,10 @@ fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRe
             .is_some_and(|job| viewer.can_see_job(tree, &job))
 }
 
-/// Admins and the managers of the print's group approve requests.
+/// Admins and the managers of the print's group approve requests; only
+/// admins approve G-code that needs review (it's the farm's hardware).
 fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
-    viewer.admin || print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+    viewer.admin || (!print.safety_review && print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)))
 }
 
 fn can_control_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
@@ -475,14 +588,21 @@ async fn approve_print(
         return Err(api_err(StatusCode::CONFLICT, format!("the print is {}", print.status)));
     }
     if !can_approve_print(&tree, &viewer, &print) {
-        return Err(api_err(StatusCode::FORBIDDEN, "only admins and the group's managers approve prints"));
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            if print.safety_review {
+                "only an admin can approve a print whose G-code needs review"
+            } else {
+                "only admins and the group's managers approve prints"
+            },
+        ));
     }
     let job = print
         .job_id
         .as_deref()
         .and_then(|j| state.db.get_job(j))
         .ok_or_else(|| api_err(StatusCode::CONFLICT, "the job is gone"))?;
-    let pkg = printing::package_of(&job).ok_or_else(|| api_err(StatusCode::CONFLICT, "the job has no package"))?;
+    let pkg = checked(&state, &job).await?;
     let package_path = job
         .package_path
         .clone()
@@ -492,6 +612,17 @@ async fn approve_print(
         .plate(print.plate as u32)
         .ok_or_else(|| api_err(StatusCode::CONFLICT, "the plate is gone"))?
         .clone();
+    // Checked again: the checker, its data or the limits may have changed.
+    let (blocked, review) = check_holds(&plate);
+    if !blocked.is_empty() {
+        return Err(api_err(StatusCode::CONFLICT, format!("this plate can't be sent: {}", blocked.join("; "))));
+    }
+    if !review.is_empty() && !viewer.admin {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            format!("the G-code now needs an admin's review: {}", review.join("; ")),
+        ));
+    }
     let printer = print
         .printer_id
         .as_deref()

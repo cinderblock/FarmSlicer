@@ -851,7 +851,8 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
     options
 }
 
-/// Read a freshly written package and attach it to the job (sendable now).
+/// Read a freshly written package, attach it to the job and check its
+/// G-code (src/safety.rs). Blocking: the check reads all of the G-code.
 pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str) {
     match crate::bambu::package::inspect(std::path::Path::new(path)) {
         Ok(pkg) => {
@@ -860,6 +861,9 @@ pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str) {
                 .db
                 .set_job_package(job_id, path, &serde_json::to_string(&pkg).expect("packages serialize"));
             state.db.add_job_stored_bytes(job_id, size);
+            if let Err(e) = crate::safety::check_job(state, job_id) {
+                eprintln!("job {job_id}: can't check its G-code: {e}");
+            }
         }
         Err(e) => eprintln!("job {job_id}: the sliced project {path} is unreadable: {e}"),
     }
@@ -1077,13 +1081,23 @@ async fn upload_job_result(
     }
 
     finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
-    if let Some(pkg) = package.filter(|p| !p.is_empty()) {
-        let path = package_output_path(&state, &id);
-        match std::fs::write(&path, &pkg) {
-            Ok(()) => record_package(&state, &id, &path),
-            Err(e) => eprintln!("job {id}: can't store the sliced project: {e}"),
+    // The client's numbers and G-code are whatever it sent: check them
+    // like an upload's (off the async runtime; it reads every line).
+    let package = package.filter(|p| !p.is_empty());
+    let checker = state.clone();
+    let job_id = id.clone();
+    tokio::task::spawn_blocking(move || match package {
+        Some(pkg) => {
+            let path = package_output_path(&checker, &job_id);
+            match std::fs::write(&path, &pkg) {
+                Ok(()) => record_package(&checker, &job_id, &path),
+                Err(e) => eprintln!("job {job_id}: can't store the sliced project: {e}"),
+            }
         }
-    }
+        None => crate::safety::settle_gcode_stats(&checker, &job_id, &output_path),
+    })
+    .await
+    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
     println!(
         "job {id}: browser slice uploaded ({} bytes, {:.0} s, {:.1} g)",
         gcode.len(),

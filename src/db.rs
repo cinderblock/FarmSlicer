@@ -104,6 +104,8 @@ pub struct PrintRecord {
     /// Why it needs approval (pending_approval), and who decided.
     pub approval_reason: Option<String>,
     pub decided_by: Option<String>,
+    /// Its G-code needs review (src/gcode/): only an admin may approve it.
+    pub safety_review: bool,
     /// pending_approval | uploading | starting | printing | paused | finished
     /// | failed | cancelled | rejected
     pub status: String,
@@ -450,6 +452,9 @@ impl Db {
             if conn.prepare(&format!("SELECT {col} FROM prints LIMIT 0")).is_err() {
                 conn.execute_batch(&format!("ALTER TABLE prints ADD COLUMN {col} TEXT;")).ok();
             }
+        }
+        if conn.prepare("SELECT safety_review FROM prints LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE prints ADD COLUMN safety_review INTEGER NOT NULL DEFAULT 0;").ok();
         }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
@@ -1182,6 +1187,24 @@ impl Db {
         .unwrap();
     }
 
+    /// Print time and filament to count for the job (quotas, cost), as the
+    /// G-code check settled them.
+    pub fn set_job_stats(&self, id: &str, print_time_sec: f64, filament_used_g: f64) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET print_time_sec = ?2, filament_used_g = ?3, updated_at = datetime('now') WHERE id = ?1",
+            params![id, print_time_sec, filament_used_g],
+        )
+        .unwrap();
+    }
+
+    /// Jobs that have a package (for re-checking their G-code).
+    pub fn jobs_with_packages(&self) -> Vec<String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM jobs WHERE package_json IS NOT NULL ORDER BY created_at DESC").unwrap();
+        stmt.query_map([], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect()
+    }
+
     pub fn set_job_package(&self, id: &str, package_path: &str, package_json: &str) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -1250,7 +1273,7 @@ impl Db {
         "SELECT p.id, p.job_id, p.plate, p.printer_id, p.printer_name, p.user_id, u.username,
                 p.group_id, p.file_name, p.name, p.ams_mapping, p.status, p.progress, p.error,
                 p.created_at, p.started_at, p.finished_at, p.updated_at,
-                p.options, p.approval_reason, p.decided_by
+                p.options, p.approval_reason, p.decided_by, p.safety_review
          FROM prints p LEFT JOIN users u ON p.user_id = u.id";
 
     fn print_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintRecord> {
@@ -1276,11 +1299,13 @@ impl Db {
             options: row.get(18)?,
             approval_reason: row.get(19)?,
             decided_by: row.get(20)?,
+            safety_review: row.get(21)?,
         })
     }
 
     /// A new print: `uploading`, or `pending_approval` when
-    /// `approval_reason` is given.
+    /// `approval_reason` is given without `decided_by` (an admin who sent it
+    /// anyway records both).
     #[allow(clippy::too_many_arguments)]
     pub fn create_print(
         &self,
@@ -1295,14 +1320,16 @@ impl Db {
         ams_mapping: &str,
         options: &str,
         approval_reason: Option<&str>,
+        safety_review: bool,
+        decided_by: Option<&str>,
     ) -> PrintRecord {
-        let status = if approval_reason.is_some() { "pending_approval" } else { "uploading" };
+        let status = if approval_reason.is_some() && decided_by.is_none() { "pending_approval" } else { "uploading" };
         {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO prints (id, job_id, plate, printer_id, printer_name, user_id, group_id, file_name, name, ams_mapping, options, approval_reason, status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![id, job_id, plate, printer.id, printer.name, user_id, group_id, file_name, name, ams_mapping, options, approval_reason, status],
+                "INSERT INTO prints (id, job_id, plate, printer_id, printer_name, user_id, group_id, file_name, name, ams_mapping, options, approval_reason, status, safety_review, decided_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                params![id, job_id, plate, printer.id, printer.name, user_id, group_id, file_name, name, ams_mapping, options, approval_reason, status, safety_review, decided_by],
             )
             .unwrap();
         }
