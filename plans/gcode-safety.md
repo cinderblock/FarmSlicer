@@ -109,8 +109,14 @@ through the approval flow.
    send/approve flow; recomputed stats in rules/quotas/cost. ✅ `40148f5`
 7. Settings: site safety limits; per-group upload policy (API). ✅ `40148f5`
 8. Web UI: findings on Jobs / Send dialog / approvals; settings (limits,
-   uploads, group uploads); profile editor errors; guide. ← **current**
-9. E2E tests with crafted packages; README / CLAUDE.md.
+   uploads, group uploads); profile editor errors; guide. ✅ `46eb4a0`
+9. E2E tests with crafted packages; README / CLAUDE.md. ✅ `40148f5`, `4cbcf10`
+10. Verified on a real image (native libslic3r) built on buildhost: X1C,
+    A1 mini and H2D server slices checked clean; a Bambu Studio upload clean
+    with its own time kept; an admin's `machine_start_gcode: M104 S300`
+    override caught as review. ✅
+11. Push to origin (CI builds the image) and deploy via the ops repo. ←
+    **waiting on the user**
 
 ## Findings / gotchas
 
@@ -159,13 +165,30 @@ through the approval flow.
 - [x] Integration (`40148f5`)
 - [x] Settings API (`40148f5`)
 - [x] E2E: `tests/gcode-safety-e2e.mjs` (44 checks), all suites pass
-- [ ] Web UI
-- [ ] Docs (README API, CLAUDE.md structure, Guide)
-- [ ] Clean up the corpus container on buildhost (`farmslicer-gsafety`)
+- [x] Web UI (`46eb4a0`), screenshots checked with headless Playwright
+- [x] Docs (README API, CLAUDE.md structure, Guide) (`4cbcf10`)
+- [x] Real-image verification on buildhost; containers, image and Docker
+      context removed afterwards
+- [ ] Push to origin (needs the user's go-ahead)
+- [ ] Deploy: pin the new image digest in the ops repo (needs the user's
+      per-change authorization)
+
+Left on buildhost on purpose (for regenerating data / re-running the
+corpus): `~/farmslicer-gcode-safety` (sources), `-target` (3.1 GB cargo
+cache), `-bs` (BambuStudio profiles of nine releases), `-corpus` (122
+FarmSlicer packages) + `-corpus.json`, `-samples` (the maintainer's three
+Bambu Studio exports and two FarmSlicer packages). Delete when done.
 
 ## Open questions for the user
 
-(None yet.)
+1. Push the 10 commits to origin? (CI then builds the image; nothing deploys
+   by itself.) Recommendation: yes.
+2. Deploy to production? That's a pin change in the ops repo and needs your
+   per-change yes. Recommendation: after CI, deploy; existing jobs get
+   checked in the background at startup.
+3. Defaults: max single pause 15 min, max heated idle 45 min, nozzle/plate
+   margin 10 °C, reach margin 5 mm, uploads allowed. Recommendation: keep,
+   adjust in Settings after a week of real prints.
 
 ## Things not to do
 
