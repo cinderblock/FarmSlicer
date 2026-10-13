@@ -491,7 +491,6 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
     let state = status.state.as_deref().unwrap_or("");
     let started = matches!(print.status.as_str(), "printing" | "paused");
     match match_print(print, status) {
-        Match::Ours => {}
         // Until the printer picks our file up it still reports the previous
         // job, which may be unnamed too: an unnamed report only starts our
         // print (it is the one just sent), it can't finish a print not yet
@@ -499,7 +498,17 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
         Match::Unnamed if !started => {
             return matches!(state, "PREPARE" | "RUNNING").then(|| ("printing", status.percent, None));
         }
-        Match::Unnamed => {}
+        // Real printers switch subtask_name to the new job a moment before
+        // gcode_state leaves the previous job's FINISH/FAILED: a print not
+        // yet seen running can only start.
+        Match::Ours if !started => {
+            return match state {
+                "PREPARE" | "RUNNING" | "SLICING" => Some(("printing", status.percent, None)),
+                "PAUSE" => Some(("paused", status.percent, None)),
+                _ => None,
+            };
+        }
+        Match::Ours | Match::Unnamed => {}
         Match::Other => {
             if started && matches!(state, "PREPARE" | "RUNNING" | "PAUSE") {
                 return Some(("failed", None, Some("another print replaced it on the printer".to_string())));
@@ -719,6 +728,9 @@ mod tests {
         assert_eq!(task_name(&starting), "Bracket-1a2b3c4d");
         // The previous job is still on show: wait.
         assert_eq!(transition(&starting, &report("FINISH", Some("Rail Section"), None)), None);
+        // Seen on an X1C: our name with the previous job's FINISH, for a second.
+        assert_eq!(transition(&starting, &report("FINISH", ours, None)), None);
+        assert_eq!(transition(&starting, &report("FAILED", ours, Some(PRINT_CANCELLED))), None);
         assert_eq!(transition(&starting, &report("RUNNING", ours, None)).unwrap().0, "printing");
         let printing = record("printing");
         assert_eq!(transition(&printing, &report("PAUSE", ours, None)).unwrap().0, "paused");
