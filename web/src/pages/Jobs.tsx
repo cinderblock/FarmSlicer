@@ -43,7 +43,7 @@ const SOURCE_LABELS: Record<Job["source"], [string, string]> = {
     "Browser",
     "Sliced by the WebAssembly engine in the user's browser; the model stays there unless the job's group keeps models.",
   ],
-  upload: ["Uploaded", "Sliced elsewhere (Bambu Studio, OrcaSlicer) and uploaded as a .gcode.3mf."],
+  upload: ["Uploaded", "Sliced elsewhere and uploaded (a .gcode.3mf for Bambu printers, G-code for others)."],
 };
 
 function parseWarnings(raw: string | null): string[] {
@@ -127,7 +127,7 @@ export default function JobsPage() {
           style={{ width: "auto" }}
           disabled={uploading}
           onClick={() => fileInput.current?.click()}
-          title="A plate sliced in Bambu Studio or OrcaSlicer, exported as .gcode.3mf"
+          title="A plate sliced elsewhere: a .gcode.3mf from Bambu Studio or OrcaSlicer for Bambu printers, a .gcode file for others"
         >
           {uploading ? "Uploading…" : "Upload a sliced file"}
         </button>
@@ -144,7 +144,7 @@ export default function JobsPage() {
         <input
           ref={fileInput}
           type="file"
-          accept=".3mf"
+          accept=".3mf,.gcode,.gco,.g"
           hidden
           onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
         />

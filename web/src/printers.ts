@@ -5,15 +5,37 @@ import { useEffect, useState } from "react";
 export interface Capabilities {
   pause: boolean;
   stop: boolean;
-  /** "levels": Bambu's four speed levels. */
-  speed: "levels" | null;
+  /** "levels": Bambu's four speed levels; "percent": a speed factor. */
+  speed: "levels" | "percent" | null;
   heat: boolean;
   camera: boolean;
   filament_mapping: boolean;
   print_options: (keyof PrintOptions)[];
-  package: "bambu3mf";
+  /** What the printer takes: a sliced Bambu project or plain G-code. */
+  package: "bambu3mf" | "gcode";
   outside_pictures: boolean;
 }
+
+/** One connection setting on the printer form (src/printer/mod.rs `Field`). */
+export interface ConnectionField {
+  key: "address" | "serial_number" | "access_code";
+  label: string;
+  placeholder: string;
+  required: boolean;
+  /** Write-only: never sent back, only whether it's set. */
+  secret: boolean;
+}
+
+/** A protocol FarmSlicer speaks (GET /api/printer-protocols). */
+export interface Protocol {
+  id: string;
+  label: string;
+  capabilities: Capabilities;
+  connection: { fields: ConnectionField[]; hint: string };
+}
+
+/** Materials to pre-heat for on printers that don't report what's loaded. */
+export const PREHEAT_MATERIALS = ["PLA", "PETG", "ABS", "ASA", "TPU", "PA", "PC"];
 
 export interface Printer {
   id: string;
@@ -28,6 +50,8 @@ export interface Printer {
   /** Admins only. */
   serial_number: string | null;
   access_code_set: boolean;
+  /** Its connection settings are complete: FarmSlicer is linked to it. */
+  configured: boolean;
   current_job: string | null;
   area: string;
   /** Installed build plate (libslic3r `curr_bed_type` name); "" = unknown. */
@@ -213,6 +237,8 @@ export interface FilamentUse {
 export interface Plate {
   index: number;
   printer_model_id: string | null;
+  /** The model it was sliced for, as the slicer names it (plain G-code). */
+  printer_model: string | null;
   nozzle_diameters: string | null;
   print_time_sec: number | null;
   weight_g: number | null;
@@ -226,6 +252,8 @@ export interface Target {
   name: string;
   machine_profile: string;
   nozzle_diameter: string;
+  /** null: a protocol FarmSlicer doesn't speak. */
+  capabilities: Capabilities | null;
   /** Why the plate can't print here; null = it fits. */
   incompatible: string | null;
   /** Why the printer can't take it now; null = free. */

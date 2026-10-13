@@ -147,7 +147,13 @@ pub async fn camera(printer: &Printer) -> Result<CameraKind, String> {
         .send()
         .await
         .map_err(|e| format!("can't ask Moonraker for its webcams: {}", http::explain(&e)))?;
-    let list = body(r).await.map_err(|e| format!("can't ask Moonraker for its webcams: {e}"))?;
+    let list = match body(r).await {
+        Ok(list) => list,
+        Err(e) if e.starts_with("HTTP 404") => {
+            return Err("this Moonraker doesn't list webcams (an older or vendor version?)".to_string());
+        }
+        Err(e) => return Err(format!("can't ask Moonraker for its webcams: {e}")),
+    };
     let webcams = list["webcams"].as_array().cloned().unwrap_or_default();
     for w in webcams.iter().filter(|w| w["enabled"].as_bool() != Some(false)) {
         let service = w["service"].as_str().unwrap_or("");

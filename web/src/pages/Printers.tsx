@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
 import { localDateTime, useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
-import { BED_TYPES, useActivePrints, usePrinterStatuses, type Printer } from "../printers";
+import { BED_TYPES, useActivePrints, usePrinterStatuses, type Printer, type Protocol } from "../printers";
 
 interface MachineModel {
   name: string;
@@ -72,6 +72,7 @@ export default function PrintersPage() {
   const printersQuery = useJson<Printer[]>("/api/printers", rev);
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
   const modelsData = useJson<MachineModel[]>("/api/profiles/machine-models").data;
+  const protocols = useJson<Protocol[]>("/api/printer-protocols").data ?? [];
   const models = useMemo(() => modelsData ?? [], [modelsData]);
   const statuses = usePrinterStatuses();
   const activePrints = useActivePrints();
@@ -118,8 +119,8 @@ export default function PrintersPage() {
         vendor,
         model: "",
         nozzle: "",
-        protocol:
-          code === "BBL" ? "bambu" : code ? (d.protocol === "bambu" || !d.protocol ? "octoprint" : d.protocol) : d.protocol,
+        // Bambu printers speak only Bambu's protocol; for the rest the admin picks.
+        protocol: code === "BBL" ? "bambu" : code && d.protocol === "bambu" ? "" : d.protocol,
       },
     );
   };
@@ -213,7 +214,13 @@ export default function PrintersPage() {
     });
   };
 
-  const isBambuProtocol = draft?.protocol === "bambu";
+  const protocol = protocols.find((p) => p.id === draft?.protocol);
+  // Bambu's protocol is for Bambu printers only; other makes can't use it.
+  const protocolChoices = protocols.filter((p) => p.id !== "bambu" || isBambuVendor || draft?.protocol === "bambu");
+  const fieldValue = (key: string) =>
+    key === "address" ? draft?.address : key === "serial_number" ? draft?.serial : draft?.accessCode;
+  const setField = (key: string, value: string) =>
+    set(key === "address" ? { address: value } : key === "serial_number" ? { serial: value } : { accessCode: value });
 
   // Discovered printers not in the farm yet, and farm printers whose address
   // changed (DHCP) since they were added.
@@ -253,7 +260,7 @@ export default function PrintersPage() {
                 type="text"
                 value={draft.name}
                 onChange={(e) => set({ name: e.target.value })}
-                placeholder="Bambu X1C #1"
+                placeholder="X1C #1"
               />
             </label>
 
@@ -304,12 +311,16 @@ export default function PrintersPage() {
               Protocol
               <select value={draft.protocol} onChange={(e) => set({ protocol: e.target.value })}>
                 {!draft.protocol && <option value="">Select protocol...</option>}
-                {(isBambuVendor || draft.protocol === "bambu") && (
-                  <option value="bambu">Bambu Lab (LAN)</option>
+                {protocolChoices.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+                {draft.protocol && !protocol && (
+                  <option value={draft.protocol}>{draft.protocol} (not supported)</option>
                 )}
-                <option value="octoprint">OctoPrint</option>
-                <option value="klipper">Klipper / Moonraker</option>
               </select>
+              <span className="hint">How FarmSlicer talks to the printer.</span>
             </label>
 
             <label>
@@ -341,45 +352,19 @@ export default function PrintersPage() {
               </datalist>
             </label>
 
-            <label>
-              IP Address
-              <input
-                type="text"
-                value={draft.address}
-                onChange={(e) => set({ address: e.target.value })}
-                placeholder="192.168.1.100"
-              />
-            </label>
-
-            {isBambuProtocol && (
-              <>
-                <label>
-                  Serial Number
-                  <input
-                    type="text"
-                    value={draft.serial}
-                    onChange={(e) => set({ serial: e.target.value })}
-                    placeholder="01P00A000000000"
-                  />
-                </label>
-                <label>
-                  Access Code
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={draft.accessCode}
-                    onChange={(e) => set({ accessCode: e.target.value })}
-                    placeholder={
-                      draft.accessCodeSet ? "Set (leave empty to keep it)" : "8-character code from the printer's screen"
-                    }
-                  />
-                </label>
-                <p className="hint">
-                  The access code is on the printer's screen, in its network / LAN-only settings.
-                  LAN mode and Developer Mode must be on for FarmSlicer to connect.
-                </p>
-              </>
-            )}
+            {protocol?.connection.fields.map((f) => (
+              <label key={f.key}>
+                {f.required ? f.label : `${f.label} (optional)`}
+                <input
+                  type={f.secret ? "password" : "text"}
+                  autoComplete="off"
+                  value={fieldValue(f.key) ?? ""}
+                  onChange={(e) => setField(f.key, e.target.value)}
+                  placeholder={f.secret && draft.accessCodeSet ? "Set (leave empty to keep it)" : f.placeholder}
+                />
+              </label>
+            ))}
+            {protocol && <p className="hint">{protocol.connection.hint}</p>}
 
             {error && <p className="printer-error">{error}</p>}
             <button className="btn-primary" onClick={handleSave} style={{ marginTop: "0.5rem" }}>

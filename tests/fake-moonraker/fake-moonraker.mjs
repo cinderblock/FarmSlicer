@@ -330,6 +330,7 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
         for (const [p, d] of Object.entries(thumbFiles)) thumbs.set(p, d);
         return json(res, 201, { result: { item: { path, root: "gcodes", size: form.file.content.length, permissions: "rw" }, print_started: false, print_queued: false, action: "create_file" } });
       }
+      if (url.pathname === "/server/webcams/list") return json(res, 200, { result: { webcams: [] } });
       if (url.pathname === "/server/files/metadata") {
         const m = metadata.get(url.searchParams.get("filename"));
         return m ? json(res, 200, { result: m }) : json(res, 404, { error: { code: 404, message: "Metadata not available" } });

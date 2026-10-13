@@ -13,6 +13,7 @@ import {
   type PrinterStatus,
   loadedTrays,
   plateLabel,
+  PREHEAT_MATERIALS,
   type PrintRecord,
   type Tray,
 } from "../printers";
@@ -90,9 +91,8 @@ export default function PrinterCard({
         await apiJson(`/api/printers/${printer.id}/cooldown`, "POST", {});
         setNote("Cooling down.");
       } else {
-        const r = await apiJson<{ nozzle: number; bed: number }>(`/api/printers/${printer.id}/preheat`, "POST", {
-          slot: Number(slot),
-        });
+        const body = slot.startsWith("material:") ? { material: slot.slice(9) } : { slot: Number(slot) };
+        const r = await apiJson<{ nozzle: number; bed: number }>(`/api/printers/${printer.id}/preheat`, "POST", body);
         setNote(`Heating: nozzle ${r.nozzle} °C, bed ${r.bed} °C.`);
       }
     } catch (e) {
@@ -100,7 +100,7 @@ export default function PrinterCard({
     }
     setHeatSlot("");
   };
-  const configured = !!printer.address && printer.access_code_set;
+  const configured = printer.configured;
   const busy = isBusy(status);
 
   return (
@@ -153,7 +153,7 @@ export default function PrinterCard({
               <div className="hint">
                 {[
                   status.percent != null ? `${status.percent}%` : null,
-                  status.total_layers ? `layer ${status.layer ?? 0}/${status.total_layers}` : null,
+                  status.total_layers && status.layer != null ? `layer ${status.layer}/${status.total_layers}` : null,
                   status.remaining_minutes != null
                     ? `${formatMinutes(status.remaining_minutes)} left`
                     : null,
@@ -239,13 +239,22 @@ export default function PrinterCard({
         caps?.heat &&
         !busy &&
         !print &&
-        (loadedTrays(status).length > 0 || status.nozzles.some((n) => n.target > 0) || (status.bed?.target ?? 0) > 0) && (
+        (loadedTrays(status).length > 0 ||
+          !caps.filament_mapping ||
+          status.nozzles.some((n) => n.target > 0) ||
+          (status.bed?.target ?? 0) > 0) && (
         <label className="preheat">
           <select value={heatSlot} onChange={(e) => heat(e.target.value)}>
             <option value="">Pre-heat for…</option>
             {loadedTrays(status).map((t) => (
                 <option key={t.slot} value={t.slot}>
                   {t.name ?? t.material} ({t.slot >= 254 ? "external" : `slot ${t.slot + 1}`})
+                </option>
+              ))}
+            {!caps.filament_mapping &&
+              PREHEAT_MATERIALS.map((m) => (
+                <option key={m} value={`material:${m}`}>
+                  {m}
                 </option>
               ))}
             {(status.nozzles.some((n) => n.target > 0) || (status.bed?.target ?? 0) > 0) && (

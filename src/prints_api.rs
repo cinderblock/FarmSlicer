@@ -239,6 +239,7 @@ async fn job_targets(
                 "name": p.name,
                 "machine_profile": p.machine_profile,
                 "nozzle_diameter": p.nozzle_diameter,
+                "capabilities": crate::printer::protocol_of(p).map(|proto| proto.capabilities()),
                 "incompatible": printing::incompatibility(&state.profile_store, p, pkg.format, plate),
                 "busy": busy_reason(&state, p),
                 "ams_mapping": mapping,

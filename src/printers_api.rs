@@ -31,7 +31,7 @@ fn not_found() -> ApiError {
     (StatusCode::NOT_FOUND, Json(json!({"error": "no such printer"})))
 }
 
-fn view(p: &Printer, user: &User) -> Value {
+fn view(state: &AppState, p: &Printer, user: &User) -> Value {
     let admin = auth::is_admin(user);
     json!({
         "id": p.id,
@@ -44,6 +44,8 @@ fn view(p: &Printer, user: &User) -> Value {
         "address": p.address,
         "serial_number": if admin { Some(&p.serial_number) } else { None },
         "access_code_set": !p.access_code.is_empty(),
+        // Its connection settings are complete (FarmSlicer is linked to it).
+        "configured": state.printers.handle(&p.id).is_some(),
         "current_job": p.current_job,
         "area": p.area,
         "plate_type": p.plate_type,
@@ -59,7 +61,7 @@ async fn list_printers(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
 ) -> Json<Value> {
-    let printers: Vec<Value> = state.db.list_printers().iter().map(|p| view(p, &user)).collect();
+    let printers: Vec<Value> = state.db.list_printers().iter().map(|p| view(&state, p, &user)).collect();
     Json(json!(printers))
 }
 
@@ -110,7 +112,7 @@ async fn create_printer(
         body.plate_type.as_deref().unwrap_or("").trim(),
     );
     resync(&state);
-    Ok((StatusCode::CREATED, Json(view(&printer, &user))))
+    Ok((StatusCode::CREATED, Json(view(&state, &printer, &user))))
 }
 
 /// Fields left out stay as they are; `access_code: ""` clears the code.
@@ -155,7 +157,7 @@ async fn update_printer(
         )
         .ok_or_else(not_found)?;
     resync(&state);
-    Ok(Json(view(&printer, &user)))
+    Ok(Json(view(&state, &printer, &user)))
 }
 
 async fn delete_printer(
@@ -330,7 +332,7 @@ async fn serve_camera(state: Arc<AppState>, source: CameraSource, mut socket: We
 async fn list_protocols() -> Json<Value> {
     Json(json!(Protocol::ALL
         .iter()
-        .map(|p| json!({"id": p.as_str(), "label": p.label(), "capabilities": p.capabilities()}))
+        .map(|p| json!({"id": p.as_str(), "label": p.label(), "capabilities": p.capabilities(), "connection": p.connection()}))
         .collect::<Vec<_>>()))
 }
 

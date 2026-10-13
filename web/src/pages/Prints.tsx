@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiJson } from "../auth";
 import { errorText, localDateTime, useJson } from "../api";
 import PrintControls from "../components/PrintControls";
-import { ACTIVE_PRINT, formatCost, type Prices, type PrintRecord } from "../printers";
+import { ACTIVE_PRINT, formatCost, type Prices, type Printer, type PrintRecord } from "../printers";
 
 const STATUS_LABELS: Record<PrintRecord["status"], string> = {
   pending_approval: "Waiting for approval",
@@ -21,6 +21,8 @@ export default function PrintsPage() {
   const [rev, setRev] = useState(0);
   const prints = useJson<PrintRecord[]>("/api/prints?limit=200", rev).data;
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
+  const printers = useJson<Printer[]>("/api/printers").data;
+  const capabilitiesOf = (p: PrintRecord) => printers?.find((x) => x.id === p.printer_id)?.capabilities;
   const [error, setError] = useState("");
 
   // Poll while anything is in flight or waiting.
@@ -117,7 +119,7 @@ export default function PrintsPage() {
                 <td>{localDateTime(p.finished_at)}</td>
                 <td>
                   {p.can_control && ["printing", "paused"].includes(p.status) && (
-                    <PrintControls print={p} onChange={() => setRev((r) => r + 1)} />
+                    <PrintControls print={p} capabilities={capabilitiesOf(p)} onChange={() => setRev((r) => r + 1)} />
                   )}
                   {p.status === "pending_approval" && (
                     <span className="print-controls">

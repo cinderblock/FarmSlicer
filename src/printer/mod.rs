@@ -45,6 +45,31 @@ impl Protocol {
         }
     }
 
+    /// What the admin fills in to connect, for the printer form.
+    pub fn connection(self) -> Connection {
+        match self {
+            Protocol::Bambu => Connection {
+                fields: vec![
+                    Field::new("address", "IP address", "192.168.1.100"),
+                    Field::new("serial_number", "Serial number", "01P00A000000000"),
+                    Field::new("access_code", "Access code", "8-character code from the printer's screen").secret(),
+                ],
+                hint: "The access code is on the printer's screen, in its network / LAN-only settings. \
+                       LAN mode and Developer Mode must be on for FarmSlicer to connect.",
+            },
+            Protocol::Moonraker => Connection {
+                fields: vec![
+                    Field::new("address", "Address", "192.168.1.50, voron.local:7125 or http://voron.local"),
+                    Field::new("access_code", "API key", "Only if the printer doesn't trust this server").secret().optional(),
+                ],
+                hint: "Moonraker's address: a host (port 7125 is assumed), host:port, or the URL of the \
+                       printer's web page (Mainsail/Fluidd, port 80). An API key is needed only when \
+                       moonraker.conf doesn't list this server under trusted_clients; Mainsail shows it \
+                       under Settings → General.",
+            },
+        }
+    }
+
     pub fn capabilities(self) -> Capabilities {
         match self {
             Protocol::Bambu => Capabilities {
@@ -82,6 +107,40 @@ impl Protocol {
 /// The printer's protocol, if FarmSlicer speaks it.
 pub fn protocol_of(p: &crate::db::Printer) -> Option<Protocol> {
     Protocol::parse(&p.protocol)
+}
+
+/// One connection setting on the printer form. `key` names the printer
+/// field it's stored in (`address`, `serial_number`, `access_code`).
+#[derive(Debug, Clone, Serialize)]
+pub struct Field {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub placeholder: &'static str,
+    pub required: bool,
+    /// Write-only, like the Bambu access code: never sent back.
+    pub secret: bool,
+}
+
+impl Field {
+    fn new(key: &'static str, label: &'static str, placeholder: &'static str) -> Self {
+        Self { key, label, placeholder, required: true, secret: false }
+    }
+
+    fn secret(mut self) -> Self {
+        self.secret = true;
+        self
+    }
+
+    fn optional(mut self) -> Self {
+        self.required = false;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Connection {
+    pub fields: Vec<Field>,
+    pub hint: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

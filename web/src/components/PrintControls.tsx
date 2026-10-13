@@ -23,6 +23,7 @@ export default function PrintControls({
 }) {
   const state = status?.state;
   const speed = status?.speed_level;
+  const percent = status?.speed_percent ?? 100;
   const canPause = capabilities?.pause ?? true;
   const canStop = capabilities?.stop ?? true;
   const speedControl = capabilities === undefined ? "levels" : capabilities?.speed;
@@ -31,11 +32,11 @@ export default function PrintControls({
   const endpoint = url ?? (print ? `/api/prints/${print.id}/control` : "");
   const paused = state ? state === "PAUSE" : print?.status === "paused";
 
-  const setSpeed = async (level: number) => {
+  const setSpeed = async (change: { level: number } | { percent: number }) => {
     setBusy("speed");
     setError("");
     try {
-      await apiJson(endpoint, "POST", { action: "speed", level });
+      await apiJson(endpoint, "POST", { action: "speed", ...change });
       onChange?.();
     } catch (e) {
       setError(errorText(e));
@@ -81,13 +82,30 @@ export default function PrintControls({
           className="speed-select"
           value={speed ?? 2}
           disabled={!!busy}
-          onChange={(e) => setSpeed(Number(e.target.value))}
+          onChange={(e) => setSpeed({ level: Number(e.target.value) })}
           title="Print speed"
         >
           <option value={1}>Silent</option>
           <option value={2}>Standard</option>
           <option value={3}>Sport</option>
           <option value={4}>Ludicrous</option>
+        </select>
+      )}
+      {speedControl === "percent" && (
+        <select
+          className="speed-select"
+          value={percent}
+          disabled={!!busy}
+          onChange={(e) => setSpeed({ percent: Number(e.target.value) })}
+          title="Print speed (speed factor)"
+        >
+          {[...new Set([50, 75, 100, 125, 150, 200, percent])]
+            .sort((a, b) => a - b)
+            .map((p) => (
+              <option key={p} value={p}>
+                {p}%
+              </option>
+            ))}
         </select>
       )}
       {error && <span className="printer-error">{error}</span>}

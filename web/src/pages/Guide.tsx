@@ -107,7 +107,10 @@ export default function GuidePage() {
           </li>
           <li>Choose one of the printers above (model and nozzle size) and the build plate type.</li>
           <li>Choose a filament that is loaded in the printer you want (see Printers).</li>
-          <li>Slice, then export the plate: File → Export → Export plate sliced file (a .gcode.3mf).</li>
+          <li>
+            Slice, then export the plate: for Bambu printers File → Export → Export plate sliced file (a
+            .gcode.3mf); for other printers, export the G-code.
+          </li>
           <li>
             On <Link to="/jobs">Jobs</Link>, press "Upload a sliced file" and pick it.
           </li>

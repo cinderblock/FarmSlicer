@@ -93,10 +93,15 @@ export default function SendDialog({
   const selected = targets.find((t) => t.printer_id === printerId) ?? usable[0];
   const mapping = selected ? (mappings[selected.printer_id] ?? selected.ams_mapping) : [];
   const trays = loadedTrays(selected?.status);
+  // Bambu printers map the plate's filaments to AMS trays; elsewhere the
+  // G-code names its tools and people load the spools.
+  const mapsFilaments = selected?.capabilities?.filament_mapping ?? true;
+  const optionLabels = OPTION_LABELS.filter(([key]) => selected?.capabilities?.print_options.includes(key) ?? true);
 
   // Cheap enough to recompute on every render.
   const problems = ((): string[] => {
     if (!selected || !currentPlate) return [];
+    if (!mapsFilaments) return selected.problems;
     const out: string[] = [];
     for (const f of currentPlate.filaments) {
       const slot = mapping[f.id - 1] ?? -1;
@@ -125,7 +130,7 @@ export default function SendDialog({
       const print = await apiJson<PrintRecord>(`/api/jobs/${jobId}/print`, "POST", {
         printer_id: selected.printer_id,
         plate: currentPlate.index,
-        ams_mapping: mapping,
+        ams_mapping: mapsFilaments ? mapping : undefined,
         options,
         ignore_mapping_problems: force,
       });
@@ -220,6 +225,23 @@ export default function SendDialog({
             {selected && !selected.incompatible && (waits || !selected.busy) && (
               <>
                 <h4>Filaments</h4>
+                {!mapsFilaments && (
+                  <>
+                    <ul className="filament-list">
+                      {currentPlate.filaments.map((f) => (
+                        <li key={f.id}>
+                          <span className="tray-color" style={{ background: f.color || undefined }} />
+                          {currentPlate.filaments.length > 1 && `Tool ${f.id - 1}: `}
+                          {f.material || "Filament"}
+                          <span className="hint"> · {f.used_g.toFixed(1)} g</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {currentPlate.filaments.length === 0 && <p className="hint">The file doesn't say which filament.</p>}
+                    <p className="hint">Make sure this is loaded on {selected.name}; it prints with whatever is.</p>
+                  </>
+                )}
+                {mapsFilaments && (<>
                 <table className="mapping-table">
                   <tbody>
                     {currentPlate.filaments.map((f) => {
@@ -260,10 +282,11 @@ export default function SendDialog({
                 {trays.length === 0 && (
                   <p className="hint">The printer reports no loaded filament yet.</p>
                 )}
+                </>)}
 
-                <h4>Options</h4>
+                {optionLabels.length > 0 && <h4>Options</h4>}
                 <div className="send-options">
-                  {OPTION_LABELS.map(([key, label, help]) => (
+                  {optionLabels.map(([key, label, help]) => (
                     <label key={key} title={help}>
                       <input
                         type="checkbox"

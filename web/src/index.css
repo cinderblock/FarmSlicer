@@ -840,6 +840,20 @@ body {
   vertical-align: middle;
 }
 
+/* What to load, for printers that don't map filaments to trays. */
+.filament-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.filament-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+
 .mapping-table select {
   background: var(--bg-card);
   color: var(--text);
