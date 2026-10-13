@@ -306,9 +306,14 @@ pub fn display_name(model_name: &str) -> String {
 }
 
 /// The file's name on the printer: unique per print so reports can't be
-/// confused with another print of the same model.
+/// confused with another print of the same model, and plain ASCII
+/// (PrusaLink refuses anything else).
 pub fn file_name(display: &str, print_id: &str, format: PackageFormat) -> String {
-    format!("{}-{}{}", display.replace(' ', "_"), &print_id[..8], format.extension())
+    let safe: String = display
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || "-_.".contains(c) { c } else { '_' })
+        .collect();
+    format!("{safe}-{}{}", &print_id[..8], format.extension())
 }
 
 // -- Sending ---------------------------------------------------------------------
@@ -381,6 +386,7 @@ async fn send(
         }
         Some(Protocol::Moonraker) => crate::moonraker::send(state, &printer, print, &data, &mut step).await,
         Some(Protocol::OctoPrint) => crate::octoprint::send(state, &printer, print, &data, &mut step).await,
+        Some(Protocol::PrusaLink) => crate::prusalink::send(state, &printer, print, &data, &mut step).await,
         None => Err(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
     }
 }
@@ -623,6 +629,7 @@ mod tests {
         assert_eq!(display_name("weird/na\"me.gcode.3mf"), "na_me");
         assert_eq!(file_name("Bracket v2", "1a2b3c4d-xxxx", PackageFormat::Bambu3mf), "Bracket_v2-1a2b3c4d.gcode.3mf");
         assert_eq!(file_name("Bracket v2", "1a2b3c4d-xxxx", PackageFormat::Gcode), "Bracket_v2-1a2b3c4d.gcode");
+        assert_eq!(file_name("Ünïcode (v2)+", "1a2b3c4d-xxxx", PackageFormat::Gcode), "_n_code__v2__-1a2b3c4d.gcode");
     }
 
     fn record(status: &str) -> PrintRecord {

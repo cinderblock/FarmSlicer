@@ -17,6 +17,7 @@ mod printer;
 mod printer_thumbs;
 mod printers_api;
 mod printing;
+mod prusalink;
 mod prints_api;
 mod profiles;
 mod progress;

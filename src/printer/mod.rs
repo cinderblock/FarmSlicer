@@ -23,10 +23,12 @@ pub enum Protocol {
     Moonraker,
     /// OctoPrint (1.x, 2.0): REST and its push socket.
     OctoPrint,
+    /// Prusa printers' PrusaLink: HTTP, polled.
+    PrusaLink,
 }
 
 impl Protocol {
-    pub const ALL: &[Protocol] = &[Protocol::Bambu, Protocol::Moonraker, Protocol::OctoPrint];
+    pub const ALL: &[Protocol] = &[Protocol::Bambu, Protocol::Moonraker, Protocol::OctoPrint, Protocol::PrusaLink];
 
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|p| p.as_str() == s)
@@ -38,6 +40,7 @@ impl Protocol {
             Protocol::Bambu => "bambu",
             Protocol::Moonraker => "moonraker",
             Protocol::OctoPrint => "octoprint",
+            Protocol::PrusaLink => "prusalink",
         }
     }
 
@@ -46,6 +49,7 @@ impl Protocol {
             Protocol::Bambu => "Bambu Lab (LAN)",
             Protocol::Moonraker => "Klipper (Moonraker)",
             Protocol::OctoPrint => "OctoPrint",
+            Protocol::PrusaLink => "Prusa (PrusaLink)",
         }
     }
 
@@ -81,6 +85,17 @@ impl Protocol {
                        User Settings → Application Keys (or use your API key); the account needs to \
                        be allowed to print and control the printer.",
             },
+            Protocol::PrusaLink => Connection {
+                fields: vec![
+                    Field::new("address", "Address", "prusa-mk4.local or 192.168.1.70"),
+                    Field::new("access_code", "PrusaLink password", "From the printer: Settings → Network → PrusaLink")
+                        .secret(),
+                ],
+                hint: "PrusaLink must be on (the printer's Settings → Network → PrusaLink), which also \
+                       shows its password. PrusaLink offers pause, resume and stop, but no speed or \
+                       temperature control and no camera. Prusa printers check that a file was sliced \
+                       for them and ask on their screen if not, holding the print until someone answers.",
+            },
         }
     }
 
@@ -101,6 +116,17 @@ impl Protocol {
                     "layer_inspect",
                 ],
                 package: PackageFormat::Bambu3mf,
+                outside_pictures: true,
+            },
+            Protocol::PrusaLink => Capabilities {
+                pause: true,
+                stop: true,
+                speed: None,
+                heat: false,
+                camera: false,
+                filament_mapping: false,
+                print_options: &[],
+                package: PackageFormat::Gcode,
                 outside_pictures: true,
             },
             // Klipper and OctoPrint: the same controls.

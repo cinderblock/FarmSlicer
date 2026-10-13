@@ -133,6 +133,9 @@ async fn fetch(printer: &crate::db::Printer, status: &crate::printer::PrinterSta
                 .map(|img| (Bytes::from(img.bytes), img.content_type))),
             None => Ok(None),
         },
+        Some(Protocol::PrusaLink) => Ok(crate::prusalink::picture(printer)
+            .await?
+            .map(|img| (Bytes::from(img.bytes), img.content_type))),
         Some(Protocol::OctoPrint) => match status.job_file.as_deref() {
             Some(file) => Ok(crate::octoprint::picture(printer, file)
                 .await?
