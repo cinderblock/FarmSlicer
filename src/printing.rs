@@ -93,6 +93,12 @@ pub fn incompatibility(store: &ProfileStore, printer: &Printer, format: PackageF
     None
 }
 
+/// "a Prusa MK4S", "an Elegoo Centauri Carbon".
+fn with_article(model: &str) -> String {
+    let vowel = model.chars().next().is_some_and(|c| "AEIOUaeiou".contains(c));
+    format!("{} {model}", if vowel { "an" } else { "a" })
+}
+
 /// Plain G-code: the model it was sliced for must be the printer's, when
 /// the slicer named a model OrcaSlicer's profiles know (other slicers name
 /// models their own way: "MK4S" for "Prusa MK4S").
@@ -102,7 +108,7 @@ fn model_problem(store: &ProfileStore, printer: &Printer, plate: &Plate) -> Opti
     if have.is_empty() || want.eq_ignore_ascii_case(have) || store.machine_model(want).is_none() {
         return None;
     }
-    Some(format!("sliced for {want}; {} is a {have}", printer.name))
+    Some(format!("sliced for {want}; {} is {}", printer.name, with_article(have)))
 }
 
 /// Bambu projects carry the model id (`C12`); families print each other's.
@@ -119,8 +125,9 @@ fn bambu_model_problem(store: &ProfileStore, printer: &Printer, plate: &Plate) -
                 .or_else(|| models::name_for(want).map(String::from))
                 .unwrap_or_else(|| format!("model {want}"));
             return Some(format!(
-                "sliced for {sliced_for}; {} is a {}",
-                printer.name, printer.machine_profile
+                "sliced for {sliced_for}; {} is {}",
+                printer.name,
+                with_article(&printer.machine_profile)
             ));
         }
     }
