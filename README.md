@@ -30,17 +30,19 @@ can run in the user's browser.
   admin or group manager to approve; equipment problem reports; pre-heating
   an idle printer for a loaded filament.
 - **G-code safety:** nothing reaches a printer unchecked, whoever sliced it.
-  Every plate's G-code is run through a model of the printer and compared
-  with what Bambu's own G-code does (commands, arguments and values
-  harvested from OrcaSlicer's and BambuStudio's vendor profiles; positions,
-  below-plate moves, temperatures per material, heaters left idle, dwells,
-  filament per tool, print time). Lines a printer might read differently
+  Every plate's G-code is read in its firmware's own syntax and run through
+  a model of the printer: moves against its bed and height, temperatures
+  against the filament (however they're set: `M104`, Klipper's
+  `SET_HEATER_TEMPERATURE`, macro parameters), heaters left idle, dwells,
+  firmware hazards (endstops off, settings saved, a faked position),
+  filament per tool, print time. Bambu printers' G-code is also held to
+  what Bambu's own G-code does (commands, arguments and values harvested
+  from OrcaSlicer's and BambuStudio's profiles); other makes' geometry comes
+  from their OrcaSlicer profiles. Lines a printer might read differently
   block a plate; anything unusual waits for an admin. Packages are refused
   when their zip is ambiguous or their G-code was changed after slicing;
   per-job overrides can't carry G-code; print rules, quotas and costs use
-  the G-code's own time and filament when a file understates them. Plain
-  G-code for other makes goes through the same model, but FarmSlicer has
-  no vendor data for them yet, so their prints wait for an admin too. See
+  the G-code's own time and filament when a file understates them. See
   `plans/gcode-safety.md`.
 - **Cameras:** live view on demand, one upstream feed per printer however
   many watch; Bambu X1/H2-class (RTSPS) passed through as H.264 for the

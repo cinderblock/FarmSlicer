@@ -151,10 +151,28 @@ through the approval flow.
   anyway (single-filament). Multi-material H2D files are untested.
 - Merged with the printer drivers (`plans/printer-drivers.md`, 2026-10-13):
   plain G-code packages go through `check_package` too, with
-  `Declared::other_firmware`, so a line the Bambu-syntax lexer can't read
-  is `review`, not `block` (Klipper `PRINT_START ...`, Prusa
-  `M862.3 P "MK4S"` are ordinary there). Non-Bambu plates always need
-  review until the data covers other vendors (ISSUES.md).
+  `Declared::other_firmware`.
+- **Every make gets a check; only Bambu gets Bambu's** (user, 2026-10-13).
+  Other makes: `lex_other` (case-insensitive; Klipper `NAME KEY=VALUE`;
+  Anycubic's `G9111 BEDTEMP=` macros; text args for M117/M862/M115/M98/
+  M486); temperatures (M104/M109 S|R, SET_HEATER_TEMPERATURE, macro params
+  with EXTRUDER/HOTEND/NOZZLE/BED/CHAMBER in the key); geometry from
+  `data/printers.json` (371 printers, every non-BBL Orca vendor; short-name
+  fallback "MK4S" → "Prusa MK4S"); firmware-generic hazards by value
+  (measured against 59 vendors' templates: Prusa `M302 S160`, Artillery
+  `M211 S1` and `SET_KINEMATIC_POSITION Y=0`, Lulzbot `M206 X0 Y0 Z0`,
+  Dremel `M907` are vendor-normal; a printer's own template commands are
+  exempt for it). Bambu-only: allowlist, unreadable-line block, line
+  length, `blind_z` (deltas home at the top), 5 mm reach margin (others
+  25 mm: deltas park at computed edges), Z floor -0.05 (others -0.5: Z
+  offsets), material temperature caps by the printer's filament list
+  (others: by material, lists are incomplete).
+- Corpus for other makes (2026-10-13): 496 FarmSlicer slices across 53
+  vendors, nothing held after the fixes above. Found on the way: Marlin's
+  `M204 P`/`T` (Snapmaker sets `M204 S100` in start G-code, then P/T per
+  feature: estimates were 1.8-2.5x), and profiles with machine limits of 0
+  made `clamp(100, 0)` panic (never live: production had no per-printer
+  data). Time median 0.99x, p90 1.20x, max 1.49x.
 - Corpus tooling (not in the repo): `corpus.py` slices every Bambu machine
   profile × materials on a NO_AUTH container (port 9341 on buildhost, volume
   `farmslicer_gsafety_data`); `FARMSLICER_SAMPLE_PACKAGES=<dir> cargo test
@@ -183,6 +201,11 @@ through the approval flow.
       `farmslicer` healthy on that digest, the site answers. (The printer
       drivers merged later into master are not in this deploy.)
 - [x] Build artifacts on buildhost and local scratch deleted (user, 2026-10-13).
+- [x] Deployed latest master `effc203` (printer drivers; user, 2026-10-13):
+      ops `9f417dd`, `sha256:71331c99…2add`, healthy.
+- [x] Every make checked, Bambu's allowlist for Bambu only (`3f8545b`):
+      104 unit tests, 8 e2e suites, 496-file corpus clean.
+- [ ] Push and deploy `3f8545b` (needs the user's yes)
       Regenerating BambuStudio data or re-running the corpus means fetching
       the profiles and re-slicing again (see Findings).
 
@@ -190,9 +213,8 @@ through the approval flow.
 
 1. ~~Push?~~ Done.
 2. ~~Deploy?~~ Done.
-3. Defaults: max single pause 15 min, max heated idle 45 min, nozzle/plate
-   margin 10 °C, reach margin 5 mm, uploads allowed. Recommendation: keep,
-   adjust in Settings after a week of real prints.
+3. ~~Defaults~~ Kept as they are (user, 2026-10-13).
+4. Push and deploy the every-make check (`3f8545b`)? Recommendation: yes.
 
 ## Things not to do
 
