@@ -217,7 +217,7 @@ export default function ProfileEditor({
                     <button
                       className="btn-reset"
                       onClick={() => handleSettingChange(key, undefined)}
-                      title="Remove override"
+                      aria-label="Remove override"
                     >
                       &times;
                     </button>
@@ -248,13 +248,19 @@ export default function ProfileEditor({
             </p>
           )}
           {!readOnly && (
-            <button
-              className="btn-sm"
-              onClick={handleJsonSave}
-              style={{ marginTop: "0.5rem" }}
-            >
-              Apply JSON
-            </button>
+            <>
+              <button
+                className="btn-sm"
+                onClick={handleJsonSave}
+                style={{ marginTop: "0.5rem" }}
+              >
+                Apply JSON
+              </button>
+              <p className="hint">
+                Only admins can save settings beyond the ones listed on the Settings tab (custom G-code and the
+                like); nobody can set post-processing scripts.
+              </p>
+            </>
           )}
         </div>
       )}

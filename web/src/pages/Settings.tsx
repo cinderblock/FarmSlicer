@@ -4,7 +4,7 @@ import { errorText, useJson } from "../api";
 import { QuotaRulesEditor } from "../components/Quota";
 import type { Rule } from "../groups";
 import PrintRulesEditor from "../components/PrintRulesEditor";
-import type { Prices, PrintRules } from "../printers";
+import { UPLOAD_POLICIES, type GcodeLimits, type Prices, type PrintRules, type UploadPolicy } from "../printers";
 
 interface SiteSettings {
   season_start: string;
@@ -14,6 +14,8 @@ interface SiteSettings {
   print_rules: PrintRules;
   filament_prices: Prices;
   guide_notes: string;
+  uploads: UploadPolicy;
+  gcode_limits: GcodeLimits;
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -86,6 +88,25 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         <p className="hint">For personal jobs and for groups that set none.</p>
         <PrintRulesEditor rules={s.print_rules ?? {}} onChange={(r) => setS({ ...s, print_rules: r })} />
 
+        <h3>Sliced files and G-code checks</h3>
+        <p className="hint">
+          Every plate's G-code is checked before it's sent: FarmSlicer runs it through a model of the printer
+          and compares it with what Bambu's own G-code does. Plates it can't read safely are never sent; plates
+          that do something unusual wait for an admin's approval.
+        </p>
+        <label>
+          Uploaded sliced files (.gcode.3mf)
+          <select value={s.uploads} onChange={(e) => setS({ ...s, uploads: e.target.value as UploadPolicy })}>
+            {UPLOAD_POLICIES.map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <span className="hint">For personal jobs and groups that set none. Admins and group managers are exempt.</span>
+        </label>
+        <GcodeLimitsEditor limits={s.gcode_limits} onChange={(l) => setS({ ...s, gcode_limits: l })} />
+
         <h3>Guide</h3>
         <label>
           Notes for the Guide page
@@ -110,6 +131,56 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         {error && <p className="login-error">{error}</p>}
       </form>
     </div>
+  );
+}
+
+function GcodeLimitsEditor({ limits, onChange }: { limits: GcodeLimits; onChange: (l: GcodeLimits) => void }) {
+  const field = (key: keyof GcodeLimits, label: string, hint: string, unit: string, scale: number, min: number, max: number) => (
+    <label key={key}>
+      {label} ({unit})
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step="any"
+        value={Math.round((limits[key] / scale) * 100) / 100}
+        onChange={(e) => onChange({ ...limits, [key]: Number(e.target.value) * scale })}
+      />
+      <span className="hint">{hint}</span>
+    </label>
+  );
+  return (
+    <>
+      {field("max_dwell_sec", "Longest single pause", "A longer G4 or M400 wait needs review.", "minutes", 60, 1, 1440)}
+      {field(
+        "max_heated_idle_sec",
+        "Longest a heater may stay on with nothing printed",
+        "Longer needs review.",
+        "minutes",
+        60,
+        1,
+        1440,
+      )}
+      {field(
+        "nozzle_margin_c",
+        "Nozzle margin",
+        "How far past the hottest vendor profile of a material the nozzle may go.",
+        "°C",
+        1,
+        0,
+        50,
+      )}
+      {field("bed_margin_c", "Plate margin", "The same for the plate.", "°C", 1, 0, 50)}
+      {field(
+        "reach_margin_mm",
+        "Reach margin",
+        "How far past the printer's own G-code moves (and its print area) the nozzle may go.",
+        "mm",
+        1,
+        0,
+        50,
+      )}
+    </>
   );
 }
 

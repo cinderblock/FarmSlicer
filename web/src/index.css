@@ -1800,3 +1800,52 @@ a.btn-sm {
 .hint a {
   color: var(--accent);
 }
+
+/* G-code check (components/GcodeCheck.tsx) */
+.gcode-chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.gcode-ok { color: var(--success); }
+.gcode-review { color: var(--warning); }
+.gcode-block { color: var(--error); }
+.gcode-unchecked { color: var(--text-dim); }
+
+.gcode-check summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.gcode-findings {
+  margin: 0.4rem 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.gcode-finding-block { color: var(--error); }
+.gcode-finding-review { color: var(--warning); }
+
+.send-blocked {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  color: var(--error);
+  font-size: 0.9rem;
+}
+.send-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+.send-review ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--warning);
+}
