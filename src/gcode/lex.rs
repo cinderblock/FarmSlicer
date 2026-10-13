@@ -110,7 +110,7 @@ pub fn lex<'a>(line: &'a str, is_text: impl Fn(&Code) -> bool, templates: bool) 
     let b = s.as_bytes();
     let letter = b[0];
     if !matches!(letter, b'G' | b'M' | b'T') {
-        return Lexed::Unreadable(format!("doesn't start with a G, M or T command: {}", excerpt(s)));
+        return Lexed::Unreadable(format!("not a G, M or T command: {}", excerpt(s)));
     }
     let mut i = 1;
     let start = i;
@@ -124,7 +124,7 @@ pub fn lex<'a>(line: &'a str, is_text: impl Fn(&Code) -> bool, templates: bool) 
         number = Some(u32::MAX);
     }
     let Some(number) = number else {
-        return Lexed::Unreadable(format!("command without a number: {}", excerpt(s)));
+        return Lexed::Unreadable(format!("a command without a number: {}", excerpt(s)));
     };
     let mut sub = None;
     if letter != b'T' && b.get(i) == Some(&b'.') && b.get(i + 1).is_some_and(u8::is_ascii_digit) {
@@ -159,7 +159,7 @@ pub fn lex<'a>(line: &'a str, is_text: impl Fn(&Code) -> bool, templates: bool) 
             continue;
         }
         if !c.is_ascii_uppercase() {
-            return Lexed::Unreadable(format!("{code} has an argument the printer would read differently: {}", excerpt(s)));
+            return Lexed::Unreadable(format!("an argument FarmSlicer can't parse: {}", excerpt(s)));
         }
         j += 1;
         let vs = j;
@@ -174,7 +174,7 @@ pub fn lex<'a>(line: &'a str, is_text: impl Fn(&Code) -> bool, templates: bool) 
         } else {
             match parse_number(raw) {
                 Some(n) => Value::Num(n),
-                None => return Lexed::Unreadable(format!("{code} has a malformed number {raw:?}")),
+                None => return Lexed::Unreadable(format!("a malformed number in {code}: {raw:?}")),
             }
         };
         words.push(Word { letter: c, value });

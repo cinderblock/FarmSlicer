@@ -523,7 +523,7 @@ impl<'a> Sim<'a> {
         let data = self.ctx.data;
         match lex::lex(text, |c| data.is_text(c), false) {
             Lexed::Empty => {}
-            Lexed::Unreadable(why) => self.block("unreadable", format!("has a line the printer may read differently: {why}")),
+            Lexed::Unreadable(why) => self.block("unreadable", format!("has a line a printer may read differently ({why})")),
             Lexed::Command(c) => {
                 self.stats.commands += 1;
                 self.allowed(&c);

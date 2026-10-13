@@ -165,6 +165,7 @@ pub fn check_package(path: &Path, pkg: &Package, limits: &Limits) -> Result<BTre
         let mut result = check::check(reader, data::data(), &declared, limits)
             .map_err(|e| format!("can't read plate {}: {e}", plate.index))?;
         reconcile(plate, &mut result);
+        result.verdict = result.findings.iter().map(|f| f.severity).max();
         result.checker = fingerprint(limits);
         out.insert(plate.index, result);
     }
