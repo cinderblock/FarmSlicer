@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use super::{Command, PrinterStatus, Protocol, protocol_of};
-use crate::{bambu, db, moonraker, octoprint, prusalink};
+use crate::{bambu, db, moonraker, octoprint, prusalink, sdcp};
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -78,6 +78,7 @@ pub enum DriverHandle {
     Moonraker(moonraker::link::Handle),
     OctoPrint(octoprint::link::Handle),
     PrusaLink(prusalink::link::Handle),
+    Sdcp(sdcp::link::Handle),
 }
 
 impl DriverHandle {
@@ -89,6 +90,7 @@ impl DriverHandle {
             DriverHandle::Moonraker(h) => h.command(command).await,
             DriverHandle::OctoPrint(h) => h.command(command).await,
             DriverHandle::PrusaLink(h) => h.command(command).await,
+            DriverHandle::Sdcp(h) => h.command(command).await,
         }
     }
 
@@ -99,6 +101,7 @@ impl DriverHandle {
             DriverHandle::Moonraker(h) => h.raw(),
             DriverHandle::OctoPrint(h) => h.raw(),
             DriverHandle::PrusaLink(h) => h.raw(),
+            DriverHandle::Sdcp(h) => h.raw(),
         }
     }
 
@@ -106,7 +109,7 @@ impl DriverHandle {
         match self {
             DriverHandle::Bambu(h) => h.shutdown(),
             // Aborting the link's task closes its socket.
-            DriverHandle::Moonraker(_) | DriverHandle::OctoPrint(_) | DriverHandle::PrusaLink(_) => {}
+            DriverHandle::Moonraker(_) | DriverHandle::OctoPrint(_) | DriverHandle::PrusaLink(_) | DriverHandle::Sdcp(_) => {}
         }
     }
 }
@@ -118,6 +121,7 @@ enum LinkConfig {
     Moonraker(moonraker::link::Config),
     OctoPrint(octoprint::link::Config),
     PrusaLink(prusalink::link::Config),
+    Sdcp(sdcp::link::Config),
 }
 
 impl LinkConfig {
@@ -127,6 +131,7 @@ impl LinkConfig {
             Protocol::Moonraker => moonraker::link::Config::from_printer(p).map(Self::Moonraker),
             Protocol::OctoPrint => octoprint::link::Config::from_printer(p).map(Self::OctoPrint),
             Protocol::PrusaLink => prusalink::link::Config::from_printer(p).map(Self::PrusaLink),
+            Protocol::Sdcp => sdcp::link::Config::from_printer(p).map(Self::Sdcp),
         }
     }
 
@@ -138,6 +143,7 @@ impl LinkConfig {
             (Self::Moonraker(a), Self::Moonraker(b)) => a.same_endpoint(b),
             (Self::OctoPrint(a), Self::OctoPrint(b)) => a.same_endpoint(b),
             (Self::PrusaLink(a), Self::PrusaLink(b)) => a.same_endpoint(b),
+            (Self::Sdcp(a), Self::Sdcp(b)) => a.same_endpoint(b),
             _ => false,
         }
     }
@@ -148,6 +154,7 @@ impl LinkConfig {
             Self::Moonraker(c) => &c.name,
             Self::OctoPrint(c) => &c.name,
             Self::PrusaLink(c) => &c.name,
+            Self::Sdcp(c) => &c.name,
         }
     }
 
@@ -168,6 +175,10 @@ impl LinkConfig {
             Self::PrusaLink(c) => {
                 let (handle, task) = prusalink::link::start(c.clone(), sink);
                 (DriverHandle::PrusaLink(handle), task)
+            }
+            Self::Sdcp(c) => {
+                let (handle, task) = sdcp::link::start(c.clone(), sink);
+                (DriverHandle::Sdcp(handle), task)
             }
         }
     }

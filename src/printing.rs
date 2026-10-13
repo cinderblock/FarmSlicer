@@ -387,6 +387,7 @@ async fn send(
         Some(Protocol::Moonraker) => crate::moonraker::send(state, &printer, print, &data, &mut step).await,
         Some(Protocol::OctoPrint) => crate::octoprint::send(state, &printer, print, &data, &mut step).await,
         Some(Protocol::PrusaLink) => crate::prusalink::send(state, &printer, print, &data, &mut step).await,
+        Some(Protocol::Sdcp) => crate::sdcp::send(state, &printer, print, &data, plate, options, &mut step).await,
         None => Err(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
     }
 }

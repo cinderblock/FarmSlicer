@@ -25,10 +25,13 @@ pub enum Protocol {
     OctoPrint,
     /// Prusa printers' PrusaLink: HTTP, polled.
     PrusaLink,
+    /// Elegoo Centauri Carbon: SDCP v3 over a WebSocket, HTTP uploads.
+    Sdcp,
 }
 
 impl Protocol {
-    pub const ALL: &[Protocol] = &[Protocol::Bambu, Protocol::Moonraker, Protocol::OctoPrint, Protocol::PrusaLink];
+    pub const ALL: &[Protocol] =
+        &[Protocol::Bambu, Protocol::Moonraker, Protocol::OctoPrint, Protocol::PrusaLink, Protocol::Sdcp];
 
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|p| p.as_str() == s)
@@ -41,6 +44,7 @@ impl Protocol {
             Protocol::Moonraker => "moonraker",
             Protocol::OctoPrint => "octoprint",
             Protocol::PrusaLink => "prusalink",
+            Protocol::Sdcp => "sdcp",
         }
     }
 
@@ -50,6 +54,7 @@ impl Protocol {
             Protocol::Moonraker => "Klipper (Moonraker)",
             Protocol::OctoPrint => "OctoPrint",
             Protocol::PrusaLink => "Prusa (PrusaLink)",
+            Protocol::Sdcp => "Elegoo Centauri Carbon (SDCP)",
         }
     }
 
@@ -96,6 +101,16 @@ impl Protocol {
                        temperature control and no camera. Prusa printers check that a file was sliced \
                        for them and ask on their screen if not, holding the print until someone answers.",
             },
+            Protocol::Sdcp => Connection {
+                fields: vec![
+                    Field::new("address", "IP address", "192.168.1.80"),
+                    Field::new("serial_number", "Mainboard ID", "Learnt from the printer when empty").optional(),
+                ],
+                hint: "The Centauri Carbon (and Centauri) needs no password on the LAN. It takes five \
+                       connections in all (the Elegoo app, slicers and Home Assistant count) and about \
+                       one camera viewer. The Centauri Carbon 2 speaks another protocol and isn't \
+                       supported yet.",
+            },
         }
     }
 
@@ -116,6 +131,18 @@ impl Protocol {
                     "layer_inspect",
                 ],
                 package: PackageFormat::Bambu3mf,
+                outside_pictures: true,
+            },
+            Protocol::Sdcp => Capabilities {
+                pause: true,
+                stop: true,
+                // Its four presets: 50, 100, 130, 160 %.
+                speed: Some(SpeedControl::Levels),
+                heat: true,
+                camera: true,
+                filament_mapping: false,
+                print_options: &["bed_leveling", "timelapse"],
+                package: PackageFormat::Gcode,
                 outside_pictures: true,
             },
             Protocol::PrusaLink => Capabilities {

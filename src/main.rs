@@ -23,6 +23,7 @@ mod profiles;
 mod progress;
 mod query;
 mod quota;
+mod sdcp;
 mod server;
 mod slicer;
 

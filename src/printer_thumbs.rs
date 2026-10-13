@@ -7,7 +7,9 @@
 //!   `/cache/` (cloud and SD prints) or `/` (LAN uploads), and its plate PNG
 //!   is taken out of it (FTPS);
 //! - Moonraker: the thumbnails it extracted from the G-code file;
-//! - OctoPrint: its own thumbnails (2.0) or the Slicer Thumbnails plugin's.
+//! - OctoPrint: its own thumbnails (2.0) or the Slicer Thumbnails plugin's;
+//! - PrusaLink: its preview of the current job;
+//! - Elegoo (SDCP): the history image it took at the task's start.
 //!
 //! Found pictures are cached for half an hour, misses for a minute, and
 //! fetches are one at a time per printer.
@@ -119,7 +121,12 @@ fn respond((bytes, content_type): Picture) -> Response {
 
 /// Fetch the picture of `job_name` (the printer's current or last job) from
 /// the printer itself.
-async fn fetch(printer: &crate::db::Printer, status: &crate::printer::PrinterStatus, job_name: &str) -> Result<Option<Picture>, String> {
+async fn fetch(
+    state: &AppState,
+    printer: &crate::db::Printer,
+    status: &crate::printer::PrinterStatus,
+    job_name: &str,
+) -> Result<Option<Picture>, String> {
     match protocol_of(printer) {
         Some(Protocol::Bambu) => {
             let plate = plate_index(status.job_file.as_deref());
@@ -133,6 +140,9 @@ async fn fetch(printer: &crate::db::Printer, status: &crate::printer::PrinterSta
                 .map(|img| (Bytes::from(img.bytes), img.content_type))),
             None => Ok(None),
         },
+        Some(Protocol::Sdcp) => Ok(crate::sdcp::picture(state, printer)
+            .await?
+            .map(|img| (Bytes::from(img.bytes), img.content_type))),
         Some(Protocol::PrusaLink) => Ok(crate::prusalink::picture(printer)
             .await?
             .map(|img| (Bytes::from(img.bytes), img.content_type))),
@@ -180,7 +190,7 @@ async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<St
     if let Some(hit) = state.printer_thumbs.cached(&key) {
         return hit.map(respond).unwrap_or_else(none);
     }
-    let picture = match fetch(&printer, &status, &job_name).await {
+    let picture = match fetch(&state, &printer, &status, &job_name).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Printer {}: can't fetch the picture of {job_name}: {e}", printer.name);
