@@ -8,5 +8,6 @@ pub mod models;
 pub mod package;
 pub mod status;
 mod tls;
+pub mod zipcheck;
 
 pub use hub::PrinterHub;
