@@ -15,6 +15,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use crate::auth::{self, CurrentUser};
 use crate::auth_api;
 use crate::bambu::PrinterHub;
+use crate::config_policy;
 use crate::db::{Db, Job, JobFilter, User};
 use crate::discovery;
 use crate::groups::{Tree, Viewer};
@@ -280,6 +281,9 @@ async fn create_custom_profile(
         ));
     }
     let overrides = body.overrides.as_deref().unwrap_or("{}");
+    config_policy::parse(overrides)
+        .and_then(|m| config_policy::check(&m, auth::is_admin(&user)))
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
     let profile = state.db.create_custom_profile(
         &body.name,
         &body.profile_type,
@@ -300,19 +304,22 @@ async fn update_custom_profile(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
     Json(body): Json<UpdateCustomProfile>,
-) -> StatusCode {
-    if auth::require_full(&user).is_err() {
-        return StatusCode::FORBIDDEN;
-    }
+) -> Result<StatusCode, ApiError> {
+    auth::require_full(&user)?;
     let Some(existing) = state.db.get_custom_profile(&id) else {
-        return StatusCode::NOT_FOUND;
+        return Err(api_err(StatusCode::NOT_FOUND, "no such profile"));
     };
     let name = body.name.as_deref().unwrap_or(&existing.name);
     let overrides = body.overrides.as_deref().unwrap_or(&existing.overrides);
+    if body.overrides.is_some() {
+        config_policy::parse(overrides)
+            .and_then(|m| config_policy::check(&m, auth::is_admin(&user)))
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+    }
     if state.db.update_custom_profile(&id, name, overrides) {
-        StatusCode::OK
+        Ok(StatusCode::OK)
     } else {
-        StatusCode::NOT_FOUND
+        Err(api_err(StatusCode::NOT_FOUND, "no such profile"))
     }
 }
 
@@ -613,12 +620,21 @@ async fn create_job(
         _ => quota::check(&state.db, &tree, &user, group_id.as_deref())
             .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e)),
     };
-    if let Err(e) = admission {
-        if !model_path.is_empty() {
-            std::fs::remove_file(&model_path).ok();
+    // Overrides may only touch what the caller is allowed to (no G-code).
+    let overrides = admission.and_then(|()| {
+        config_policy::parse(&overrides_str)
+            .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+    });
+    let overrides = match overrides {
+        Ok(o) => o,
+        Err(e) => {
+            if !model_path.is_empty() {
+                std::fs::remove_file(&model_path).ok();
+            }
+            return Err(e);
         }
-        return Err(e);
-    }
+    };
     let keep_model = group_id
         .as_deref()
         .is_some_and(|g| tree.effective(g).keep_models);
@@ -658,14 +674,12 @@ async fn create_job(
             })?;
 
         // Merge per-job overrides on top of resolved config
-        if !overrides_str.is_empty() {
-            if let Ok(overrides) = serde_json::from_str::<serde_json::Map<String, Value>>(&overrides_str) {
-                if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
-                    for (k, v) in overrides {
-                        config.insert(k, v);
-                    }
-                    config_str = serde_json::to_string(&Value::Object(config)).unwrap();
+        if !overrides.is_empty() {
+            if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
+                for (k, v) in overrides {
+                    config.insert(k, v);
                 }
+                config_str = serde_json::to_string(&Value::Object(config)).unwrap();
             }
         }
 
