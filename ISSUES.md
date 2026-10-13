@@ -46,6 +46,8 @@ the farm's tuned profiles there (plans/printer-control.md).
 
 ## The G-code check knows only Bambu's G-code: every other make's print needs review
 
+**in progress — gcode-safety thread (master)**
+
 `src/gcode/` reads lines in Bambu's firmware syntax and allows what
 OrcaSlicer's and BambuStudio's **BBL** profiles do. Plain G-code (Klipper,
 OctoPrint, PrusaLink, SDCP printers) goes through the same check with
