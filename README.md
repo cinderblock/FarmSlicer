@@ -14,22 +14,26 @@ can run in the user's browser.
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
   isolated). Browser slicing uploads only the resulting G-code, unless the
   job's group is set to keep models.
-- **Printers:** Bambu Lab SSDP discovery; machine model + nozzle size per printer;
-  live status over the printers' LAN MQTT interface (state, progress,
-  temperatures, AMS trays, errors); sending prints (FTPS upload, start with an
-  AMS mapping, pause/resume/stop) and following them to the end. Needs the
-  printer's IP, serial number and LAN access code, with LAN mode and
-  Developer Mode on. Server slices for Bambu printers come out as a
-  `.gcode.3mf` with a rendered thumbnail; sliced projects from Bambu Studio /
-  OrcaSlicer can be uploaded and sent too.
+- **Printers:** five kinds, each on the LAN (see [Printers](#printers)):
+  Bambu Lab, Klipper (Moonraker), OctoPrint, Prusa (PrusaLink) and Elegoo
+  Centauri Carbon (SDCP). Discovery, live status (state, progress,
+  temperatures, errors; AMS trays on Bambu printers), sending prints and
+  following them to the end, pause/resume/stop, speed, pre-heating, cameras
+  and pictures of prints started elsewhere, as far as each protocol allows.
+  Server slices for Bambu printers come out as a `.gcode.3mf` with a rendered
+  thumbnail, for the others as plain G-code with the thumbnails their
+  firmware wants; sliced files from other slicers (`.gcode.3mf` or `.gcode`)
+  can be uploaded and sent too.
 - **Farm floor:** a Guide page (how to slice or export, send, and look after
   plates, plus the farm's own notes); filament cost estimates (site price table); printer areas; print rules per group (max time, allowed
   materials; inherited, with a site default) whose violations wait for an
   admin or group manager to approve; equipment problem reports; pre-heating
   an idle printer for a loaded filament.
-- **Cameras:** live view on demand; X1/H2-class (RTSPS) passed through as
-  H.264 for the browser to decode, A1/P1 (JPEG over TLS) as frames. No
-  ffmpeg, and the access code never leaves the server process.
+- **Cameras:** live view on demand, one upstream feed per printer however
+  many watch; Bambu X1/H2-class (RTSPS) passed through as H.264 for the
+  browser to decode, A1/P1 (JPEG over TLS), Klipper and OctoPrint webcams
+  and the Centauri Carbon (MJPEG, or snapshots) as JPEG frames. No ffmpeg,
+  and printer credentials never leave the server process.
 - **Thumbnails:** rendered in software (no GPU), optionally with a group's
   label (e.g. a team number, from the `thumbnail_label` group setting) and
   logo.
@@ -37,6 +41,32 @@ can run in the user's browser.
   seasons, quotas, self-service joining through links, guest accounts.
 
 License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
+
+## Printers
+
+| Protocol | Printers | Connection | Status | Control | Camera |
+| --- | --- | --- | --- | --- | --- |
+| Bambu Lab (LAN) | X1, P1, A1, H2, P2S, X2D | IP, serial number, LAN access code (LAN mode and Developer Mode on) | MQTT push, AMS trays | pause/resume/stop, speed levels, heat, AMS mapping, plate options | RTSPS (X1/H2), JPEG (A1/P1) |
+| Klipper (Moonraker) | Voron, RatRig, Sovol, Qidi, Creality K1/K2, Elegoo Neptune 4, Snapmaker U1, ... | address (`host`, `host:port`, default 7125, or the web page's URL); API key only if Moonraker doesn't trust FarmSlicer | WebSocket push | pause/resume/stop, speed %, heat | Moonraker's webcam (MJPEG or snapshots) |
+| OctoPrint | any printer behind OctoPrint 1.x or 2.0 | address (port 80 as on OctoPi, `:5000`, or a URL), API key | push socket | pause/resume/stop, speed %, heat | OctoPrint's webcam |
+| Prusa (PrusaLink) | MK4/MK4S, MK3.5/3.9, MINI, XL, CORE One | address, PrusaLink password | polled | pause/resume/stop (no speed, heat or G-code over PrusaLink) | none |
+| Elegoo Centauri Carbon (SDCP) | Centauri Carbon, Centauri | address (no password) | WebSocket push and polling | pause/resume/stop, speed presets, heat, levelling and timelapse options | MJPEG on 3031 |
+
+- Discovery: Bambu printers over SSDP, Klipper/OctoPrint/PrusaLink over mDNS
+  (Moonraker only with `[zeroconf]`), Centauri Carbons over SDCP's UDP
+  broadcast. Multicast doesn't cross routers or Docker bridges: run the
+  container with host networking to see printers; others are added by
+  address.
+- Non-Bambu printers print what they're sent: FarmSlicer lists the plate's
+  filaments to load instead of mapping them to trays, and checks the
+  sliced-for model and nozzle against the printer.
+- Prusa printers check the file's model, nozzle and filament themselves and
+  ask on their screen when unsure; such a print waits "at the printer" until
+  someone answers there.
+- The Elegoo Centauri Carbon 2 speaks another protocol (MQTT) and isn't
+  supported yet.
+- `tests/fake-*` hold a fake printer per protocol (and a Dockerfile for real
+  OctoPrint with its Virtual Printer); `tests/*-e2e.mjs` drive them.
 
 ## Running it
 
@@ -213,21 +243,22 @@ summary prints the `pin.json` to paste there.
 | `GET /api/profiles/resolve-single?name=` | one profile with inheritance resolved |
 | `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set` |
 | `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
-| `GET /api/printers/{id}/report` | the printer's merged raw MQTT report (admins) |
-| `GET /api/printers/{id}/camera` (WebSocket) | live camera: H.264 access units for X1/H2-class printers (decoded in the browser with WebCodecs), JPEG frames for A1/P1 |
-| `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level}` on whatever the printer runs (admins) |
+| `GET /api/printer-protocols` | the protocols FarmSlicer speaks, what each can do (`capabilities`) and its connection fields |
+| `GET /api/printers/{id}/report` | the driver's raw view of the printer: Bambu's merged MQTT report, Klipper's objects, ... (admins) |
+| `GET /api/printers/{id}/camera` (WebSocket) | live camera: H.264 access units for X1/H2-class printers (decoded in the browser with WebCodecs), JPEG frames for the rest; `{"type":"error"}` says why when there is none |
+| `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level \| percent}` on whatever the printer runs (admins) |
 | `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay`, `GET /api/groups/{id}/overlay/logo` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
-| `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |
-| `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping |
+| `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` or `.gcode` becomes a finished, sendable job (what it needs is read from the slicer's comments) |
+| `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability, its capabilities and (Bambu) a suggested AMS mapping |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems}`: upload and start |
-| `GET /api/prints?printer=&active=1&pending=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed (sender, group managers, admins) |
+| `GET /api/prints?printer=&active=1&pending=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed as the printer allows (sender, group managers, admins) |
 | `POST /api/prints/{id}/approve`, `POST /api/prints/{id}/reject` | decide a print that broke the print rules (admins, the group's managers; the requester may withdraw) |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
-| `POST /api/printers/{id}/preheat` (`{slot}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament, or cool it |
+| `POST /api/printers/{id}/preheat` (`{slot}` or `{material}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament or a material, or cool it |
 | `GET /api/printers/{id}/thumbnail` | picture of the job the printer runs or ran (fetched from the printer for prints started elsewhere) |
 | `GET /api/guide` | the Guide page's farm notes (site setting `guide_notes`) and default print rules |
 | `GET /api/prices` | currency and filament price per kg; jobs, prints and targets carry `estimated_cost` |
-| `GET /api/discovery` | Bambu printers seen on the LAN |
+| `GET /api/discovery` | printers seen on the LAN, each with the protocol and address to add it with |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
 | `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser (the response's `keep_model` says whether to upload the model with the result). Optional `group_id`; 429 when a quota is used up |
@@ -253,13 +284,20 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 groups.rs + groups_api.rs (groups, visibility, settings),
                 join_api.rs (join links, guests), quota.rs,
                 profiles.rs (OrcaSlicer profile inheritance), progress.rs,
-                slicer.rs (cxx bridge declaration + stub), discovery.rs (SSDP)
+                slicer.rs (cxx bridge declaration + stub),
+                printer/ (protocols, capabilities, status, the link hub),
+                bambu/, moonraker/, octoprint/, prusalink/, sdcp/ (drivers),
+                printing.rs + prints_api.rs (sending, tracking),
+                package/ (.gcode.3mf and G-code readers), camera/,
+                discovery/ (SSDP, mDNS, SDCP)
 cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
                 engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp
 wasm/           Emscripten superbuild + C bridge for the browser engine
 web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build
-tests/          API end-to-end tests (run-e2e.sh) and their shared helpers
+tests/          API end-to-end tests (run-e2e.sh), their shared helpers, and a
+                fake printer per protocol (fake-printer = Bambu, fake-moonraker,
+                fake-octoprint, fake-prusalink, fake-sdcp)
 plans/          living plan documents
 ```

@@ -88,32 +88,64 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   calls back without user data, so jobs are looked up by id)
 - `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, model, config_json, out)`;
   `extern "Rust"` `slice_progress` / `slice_cancelled`
-- `src/discovery.rs` — Bambu SSDP listener (shared port, logs sightings)
-- `src/bambu/` — Bambu LAN link: `hub.rs` (one MQTT/TLS connection per
-  printer, reconnect, request/response by `sequence_id`, `sync()` after any
-  printer change), `status.rs` (merging P1/A1 delta reports, the UI summary),
-  `tls.rs` (accept the printer's Bambu-CA cert, ring provider),
-  `ftps.rs` (implicit FTPS upload; the data channel must resume the control
-  channel's TLS session), `package.rs` (reading `.gcode.3mf`), `models.rs`,
-  `camera.rs` (on-demand feeds: RTSPS via `retina` behind a local TLS
-  proxy → H.264 to the browser's WebCodecs; A1/P1 JPEG on port 6000)
-- `src/printers_api.rs` — printer CRUD (admins), status + SSE events
+- `src/printer/` — vendor-neutral printers: `mod.rs` (`Protocol` = the
+  `printers.protocol` values, `Capabilities` the UI gates controls on,
+  connection-field descriptions, `Command`), `status.rs` (`PrinterStatus`
+  with the normalized `state` vocabulary: IDLE PREPARE RUNNING PAUSE FINISH
+  FAILED CANCELLED SLICING; `job_key`/`job_file` identify the job),
+  `hub.rs` (`PrinterHub`: one link per printer, `sync()` after any printer
+  change, enum dispatch to driver handles, status board + broadcast),
+  `http.rs` (shared reqwest client, base URLs from addresses), `tls.rs`
+  (accept printers' self-signed / Bambu-CA certs, ring provider)
+- Drivers (each a `link.rs` task + `status.rs` + send/pictures/camera in
+  `mod.rs`; references in `plans/printer-drivers/*.md`):
+  - `src/bambu/` — MQTT/TLS (`link.rs`: request/response by `sequence_id`,
+    delta reports merged in `status.rs`), `ftps.rs` (implicit FTPS; the data
+    channel must resume the control channel's TLS session), `send.rs`
+    (`project_file`, AMS mapping fields), `models.rs`
+  - `src/moonraker/` — Klipper: WebSocket JSON-RPC, objects subscribed and
+    merged, HTTP upload then `printer.print.start` (refused while paused:
+    Klipper would replace the job)
+  - `src/octoprint/` — push socket (passive login) + REST; how a print ended
+    comes from events (the file stays selected); select+print, never `start`
+  - `src/prusalink/` — polled (no push), remembers the last job (FINISHED/
+    STOPPED drop it), ATTENTION = waiting at the printer; no speed/heat/camera
+  - `src/sdcp/` — Elegoo Centauri Carbon: WebSocket envelopes by RequestID,
+    status asked for when quiet; **only Elegoo's own payloads** (a surprise
+    can crash the printer mid-print)
+- `src/camera/` — on-demand feeds, one upstream per printer: `bambu.rs`
+  (RTSPS via `retina` behind a local TLS proxy → H.264 to the browser's
+  WebCodecs; A1/P1 JPEG on port 6000), `mjpeg.rs` (MJPEG or snapshot
+  polling: Klipper, OctoPrint, SDCP)
+- `src/discovery/` — `ssdp.rs` (Bambu, shared port 2021), `mdns.rs`
+  (`_moonraker._tcp`, `_octoprint._tcp`, `_prusalink._tcp`), `sdcp.rs`
+  (`M99999` UDP broadcast)
+- `src/package/` — what printers are sent: `bambu.rs` (`.gcode.3mf`
+  plates, slice_info) and `gcode.rs` (plain G-code: model, nozzle, time,
+  filaments, bed type and thumbnails from the slicer's comments)
+- `src/printers_api.rs` — printer CRUD (admins), status + SSE events,
+  `/api/printer-protocols`, cameras
 - `src/farm_api.rs` — equipment reports, preheat/cooldown; print rules are
   `groups::PrintRules` (inherited `print_rules`, site setting default),
   checked in `prints_api::send_job` → `pending_approval` prints
 - `src/query.rs` — `flag`: `?x=1` query booleans
 - `src/cost.rs` — filament cost estimates (site setting `filament_prices`)
-- `src/printer_thumbs.rs` — job pictures for printer cards (package, or the
-  project fetched over FTPS from the printer's `/cache/` or `/`)
+- `src/printer_thumbs.rs` — job pictures for printer cards (the job's
+  package, or from the printer: Bambu project over FTPS, Moonraker/OctoPrint
+  thumbnails, PrusaLink `/thumb/l`, SDCP history image)
 - `src/overlay.rs` — thumbnail label (inherited group setting
   `thumbnail_label`, `{key}`/`{group}` template) and per-group logos
   (`data/logos/<group>.png`); `resources/fonts/` — the label font (OFL)
-- `src/printing.rs` — sending: compatibility, AMS mapping (`ams_mapping` +
-  `ams_mapping2`), upload → `project_file` → ack/retry, and `track()` moving
-  prints along from printer reports; `src/prints_api.rs` — uploads, targets,
-  send, prints, control
-- `tests/fake-printer/` — Docker fake printer (mosquitto TLS + vsftpd with
-  `require_ssl_reuse`) for developing without hardware
+- `src/printing.rs` — sending: compatibility (package format per protocol,
+  model, nozzle), AMS mapping where the protocol maps filaments, dispatch to
+  the driver's send, and `track()` moving prints along from printer
+  statuses (a print not yet seen running can only start); `src/prints_api.rs`
+  — uploads, targets, send, prints, control
+- `tests/fake-printer/` — Docker fake Bambu printer (mosquitto TLS + vsftpd
+  with `require_ssl_reuse`); `tests/fake-{moonraker,octoprint,prusalink,sdcp}/`
+  — Node fakes the e2e tests start in-process (`tests/fake-lib.mjs`: WebSocket
+  server, multipart); `tests/fake-octoprint/Dockerfile` — real OctoPrint +
+  Virtual Printer for conformance runs
 - `src/groups.rs` — group tree, inherited settings, permissions
   (`can_manage`, `can_govern`), job visibility, seasons; `src/groups_api.rs`
   (groups, members, links, library, usage, site settings);
@@ -144,7 +176,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `.github/workflows/build.yml` — check → wasm → image (registry build cache)
 - `extern/OrcaSlicer/` — submodule @ v2.4.2 (libslic3r + 11k vendor profiles)
 - `data/` — runtime (gitignored): SQLite db, models, G-code
-- `tests/` — API end-to-end tests (`run-e2e.sh`, `lib.mjs`, `*-e2e.mjs`)
+- `tests/` — API end-to-end tests (`run-e2e.sh`, `lib.mjs`, `*-e2e.mjs`,
+  one per printer protocol). `run-e2e.sh` prints no summary of its own:
+  check its exit code, not the last suite's "ALL PASSED"
 - `plans/` — living plans
 
 ## Architecture
@@ -203,9 +237,25 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   their jobs can't be sent until re-sliced (the worker skips the options).
 - Jobs tagged `printer_id` at slicing time are not sent automatically;
   sending is an explicit `POST /api/jobs/{id}/print`.
+- Printer drivers and what proved them (`plans/printer-drivers.md`): Bambu
+  on real printers; Klipper against real Klipper + Moonraker (simulavr,
+  `mainsail-crew/virtual-klipper-printer` built locally); OctoPrint against
+  real OctoPrint 1.11.8 and 2.0.0rc6 (Virtual Printer); PrusaLink and the
+  Elegoo Centauri Carbon (SDCP) against the Node fakes only: no hardware,
+  no emulator. The Centauri Carbon 2 (MQTT) isn't supported.
+- Profiles' `compatible_printers_condition` isn't evaluated (OrcaSlicer runs
+  it through its PlaceholderParser); filaments and processes with only a
+  condition are offered to every printer of the vendor.
 
 ## Key Conventions
 
+- A new printer protocol is a driver module (link task publishing
+  `PrinterStatus` through a `StatusSink`, a `Handle` taking `Command`s, a
+  send function, pictures, camera) plus a `Protocol` variant (capabilities,
+  connection fields) and an arm in `printer/hub.rs`, `printing::send`,
+  `printer_thumbs::fetch` and `printers_api::camera_kind`; a fake under
+  `tests/fake-<name>/` and a `tests/<name>-e2e.mjs`. The web UI needs no
+  change: it renders the protocol's fields and capabilities.
 - Rust 2024 edition; `NDEBUG` must be defined for the C++ (Eigen 5.x).
 - JS/TS uses **Bun** (`bun.lock`; no `package-lock.json`).
 - Keep `cxx/slice_core.cpp` engine-agnostic; anything Rust- or Emscripten-specific
