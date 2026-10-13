@@ -102,10 +102,9 @@ const jobId = r.json.id;
 r = await owner.get(`/api/jobs/${jobId}/targets`);
 const target = r.json?.targets?.find((t) => t.printer_id === id);
 check(target && target.incompatible === null && target.busy === null && target.problems.length === 0, "the Voron takes it and is free", json(r));
-// FarmSlicer's G-code data covers Bambu's own G-code only: other makes'
-// plates need review, so an admin's send says it was looked at.
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
-check(r.status === 409 && r.json.needs_review?.length > 0, "an admin's send must acknowledge the G-code review", json(r));
+// Other makes' G-code gets the checks every printer gets (not Bambu's
+// allowlist): an ordinary Klipper file needs no review.
+check(r.json?.gcode_check && r.json.blocked.length === 0 && r.json.needs_review.length === 0, "an ordinary Klipper file passes the G-code check", json(r));
 
 r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 201 && r.json.file_name.endsWith(".gcode"), "send starts", json(r));

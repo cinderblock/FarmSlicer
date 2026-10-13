@@ -169,6 +169,10 @@ pub struct ModelLimits {
     pub max_speed: Option<[f64; 4]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_accel: Option<f64>,
+    /// Other makes: the M-codes and extended commands the printer's own
+    /// vendor templates use (a firmware hazard there is the vendor's call).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub commands: BTreeSet<String>,
 }
 
 pub(super) fn max_opt(a: &mut Option<f64>, b: Option<f64>) {
@@ -201,6 +205,7 @@ impl ModelLimits {
         if self.max_accel.is_none() {
             self.max_accel = o.max_accel;
         }
+        self.commands.extend(o.commands.iter().cloned());
     }
 }
 
@@ -237,6 +242,15 @@ pub struct Data {
     /// By material (`PLA`, `PETG-CF`), upper case.
     #[serde(default)]
     pub materials: BTreeMap<String, MaterialLimits>,
+    /// Every other make's printers, by the `printer_model` name their
+    /// profiles and G-code use ("Prusa MK4S", "Voron 2.4 350"): geometry
+    /// and temperatures only. Their G-code isn't held to Bambu's commands.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub printers: BTreeMap<String, ModelLimits>,
+    /// Materials across every other vendor's filament profiles, for their
+    /// printers' G-code.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub other_materials: BTreeMap<String, MaterialLimits>,
 }
 
 impl Data {
@@ -249,11 +263,16 @@ impl Data {
         for (k, m) in &o.models {
             self.models.entry(k.clone()).or_default().merge(m);
         }
-        for (k, m) in &o.materials {
-            match self.materials.get_mut(k) {
-                Some(e) => e.merge(m),
-                None => {
-                    self.materials.insert(k.clone(), m.clone());
+        for (k, m) in &o.printers {
+            self.printers.entry(k.clone()).or_default().merge(m);
+        }
+        for (mine, theirs) in [(&mut self.materials, &o.materials), (&mut self.other_materials, &o.other_materials)] {
+            for (k, m) in theirs {
+                match mine.get_mut(k) {
+                    Some(e) => e.merge(m),
+                    None => {
+                        mine.insert(k.clone(), m.clone());
+                    }
                 }
             }
         }
@@ -263,12 +282,16 @@ impl Data {
         self.text_commands.contains(&code.key())
     }
 
-    pub fn model(&self, id: &str) -> Option<&ModelLimits> {
-        self.models.get(id)
+    /// A Bambu model by id, or (`other`) another make's printer by name.
+    pub fn model(&self, id: &str, other: bool) -> Option<&ModelLimits> {
+        if other { self.printers.get(id.trim()) } else { self.models.get(id) }
     }
 
-    pub fn material(&self, name: &str) -> Option<&MaterialLimits> {
-        self.materials.get(&name.trim().to_uppercase())
+    /// Temperatures for a material: Bambu's profiles of it, or (`other`)
+    /// every other vendor's.
+    pub fn material(&self, name: &str, other: bool) -> Option<&MaterialLimits> {
+        let key = name.trim().to_uppercase();
+        if other { self.other_materials.get(&key) } else { self.materials.get(&key) }
     }
 }
 
@@ -281,6 +304,7 @@ pub fn data() -> &'static Data {
             ("orca.json", include_str!("data/orca.json")),
             ("bambustudio.json", include_str!("data/bambustudio.json")),
             ("slicer.json", include_str!("data/slicer.json")),
+            ("printers.json", include_str!("data/printers.json")),
         ] {
             let part: Data = serde_json::from_str(text).unwrap_or_else(|e| panic!("gcode data {name}: {e}"));
             d.merge(&part);

@@ -195,8 +195,8 @@ check(
   json(r),
 );
 check(
-  r.json?.gcode_check && r.json.blocked.length === 0 && r.json.needs_review.some((m) => /Voron 2\.4 350, which FarmSlicer has no data for/.test(m)),
-  "plain G-code is checked too; no data for its model means review",
+  r.json?.gcode_check && r.json.blocked.length === 0 && r.json.needs_review.length === 0,
+  "plain G-code is checked too, against the Voron's own geometry, and passes",
   json(r),
 );
 r = await user.form("/api/uploads", { file: [new Blob(["solid cube\nfacet normal 0 0 0\n"]), "cube.stl"] });

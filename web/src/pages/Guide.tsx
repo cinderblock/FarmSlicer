@@ -126,8 +126,8 @@ export default function GuidePage() {
         <h3>Why a print might wait</h3>
         <p>
           Before anything is sent, FarmSlicer reads every line of the plate's G-code and runs it through a model
-          of the printer, comparing it with what Bambu's own G-code does. On Jobs each plate shows what it found.
-          FarmSlicer knows only Bambu's G-code so far, so prints for other makes always need review.
+          of the printer: its bed, its height, the filament's temperatures. Bambu printers' G-code is also held
+          to what Bambu's own G-code does. On Jobs each plate shows what it found.
         </p>
         <ul>
           <li>
@@ -135,8 +135,9 @@ export default function GuidePage() {
             changed after it was sliced. Slice it again.
           </li>
           <li>
-            <strong>Needs review:</strong> commands Bambu's G-code never uses, the nozzle hotter than the
-            filament is ever printed at, moves outside where the printer's own G-code goes or into the plate,
+            <strong>Needs review:</strong> the nozzle hotter than the filament is ever printed at, moves off the
+            printer's bed or into the plate, settings it changes on the printer for good (endstops, saved
+            configuration), on Bambu printers commands Bambu's G-code never uses,
             {info && (
               <>
                 {" "}

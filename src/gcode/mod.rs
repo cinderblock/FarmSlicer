@@ -26,7 +26,12 @@ pub fn fingerprint(limits: &Limits) -> String {
     use md5::{Digest, Md5};
     let mut h = Md5::new();
     h.update(check::CHECKER_VERSION.to_le_bytes());
-    for part in [include_str!("data/orca.json"), include_str!("data/bambustudio.json"), include_str!("data/slicer.json")] {
+    for part in [
+        include_str!("data/orca.json"),
+        include_str!("data/bambustudio.json"),
+        include_str!("data/slicer.json"),
+        include_str!("data/printers.json"),
+    ] {
         h.update(part.as_bytes());
     }
     h.update(serde_json::to_string(limits).expect("limits serialize").as_bytes());
@@ -151,10 +156,9 @@ pub fn check_package(path: &Path, pkg: &Package, limits: &Limits) -> Result<BTre
                 out.insert(plate.index, check_plate(entry, pkg.format, plate, &settings, limits)?);
             }
         }
-        // The file is the one plate's G-code. FarmSlicer has data only for
-        // Bambu's own G-code, so other makes' plates come out as needing
-        // review (`unknown_model`, and whatever their start G-code uses;
-        // see `Declared::other_firmware`).
+        // The file is the one plate's G-code, for another make's firmware:
+        // the checks every printer gets, without Bambu's allowlist (see
+        // `Declared::other_firmware`).
         PackageFormat::Gcode => {
             let s = package::gcode::filament_settings(path)?;
             let settings = ProjectSettings { types: s.types, densities: s.densities, diameter: s.diameter };
@@ -214,7 +218,7 @@ mod tests {
         let mut paths: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
         paths.sort();
         for path in paths {
-            if !path.to_string_lossy().ends_with(".gcode.3mf") {
+            if !path.to_string_lossy().ends_with(".gcode.3mf") && !path.to_string_lossy().ends_with(".gcode") {
                 continue;
             }
             let pkg = package::inspect(&path).unwrap();
@@ -225,7 +229,7 @@ mod tests {
                 println!(
                     "{} plate {index} [{}]: time {:.0}s vs declared {:?} ({:.2}x), {:.1} g vs declared {:?}, nozzle {} bed {} idle {:.0}s dwell {:.0}s",
                     path.file_name().unwrap().to_string_lossy(),
-                    plate.printer_model_id.as_deref().unwrap_or("?"),
+                    plate.printer_model_id.as_deref().or(plate.printer_model.as_deref()).unwrap_or("?"),
                     s.time_sec,
                     plate.print_time_sec,
                     s.time_sec / plate.print_time_sec.unwrap_or(f64::NAN),

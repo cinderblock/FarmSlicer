@@ -174,6 +174,23 @@ r = await upload(owner, pkg(CLEAN));
 check(r.status === 201, "admins still upload", json(r));
 r = await owner.call("PUT", "/api/settings", { uploads: "allow" });
 
+// ---- other makes' G-code: the checks every printer gets, not Bambu's allowlist ----
+const klipper = (body) =>
+  [body, "; filament_type = PLA", "; nozzle_diameter = 0.4", "; printer_model = Voron 2.4 350", ""].join("\n");
+const plain = async (body, name) => {
+  const up = await user.form("/api/uploads", { file: [new Blob([klipper(body)]), name] });
+  check(up.status === 201, `${name} uploads`, json(up));
+  return user.get(`/api/jobs/${up.json.id}/targets`);
+};
+r = await plain("PRINT_START EXTRUDER=215 BED=60\nM117 Printing\nSET_VELOCITY_LIMIT ACCEL=5000\nG90\nM83\nG1 X100 Y100 Z0.2 E1 F3000\nPRINT_END", "voron.gcode");
+check(r.json.blocked.length === 0 && r.json.needs_review.length === 0, "an ordinary Klipper print needs no review", json(r));
+r = await plain("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=320\nG4 S3600", "hot.gcode");
+check(r.json.needs_review.some((m) => /320 °C/.test(m)) && r.json.needs_review.some((m) => /waits 1 h/.test(m)), "Klipper's own way of heating is still checked", json(r));
+r = await plain("SET_KINEMATIC_POSITION Z=200\nG1 Z0 F600", "kinematic.gcode");
+check(r.json.needs_review.some((m) => /SET_KINEMATIC_POSITION/.test(m)), "faking the position needs review", json(r));
+r = await plain("G90\nG1 X900 Y10 Z5", "far.gcode");
+check(r.json.needs_review.some((m) => /X900/.test(m)), "moves off the Voron's bed need review", json(r));
+
 // ---- limits --------------------------------------------------------------------------
 r = await owner.call("PUT", "/api/settings", { gcode_limits: { max_dwell_sec: 0 } });
 check(r.status === 400, "limits are range-checked", json(r));

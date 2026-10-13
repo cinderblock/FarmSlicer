@@ -182,6 +182,113 @@ pub fn lex<'a>(line: &'a str, is_text: impl Fn(&Code) -> bool, templates: bool) 
     Lexed::Command(Command { code, words, text: None })
 }
 
+/// A Klipper-style extended command: `SET_HEATER_TEMPERATURE HEATER=extruder
+/// TARGET=220`, or a macro the printer's config defines (`PRINT_START
+/// BED=60`). Names and keys upper case, as Klipper matches them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extended {
+    pub name: String,
+    pub params: Vec<(String, String)>,
+}
+
+impl Extended {
+    pub fn param(&self, key: &str) -> Option<&str> {
+        self.params.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    pub fn num(&self, key: &str) -> Option<f64> {
+        self.param(key).and_then(|v| v.trim_matches('"').parse().ok()).filter(|n: &f64| n.is_finite())
+    }
+}
+
+/// A line of another firmware's G-code (Klipper, Marlin, Prusa, RepRap).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Other<'a> {
+    Empty,
+    Command(Command<'a>),
+    Extended(Extended),
+    /// Neither: the reason.
+    Unreadable(String),
+}
+
+/// Commands other firmware takes free text with: stops and messages (`M0`,
+/// `M117 Homing`), file names (`M23`, `M28`-`M33`), macros (`M98
+/// P"start.g"`), version and model checks (`M115 U6.1.3`, `M862.3 P
+/// "MK4S"`), object labels (`M486 S0 A"cube"`).
+pub fn other_text(c: &Code) -> bool {
+    c.letter == b'M' && matches!(c.number, 0 | 1 | 16 | 23 | 28 | 29 | 30 | 32 | 33 | 98 | 115 | 117 | 118 | 486 | 862)
+}
+
+/// Lex a line of another firmware's G-code. `upper` must already be upper
+/// case: Klipper, Marlin and Prusa read `g1 x10` as `G1 X10`, and Klipper
+/// matches extended commands and their keys case-insensitively.
+pub fn lex_other(upper: &str, templates: bool) -> Other<'_> {
+    let code_part = match upper.find(';') {
+        Some(i) => &upper[..i],
+        None => upper,
+    };
+    let s = code_part.trim_matches(|c| c == ' ' || c == '\t' || c == '\r');
+    let b = s.as_bytes();
+    match b.first() {
+        None => Other::Empty,
+        Some(b'G' | b'M' | b'T')
+            if b.get(1).is_some_and(|c| c.is_ascii_digit() || (templates && *c == PLACEHOLDER as u8)) =>
+        {
+            match lex(s, other_text, templates) {
+                Lexed::Empty => Other::Empty,
+                Lexed::Command(c) => Other::Command(c),
+                // Klipper macros may be named like G-codes and take its
+                // parameters (Anycubic's `G9111 BEDTEMP=60 EXTRUDERTEMP=220`).
+                Lexed::Unreadable(_) if s.contains('=') => {
+                    let name_end = s.find([' ', '\t']).unwrap_or(s.len());
+                    Other::Extended(Extended { name: s[..name_end].to_string(), params: extended_params(&s[name_end..]) })
+                }
+                Lexed::Unreadable(why) => Other::Unreadable(why),
+            }
+        }
+        Some(c) if c.is_ascii_uppercase() || *c == b'_' => {
+            let name_end = s.find([' ', '\t']).unwrap_or(s.len());
+            let name = &s[..name_end];
+            if !name.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_' || (templates && c == PLACEHOLDER as u8)) {
+                return Other::Unreadable(format!("not a command: {}", excerpt(s)));
+            }
+            Other::Extended(Extended { name: name.to_string(), params: extended_params(&s[name_end..]) })
+        }
+        Some(_) => Other::Unreadable(format!("not a command: {}", excerpt(s))),
+    }
+}
+
+/// `KEY=VALUE` pairs, values possibly quoted; anything else is skipped.
+fn extended_params(rest: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut tokens = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    for c in rest.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                cur.push(c);
+            }
+            ' ' | '\t' if !quoted => {
+                if !cur.is_empty() {
+                    tokens.push(std::mem::take(&mut cur));
+                }
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
+    for t in tokens {
+        if let Some((k, v)) = t.split_once('=') {
+            out.push((k.to_string(), v.trim_matches('"').to_string()));
+        }
+    }
+    out
+}
+
 /// `-12.5`, `+3`, `.5`, `7.`: what firmware reads with strtod, minus
 /// exponents, hex and the like, which no slicer writes.
 fn parse_number(raw: &str) -> Option<f64> {
@@ -254,6 +361,31 @@ mod tests {
             assert!(matches!(lex(bad, text, false), Lexed::Unreadable(_)), "{bad}");
         }
         assert!(matches!(lex("G1 X\u{1}", text, false), Lexed::Unreadable(_)), "placeholders only in templates");
+    }
+
+    #[test]
+    fn other_firmware() {
+        let up = |s: &str| s.to_ascii_uppercase();
+        let l = up("g1 x10 e.5 f1200 ; move");
+        let Other::Command(c) = lex_other(&l, false) else { panic!("{l}") };
+        assert_eq!((c.code.key(), c.num(b'X'), c.num(b'F')), ("G1".to_string(), Some(10.0), Some(1200.0)));
+        let l = up("set_heater_temperature heater=extruder target=300");
+        let Other::Extended(e) = lex_other(&l, false) else { panic!("{l}") };
+        assert_eq!(e.name, "SET_HEATER_TEMPERATURE");
+        assert_eq!((e.param("HEATER"), e.num("TARGET")), (Some("EXTRUDER"), Some(300.0)));
+        let l = up("PRINT_START EXTRUDER=220 BED=60 MATERIAL=\"PLA Silk\"");
+        let Other::Extended(e) = lex_other(&l, false) else { panic!("{l}") };
+        assert_eq!((e.num("BED"), e.param("MATERIAL")), (Some(60.0), Some("PLA SILK")));
+        for text in ["M117 Homing...", "M862.3 P \"MK4S\"", "M115 U6.1.3+7898", "M98 P\"start_print.g\"", "M486 S0 A\"cube\""] {
+            let l = up(text);
+            assert!(matches!(lex_other(&l, false), Other::Command(Command { text: Some(_), .. })), "{text}");
+        }
+        assert_eq!(lex_other("TIMELAPSE_TAKE_FRAME", false), Other::Extended(Extended { name: "TIMELAPSE_TAKE_FRAME".into(), params: vec![] }));
+        let Other::Extended(e) = lex_other("G9111 BEDTEMP=60 EXTRUDERTEMP=220", false) else { panic!() };
+        assert_eq!((e.name.as_str(), e.num("EXTRUDERTEMP")), ("G9111", Some(220.0)));
+        assert_eq!(lex_other("  ; comment", false), Other::Empty);
+        assert!(matches!(lex_other("G1 X(1)", false), Other::Unreadable(_)));
+        assert!(matches!(lex_other("{IF}", false), Other::Unreadable(_)));
     }
 
     #[test]

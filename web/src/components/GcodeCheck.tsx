@@ -52,7 +52,7 @@ export default function GcodeCheckDetails({ check, open }: { check: GcodeCheck; 
         </ul>
       )}
       <p className="hint">
-        Checked against what Bambu's own G-code does: {facts.join(" · ")}.
+        Run through a model of the printer: {facts.join(" · ")}.
       </p>
     </details>
   );

@@ -91,8 +91,9 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         <h3>Sliced files and G-code checks</h3>
         <p className="hint">
           Every plate's G-code is checked before it's sent: FarmSlicer runs it through a model of the printer
-          and compares it with what Bambu's own G-code does. Plates it can't read safely are never sent; plates
-          that do something unusual wait for an admin's approval.
+          (its bed, its height, the filament's temperatures), and holds Bambu printers' G-code to what Bambu's
+          own G-code does. Plates it can't read safely are never sent; plates that do something unusual wait for
+          an admin's approval.
         </p>
         <label>
           Uploaded sliced files (.gcode.3mf)

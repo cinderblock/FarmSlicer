@@ -347,7 +347,7 @@ export default function SendDialog({
             )}
             {review.length > 0 && data.blocked.length === 0 && (
               <div className="send-review">
-                <strong>Its G-code does things Bambu's own G-code doesn't:</strong>
+                <strong>Its G-code does something unusual:</strong>
                 <ul>
                   {review.map((r) => (
                     <li key={r}>{r}</li>

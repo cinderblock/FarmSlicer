@@ -26,7 +26,7 @@ use super::lex::{self, Command, Lexed, Value};
 
 /// Bumped whenever the checker changes what it reports, so stored results
 /// from an older checker are redone.
-pub const CHECKER_VERSION: u32 = 1;
+pub const CHECKER_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -158,10 +158,15 @@ pub struct Declared {
     /// mm.
     pub filament_diameter: f64,
     /// For firmware other than Bambu's (plain G-code: Klipper, Marlin,
-    /// Prusa, ...). The lexer reads Bambu's syntax; a line it can't read
-    /// may be ordinary for that firmware (`PRINT_START BED=60`,
-    /// `M117 Homing`, `M862.3 P "MK4S"`), so it needs review instead of
-    /// blocking the plate.
+    /// Prusa, RepRap). Every file gets the checks that hold for any
+    /// printer: temperatures against the material (Klipper's
+    /// `SET_HEATER_TEMPERATURE` and macro parameters too), dwells, heaters
+    /// left idle, moves against the printer's own geometry, firmware-generic
+    /// hazards (soft endstops off, cold extrusion, settings saved, a faked
+    /// position), and the numbers. Only Bambu's G-code is held to the
+    /// allowlist of what Bambu's own G-code does; other dialects' lines
+    /// (`PRINT_START BED=60`, `M117 Homing`, `M862.3 P "MK4S"`) are read
+    /// in their own syntax, and a line none of them reads is only noted.
     pub other_firmware: bool,
 }
 
@@ -237,7 +242,10 @@ impl Findings {
 /// with the acceleration in force, and each move's time is its trapezoid.
 struct Motion {
     feed: f64,
+    /// Acceleration for moves that extrude, and for the rest (Marlin's
+    /// `M204 P` and `T`; `S` sets both).
     accel: f64,
+    travel_accel: f64,
     speed_factor: f64,
     max_speed: [f64; 4],
     max_accel: f64,
@@ -262,11 +270,20 @@ const LOOKAHEAD: usize = 64;
 
 impl Motion {
     fn new(model: Option<&ModelLimits>) -> Motion {
-        let max_speed = model.and_then(|m| m.max_speed).unwrap_or([500.0, 500.0, 20.0, 30.0]);
-        let max_accel = model.and_then(|m| m.max_accel).unwrap_or(20_000.0);
+        // Some vendors' profiles leave limits at 0 ("not set"): use the
+        // defaults then, never a zero speed or acceleration.
+        let defaults = [500.0, 500.0, 20.0, 30.0];
+        let mut max_speed = model.and_then(|m| m.max_speed).unwrap_or(defaults);
+        for (v, d) in max_speed.iter_mut().zip(defaults) {
+            if !(v.is_finite() && *v > 0.0) {
+                *v = d;
+            }
+        }
+        let max_accel = model.and_then(|m| m.max_accel).filter(|a| a.is_finite() && *a >= 100.0).unwrap_or(20_000.0);
         Motion {
             feed: 50.0,
             accel: max_accel.min(10_000.0),
+            travel_accel: max_accel.min(10_000.0),
             speed_factor: 1.0,
             max_speed,
             max_accel,
@@ -290,7 +307,7 @@ impl Motion {
                 v = v.min(self.max_speed[i] * len / di.abs());
             }
         }
-        let accel = self.accel.clamp(100.0, self.max_accel);
+        let accel = if d[3] > 0.0 { self.accel } else { self.travel_accel }.clamp(100.0, self.max_accel);
         let dir = if xyz > 1e-9 { [d[0] / xyz, d[1] / xyz, d[2] / xyz] } else { [0.0; 3] };
         // Classic jerk: from a standstill, or around a corner, each axis's
         // speed may jump by at most its jerk.
@@ -519,7 +536,7 @@ impl<'a> Sim<'a> {
             Some(i) => &raw[..i],
             None => raw,
         };
-        if code.len() > LONGEST_COMMAND {
+        if code.len() > LONGEST_COMMAND && !self.ctx.declared.other_firmware {
             self.block("long_line", format!("has a command of {} characters", code.len()));
             return;
         }
@@ -528,12 +545,29 @@ impl<'a> Sim<'a> {
             return;
         }
         let text = std::str::from_utf8(code).expect("ASCII is UTF-8");
+        if self.ctx.declared.other_firmware {
+            let upper = text.to_ascii_uppercase();
+            match lex::lex_other(&upper, false) {
+                lex::Other::Empty => {}
+                lex::Other::Unreadable(_) => self.info(
+                    "unreadable",
+                    "has lines FarmSlicer can't read in any firmware's syntax; it checked the rest".to_string(),
+                ),
+                lex::Other::Command(c) => {
+                    self.stats.commands += 1;
+                    self.hazards(&c);
+                    self.run(&c);
+                }
+                lex::Other::Extended(e) => {
+                    self.stats.commands += 1;
+                    self.extended(&e);
+                }
+            }
+            return;
+        }
         let data = self.ctx.data;
         match lex::lex(text, |c| data.is_text(c), false) {
             Lexed::Empty => {}
-            Lexed::Unreadable(why) if self.ctx.declared.other_firmware => {
-                self.review("unreadable", format!("has a line FarmSlicer can't check ({why})"))
-            }
             Lexed::Unreadable(why) => self.block("unreadable", format!("has a line a printer may read differently ({why})")),
             Lexed::Command(c) => {
                 self.stats.commands += 1;
@@ -592,6 +626,127 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// What any Marlin-family firmware does that no print should: checked
+    /// for every make but Bambu (whose allowlist covers it). Values matter:
+    /// Prusa's start G-code sets `M302 S160` and Artillery's `M211 S1`.
+    fn hazards(&mut self, c: &Command<'_>) {
+        let (n, s) = (c.code.number, c.num(b'S'));
+        if c.code.letter != b'M' || c.code.sub.is_some() || self.vendor_uses(&c.code.key()) {
+            return;
+        }
+        let what = match n {
+            500 => Some("saves the printer's settings (M500)".to_string()),
+            502 => Some("resets the printer's settings to factory defaults (M502)".to_string()),
+            997 => Some("starts a firmware update (M997)".to_string()),
+            92 => Some("changes the steps per mm of the motors (M92)".to_string()),
+            851 => Some("changes the probe's Z offset (M851)".to_string()),
+            428 => Some("sets the home offsets from where the nozzle is (M428)".to_string()),
+            303 => Some("runs a heater autotune (M303)".to_string()),
+            121 => Some("turns the endstops off (M121)".to_string()),
+            211 if s == Some(0.0) => Some("turns the soft endstops off (M211 S0)".to_string()),
+            302 if (c.has(b'P') && c.num(b'P') != Some(0.0)) || s.is_some_and(|t| t < 150.0) => {
+                Some("allows extruding with a cold nozzle (M302)".to_string())
+            }
+            206 if [b'X', b'Y', b'Z'].iter().any(|&l| c.num(l).is_some_and(|v| v != 0.0)) => {
+                Some("shifts the home position (M206)".to_string())
+            }
+            290 if c.num(b'Z').is_some_and(|z| z.abs() > 0.5) => Some("babysteps Z by more than 0.5 mm (M290)".to_string()),
+            221 if s.is_some_and(|f| !(50.0..=200.0).contains(&f)) => {
+                Some(format!("sets the flow to {}% (M221)", trim(s.unwrap_or(0.0))))
+            }
+            _ => None,
+        };
+        if let Some(what) = what {
+            self.review("firmware_hazard", what);
+        } else if matches!(n, 906 | 907 | 350) {
+            self.info("motor_settings", format!("changes stepper motor settings (M{n})"));
+        }
+    }
+
+    /// Whether the printer's own vendor templates use this command
+    /// (Artillery's start G-code sets `SET_KINEMATIC_POSITION Y=0`).
+    fn vendor_uses(&self, key: &str) -> bool {
+        self.ctx.model.is_some_and(|m| m.commands.contains(key))
+    }
+
+    /// Klipper's extended commands and the printer's own macros.
+    fn extended(&mut self, e: &lex::Extended) {
+        let vendor = self.vendor_uses(&e.name);
+        match e.name.as_str() {
+            "SET_HEATER_TEMPERATURE" => {
+                let Some(t) = e.num("TARGET") else { return };
+                match e.param("HEATER").unwrap_or("") {
+                    h if h.starts_with("EXTRUDER") => {
+                        self.nozzle_temp(t);
+                        self.set_heater(b'N', t);
+                    }
+                    "HEATER_BED" => {
+                        self.bed_temp(t);
+                        self.set_heater(b'B', t);
+                    }
+                    h if h.contains("CHAMBER") => self.chamber_temp(t),
+                    _ => {}
+                }
+            }
+            "SET_VELOCITY_LIMIT" => {
+                if let Some(a) = e.num("ACCEL") {
+                    self.motion.accel = a;
+                    self.motion.travel_accel = a;
+                }
+            }
+            "SET_KINEMATIC_POSITION" => {
+                if !vendor {
+                    self.review(
+                        "firmware_hazard",
+                        "tells the printer it's somewhere it may not be (SET_KINEMATIC_POSITION)".to_string(),
+                    );
+                }
+                for (i, k) in ["X", "Y", "Z"].into_iter().enumerate() {
+                    if let Some(v) = e.num(k) {
+                        self.pos[i] = Some(v);
+                    }
+                }
+            }
+            "FORCE_MOVE" | "SAVE_CONFIG" | "RESTART" | "FIRMWARE_RESTART" | "STEPPER_BUZZ" | "PID_CALIBRATE"
+            | "SHAPER_CALIBRATE"
+                if vendor => {}
+            "FORCE_MOVE" => self.review("firmware_hazard", "moves a motor without limits (FORCE_MOVE)".to_string()),
+            "SAVE_CONFIG" => self.review("firmware_hazard", "saves the printer's configuration (SAVE_CONFIG)".to_string()),
+            "RESTART" | "FIRMWARE_RESTART" => {
+                self.review("firmware_hazard", format!("restarts the printer's firmware ({})", e.name))
+            }
+            "STEPPER_BUZZ" | "PID_CALIBRATE" | "SHAPER_CALIBRATE" => {
+                self.review("firmware_hazard", format!("runs a calibration meant for setup ({})", e.name))
+            }
+            "SET_GCODE_OFFSET" => {
+                if !vendor && ["Z", "Z_ADJUST"].iter().any(|k| e.num(k).is_some_and(|z| z.abs() > 1.0)) {
+                    self.review("firmware_hazard", "shifts Z by more than 1 mm (SET_GCODE_OFFSET)".to_string());
+                }
+            }
+            // A macro from the printer's config (`PRINT_START EXTRUDER=220
+            // BED=60`): what it heats to is in its parameters.
+            _ => {
+                for (k, _) in &e.params {
+                    let Some(t) = e.num(k) else { continue };
+                    if ["EXTRUDER", "HOTEND", "NOZZLE", "TOOL_TEMP"].iter().any(|w| k.contains(w)) {
+                        self.nozzle_temp(t);
+                    } else if k.contains("BED") && !k.contains("MESH") {
+                        self.bed_temp(t);
+                    } else if k.contains("CHAMBER") {
+                        self.chamber_temp(t);
+                    }
+                }
+            }
+        }
+    }
+
+    fn chamber_temp(&mut self, s: f64) {
+        self.stats.max_chamber_c = self.stats.max_chamber_c.max(s);
+        if s > self.ctx.chamber_cap {
+            self.review("hot_chamber", format!("heats the chamber to {} °C", trim(s)));
+        }
+    }
+
     fn run(&mut self, c: &Command<'_>) {
         let code = c.code;
         match (code.letter, code.number, code.sub) {
@@ -641,7 +796,8 @@ impl<'a> Sim<'a> {
             (b'M', 82, None) => self.e_relative = false,
             (b'M', 83, None) => self.e_relative = true,
             (b'M', 104 | 109, None) => {
-                if let Some(s) = c.num(b'S') {
+                // `M109 R220` waits for cooling as well as heating (Marlin).
+                if let Some(s) = c.num(b'S').or(c.num(b'R')) {
                     self.nozzle_temp(s);
                     if code.number == 109 {
                         // Rough heating time: 2 °C/s.
@@ -654,7 +810,7 @@ impl<'a> Sim<'a> {
                 }
             }
             (b'M', 140 | 190, None) => {
-                if let Some(s) = c.num(b'S') {
+                if let Some(s) = c.num(b'S').or(c.num(b'R')) {
                     self.bed_temp(s);
                     if code.number == 190 {
                         let rise = (s - self.bed.target.max(25.0)).max(0.0);
@@ -666,16 +822,20 @@ impl<'a> Sim<'a> {
                 }
             }
             (b'M', 141 | 191, None) => {
-                if let Some(s) = c.num(b'S') {
-                    self.stats.max_chamber_c = self.stats.max_chamber_c.max(s);
-                    if s > self.ctx.chamber_cap {
-                        self.review("hot_chamber", format!("heats the chamber to {} °C", trim(s)));
-                    }
+                if let Some(s) = c.num(b'S').or(c.num(b'R')) {
+                    self.chamber_temp(s);
                 }
             }
             (b'M', 204, None) => {
                 if let Some(s) = c.num(b'S') {
                     self.motion.accel = s;
+                    self.motion.travel_accel = s;
+                }
+                if let Some(p) = c.num(b'P') {
+                    self.motion.accel = p;
+                }
+                if let Some(t) = c.num(b'T') {
+                    self.motion.travel_accel = t;
                 }
             }
             (b'M', 220, None) => {
@@ -726,7 +886,12 @@ impl<'a> Sim<'a> {
             .declared
             .materials
             .iter()
-            .filter_map(|m| self.ctx.data.material(m).map(|l| format!("{m} up to {} °C", trim(l.nozzle_max))))
+            .filter_map(|m| {
+                self.ctx
+                    .data
+                    .material(m, self.ctx.declared.other_firmware)
+                    .map(|l| format!("{m} up to {} °C", trim(l.nozzle_max)))
+            })
             .collect();
         if known.is_empty() { String::new() } else { format!(" ({})", known.join(", ")) }
     }
@@ -745,7 +910,9 @@ impl<'a> Sim<'a> {
                 } else {
                     delta[i] = v;
                     target[i] = before[i].map(|p| p + v);
-                    if i == 2 && before[2].is_none() {
+                    // Bambu homes Z at the plate; other makes' homing varies
+                    // (a delta homes at the top and moves down from there).
+                    if i == 2 && before[2].is_none() && !self.ctx.declared.other_firmware {
                         self.z_drop_unknown += v;
                         if self.z_drop_unknown < -5.0 {
                             self.review(
@@ -838,9 +1005,17 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// How far past the bed and the vendor's own moves the nozzle may go:
+    /// other makes' templates often park at computed positions their data
+    /// can't see (a delta's edge), so they get at least 25 mm.
+    fn reach_margin(&self) -> f64 {
+        let m = self.ctx.limits.reach_margin_mm;
+        if self.ctx.declared.other_firmware { m.max(25.0) } else { m }
+    }
+
     fn bounds(&mut self, x: f64, y: f64, z: Option<f64>) {
         if let Some(m) = self.ctx.model {
-            let margin = self.ctx.limits.reach_margin_mm;
+            let margin = self.reach_margin();
             let mut env = m.bed;
             if let (Some(e), Some(r)) = (env.as_mut(), m.reach) {
                 e[0] = e[0].min(r[0]);
@@ -869,8 +1044,10 @@ impl<'a> Sim<'a> {
                 self.review("out_of_reach", format!("raises the nozzle to Z{}, above the {} mm build height", trim1(z), trim(max_z)));
             }
         }
-        if z < -0.05 {
-            let margin = self.ctx.limits.reach_margin_mm;
+        // Other makes' first layers can sit a little below Z0 (a Z offset).
+        let floor = if self.ctx.declared.other_firmware { -0.5 } else { -0.05 };
+        if z < floor {
+            let margin = self.reach_margin();
             let allowed_here = match (xy, m.below_plate) {
                 (Some((x, y)), Some(b)) => x >= b[0] - margin && x <= b[2] + margin && y >= b[1] - margin && y <= b[3] + margin,
                 _ => false,
@@ -936,10 +1113,17 @@ pub fn minutes(secs: f64) -> String {
 
 /// Check one plate's G-code.
 pub fn check<R: BufRead>(mut reader: R, data: &Data, declared: &Declared, limits: &Limits) -> std::io::Result<PlateCheck> {
-    let model = declared.model_id.as_deref().and_then(|id| data.model(id));
+    let other = declared.other_firmware;
+    let model = declared.model_id.as_deref().and_then(|id| find_model(data, id, other));
     let mut nozzle_cap = model.and_then(|m| m.nozzle_max).unwrap_or(300.0);
     let mut bed_cap = model.and_then(|m| m.bed_max).unwrap_or(110.0);
-    let materials: Vec<_> = declared.materials.iter().filter_map(|m| data.material(m)).collect();
+    if other {
+        // Other vendors' profiles list only some filaments for each printer,
+        // so a printer's "hottest" says little: the material decides.
+        nozzle_cap = nozzle_cap.max(300.0);
+        bed_cap = bed_cap.max(110.0);
+    }
+    let materials: Vec<_> = declared.materials.iter().filter_map(|m| data.material(m, other)).collect();
     if !materials.is_empty() && materials.len() == declared.materials.iter().filter(|m| !m.trim().is_empty()).count() {
         let hottest = materials.iter().map(|m| m.nozzle_max).fold(0.0, f64::max) + limits.nozzle_margin_c;
         let warmest = materials.iter().map(|m| m.bed_max).fold(0.0, f64::max) + limits.bed_margin_c;
@@ -947,8 +1131,13 @@ pub fn check<R: BufRead>(mut reader: R, data: &Data, declared: &Declared, limits
         // common flush temperature), never past the model's maximum.
         let vendor_nozzle = model.and_then(|m| m.template_nozzle_max).unwrap_or(0.0);
         let vendor_bed = model.and_then(|m| m.template_bed_max).unwrap_or(0.0);
-        nozzle_cap = nozzle_cap.min(hottest.max(vendor_nozzle));
-        bed_cap = bed_cap.min(warmest.max(vendor_bed));
+        if other {
+            nozzle_cap = hottest.max(vendor_nozzle);
+            bed_cap = warmest.max(vendor_bed);
+        } else {
+            nozzle_cap = nozzle_cap.min(hottest.max(vendor_nozzle));
+            bed_cap = bed_cap.min(warmest.max(vendor_bed));
+        }
     }
     let ctx = Ctx {
         data,
@@ -960,15 +1149,26 @@ pub fn check<R: BufRead>(mut reader: R, data: &Data, declared: &Declared, limits
         chamber_cap: model.and_then(|m| m.chamber_max).unwrap_or(65.0),
     };
     let mut sim = Sim::new(ctx);
+    // Bambu's models are all in the data, so a missing one is suspect;
+    // other makes' may simply be printers the profiles don't know.
+    let missing = if other { Severity::Info } else { Severity::Review };
     match &declared.model_id {
-        None => sim.review("unknown_model", "doesn't say which printer model it's for, so where it moves can't be checked".to_string()),
-        Some(id) if model.is_none() => {
-            sim.review("unknown_model", format!("is for printer model {id}, which FarmSlicer has no data for"))
-        }
+        None => sim.f.add(
+            missing,
+            "unknown_model",
+            "doesn't say which printer model it's for, so where it moves can't be checked".to_string(),
+            0,
+        ),
+        Some(id) if model.is_none() => sim.f.add(
+            missing,
+            "unknown_model",
+            format!("is for printer model {id}, which FarmSlicer has no data for, so where it moves isn't checked"),
+            0,
+        ),
         _ => {}
     }
     for m in &declared.materials {
-        if !m.trim().is_empty() && data.material(m).is_none() {
+        if !m.trim().is_empty() && data.material(m, other).is_none() {
             sim.info("unknown_material", format!("uses {m}, a material FarmSlicer has no temperatures for"));
         }
     }
@@ -985,6 +1185,24 @@ pub fn check<R: BufRead>(mut reader: R, data: &Data, declared: &Declared, limits
         sim.physical_line(&buf);
     }
     Ok(sim.finish())
+}
+
+/// The data for a printer model: Bambu's by id; another make's by the name
+/// its profiles use ("Prusa MK4S"), or by the short name other slicers
+/// write ("MK4S") when exactly one printer ends with it.
+fn find_model<'d>(data: &'d Data, id: &str, other: bool) -> Option<&'d ModelLimits> {
+    if let Some(m) = data.model(id, other) {
+        return Some(m);
+    }
+    if !other || id.trim().is_empty() {
+        return None;
+    }
+    let suffix = format!(" {}", id.trim().to_lowercase());
+    let mut hits = data.printers.iter().filter(|(k, _)| k.to_lowercase().ends_with(&suffix));
+    match (hits.next(), hits.next()) {
+        (Some((_, m)), None) => Some(m),
+        _ => None,
+    }
 }
 
 /// Shorthand for tests with G-code in memory.
@@ -1068,17 +1286,77 @@ mod tests {
         assert!(run("G1 X1 Y\u{e9}\n").blocked(), "non-ASCII commands");
     }
 
+    fn other(model: &str, materials: &[&str]) -> Declared {
+        Declared { model_id: Some(model.into()), other_firmware: true, ..x1(materials) }
+    }
+
     #[test]
-    fn other_firmware_lines_need_review() {
-        let other = Declared { model_id: Some("Voron 2.4 350".into()), other_firmware: true, ..x1(&["PLA"]) };
-        let run = |g: &str| check_str(g, data(), &other, &Limits::default());
-        let c = run("PRINT_START BED=60\nM117 Homing\nM862.3 P \"MK4S\"\nG1 X10\n");
-        assert!(!c.blocked(), "{:?}", c.findings);
-        assert_eq!(codes(&c).iter().filter(|&&k| k == "unreadable").count(), 3, "{:?}", c.findings);
-        assert!(c.needs_review());
+    fn other_firmware_is_read_in_its_own_syntax() {
+        let voron = other("Voron 2.4 350", &["PLA"]);
+        let run = |g: &str| check_str(g, data(), &voron, &Limits::default());
+        // Klipper macros, Prusa's checks, messages, lower case: ordinary.
+        let c = run("PRINT_START EXTRUDER=215 BED=60\nM117 Homing\nM862.3 P \"MK4S\"\nm83\ng1 x10 y10 z0.2 e1 f3000\nM115 U6.1.3+7898\nTIMELAPSE_TAKE_FRAME\nM84\n");
+        assert_eq!(c.verdict, None, "{:?}", c.findings);
+        assert!((c.stats.filament_mm[&0] - 1.0).abs() < 1e-9, "lower-case moves are read");
+        // Not Bambu's allowlist: commands Bambu never uses are fine here.
+        assert_eq!(run("M555 X10 Y10 W50 H50\nM862.1 P0.4\nG29 P1\nM420 S1\n").verdict, None);
+        // A line no firmware's syntax reads is only noted.
+        let c = run("G1 X(1)\n");
+        assert_eq!((c.verdict, codes(&c)), (Some(Severity::Info), vec!["unreadable"]));
         // What no firmware reads the same way still blocks.
-        assert!(run(&format!("G1 X1 {}\n", "Y1 ".repeat(100))).blocked(), "long commands");
-        assert!(run("G1 X1 Y\u{e9}\n").blocked(), "non-ASCII commands");
+        assert!(run("G1 X1\u{0}\n").blocked(), "NUL bytes");
+    }
+
+    #[test]
+    fn other_firmware_gets_the_universal_checks() {
+        let voron = other("Voron 2.4 350", &["PLA"]);
+        let run = |g: &str| check_str(g, data(), &voron, &Limits::default());
+        let has = |c: &PlateCheck, code: &str| codes(c).contains(&code);
+        // Temperatures, however they're set.
+        assert!(has(&run("M104 S300\n"), "hot_nozzle"));
+        assert!(has(&run("m109 r300\n"), "hot_nozzle"), "lower case, wait-for-cooling form");
+        assert!(has(&run("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=320\n"), "hot_nozzle"));
+        assert!(has(&run("set_heater_temperature heater=heater_bed target=130\n"), "hot_plate"));
+        assert!(has(&run("PRINT_START EXTRUDER=300 BED=60\n"), "hot_nozzle"), "macro parameters");
+        assert!(has(&run("G9111 BEDTEMP=35 EXTRUDERTEMP=320\n"), "hot_nozzle"), "macros named like G-codes");
+        // Marlin's per-feature accelerations: `M204 S100` then `P`/`T`.
+        let slow = run("M204 S100\nG1 X0 Y0 F6000\nG1 X200 Y0 E5\n").stats.time_sec;
+        let fast = run("M204 S100\nM204 P5000 T5000\nG1 X0 Y0 F6000\nG1 X200 Y0 E5\n").stats.time_sec;
+        assert!(fast < slow * 0.8, "{fast} vs {slow}");
+        // Dwells and idle heaters.
+        let c = run("M104 S215\nG4 S3600\n");
+        assert!(has(&c, "long_dwell") && has(&c, "heated_idle"), "{:?}", c.findings);
+        // Firmware hazards, by value.
+        for g in ["M500\n", "M502\n", "M211 S0\n", "M302 P1\n", "M302 S0\n", "M206 Z-5\n", "M997\n", "SAVE_CONFIG\n", "SET_KINEMATIC_POSITION Z=10\n", "FORCE_MOVE STEPPER=stepper_z DISTANCE=-50 VELOCITY=5\n", "SET_GCODE_OFFSET Z=-3\n", "M221 S500\n"] {
+            assert!(has(&run(g), "firmware_hazard"), "{g}");
+        }
+        for g in ["M211 S1\n", "M302 S160\n", "M206 X0 Y0 Z0\n", "SET_GCODE_OFFSET Z=-0.05\n", "M221 S100\n"] {
+            assert_eq!(run(g).verdict, None, "{g}");
+        }
+        // Where it moves: the Voron 2.4 350's bed.
+        assert!(has(&run("G90\nG1 X600 Y10 Z5\n"), "out_of_reach"));
+        assert!(has(&run("G90\nG1 X100 Y100 Z-2\n"), "below_plate"));
+        assert_eq!(run("G90\nG1 X340 Y340 Z5\n").verdict, None);
+    }
+
+    #[test]
+    fn unset_machine_limits_fall_back_to_defaults() {
+        // Some vendors' profiles leave limits at 0; that once panicked in
+        // `clamp(100, 0)`.
+        let zero = ModelLimits { max_speed: Some([0.0; 4]), max_accel: Some(0.0), ..Default::default() };
+        let mut m = Motion::new(Some(&zero));
+        m.accel = 0.0;
+        m.travel_accel = 0.0;
+        let t = m.push([100.0, 0.0, 0.0, 1.0]) + m.stop();
+        assert!(t.is_finite() && t > 0.0, "{t}");
+    }
+
+    #[test]
+    fn other_printers_are_found_by_short_names() {
+        let c = check_str("G1 X1\n", data(), &other("MK4S", &["PLA"]), &Limits::default());
+        assert!(!codes(&c).contains(&"unknown_model"), "{:?}", c.findings);
+        let c = check_str("G1 X1\n", data(), &other("Nonesuch 9000", &["PLA"]), &Limits::default());
+        assert_eq!((c.verdict, codes(&c)), (Some(Severity::Info), vec!["unknown_model"]));
     }
 
     #[test]

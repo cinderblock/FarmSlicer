@@ -154,6 +154,10 @@ impl Reach {
 
     fn see(&mut self, data: &Data, line: &str) {
         let Lexed::Command(c) = lex::lex(line, |c| data.is_text(c), true) else { return };
+        self.see_command(&c);
+    }
+
+    fn see_command(&mut self, c: &lex::Command<'_>) {
         if c.code.is(b'G', 90) {
             self.absolute = true;
         } else if c.code.is(b'G', 91) {
@@ -195,10 +199,77 @@ const PLATE_TEMPS: &[&str] = &[
     "textured_cool_plate_temp_initial_layer",
 ];
 
-/// Harvest one vendor directory (`.../profiles/BBL`).
+/// Harvest Bambu's vendor directory (`.../profiles/BBL`): commands, models
+/// by id, materials.
 pub fn harvest(vendor_dir: &Path, source: &str) -> Data {
-    let dir = ProfileDir::load(vendor_dir);
     let mut data = Data { sources: vec![source.to_string()], ..Default::default() };
+    harvest_vendor(vendor_dir, &mut data, true);
+    data
+}
+
+/// Harvest every other vendor under `profiles` (all but `BBL`): printers by
+/// `printer_model` name (geometry, temperatures, motion limits) and
+/// materials. No commands: other makes' G-code isn't held to an allowlist.
+pub fn harvest_others(profiles: &Path, source: &str) -> Data {
+    let mut data = Data { sources: vec![source.to_string()], ..Default::default() };
+    let mut vendors: Vec<PathBuf> = std::fs::read_dir(profiles)
+        .map(|r| r.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default();
+    vendors.sort();
+    for v in vendors {
+        if v.file_name().is_some_and(|n| n == "BBL") {
+            continue;
+        }
+        harvest_vendor(&v, &mut data, false);
+    }
+    data
+}
+
+/// A template line of another firmware, as `lex_other` reads it.
+fn other_line(line: &str) -> Option<lex::Command<'static>> {
+    // Leaked per call would be wasteful; re-lex on an owned copy instead.
+    let upper = line.to_ascii_uppercase();
+    match lex::lex_other(&upper, true) {
+        lex::Other::Command(c) => Some(lex::Command { code: c.code, words: c.words, text: None }),
+        _ => None,
+    }
+}
+
+/// Literal temperatures in another firmware's extended commands
+/// (`SET_HEATER_TEMPERATURE HEATER=extruder TARGET=250`), and which
+/// M-codes and extended commands the vendor's templates use.
+fn other_extended_temps(line: &str, lim: &mut ModelLimits) {
+    let upper = line.to_ascii_uppercase();
+    match lex::lex_other(&upper, true) {
+        lex::Other::Command(c) if c.code.letter == b'M' => {
+            lim.commands.insert(c.code.key());
+        }
+        lex::Other::Extended(e) if !e.name.contains(lex::PLACEHOLDER) => {
+            lim.commands.insert(e.name.clone());
+        }
+        _ => {}
+    }
+    if let lex::Other::Extended(e) = lex::lex_other(&upper, true) {
+        if e.name == "SET_HEATER_TEMPERATURE" {
+            let target = e.num("TARGET");
+            match e.param("HEATER").unwrap_or("") {
+                h if h.starts_with("EXTRUDER") => {
+                    max_opt(&mut lim.nozzle_max, target);
+                    max_opt(&mut lim.template_nozzle_max, target);
+                }
+                "HEATER_BED" => {
+                    max_opt(&mut lim.bed_max, target);
+                    max_opt(&mut lim.template_bed_max, target);
+                }
+                h if h.contains("CHAMBER") => max_opt(&mut lim.chamber_max, target),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn harvest_vendor(vendor_dir: &Path, data: &mut Data, bambu: bool) {
+    let dir = ProfileDir::load(vendor_dir);
 
     // Model name → id.
     let ids: HashMap<String, String> = dir
@@ -226,10 +297,12 @@ pub fn harvest(vendor_dir: &Path, source: &str) -> Data {
         keys.sort();
         keys.into_iter().flat_map(|k| strings(o.get(k))).collect()
     };
-    for (_, m) in machines.iter().chain(filaments.iter()) {
-        for t in templates(m) {
-            for line in template::lines(&t) {
-                see_line(&mut data, &line);
+    if bambu {
+        for (_, m) in machines.iter().chain(filaments.iter()) {
+            for t in templates(m) {
+                for line in template::lines(&t) {
+                    see_line(data, &line);
+                }
             }
         }
     }
@@ -238,7 +311,13 @@ pub fn harvest(vendor_dir: &Path, source: &str) -> Data {
     let mut machine_model: HashMap<String, String> = HashMap::new();
     for (name, m) in &machines {
         let Some(model) = m.get("printer_model").and_then(Value::as_str) else { continue };
-        let Some(id) = ids.get(model) else { continue };
+        // Bambu's models by the id its files carry; others' by name.
+        let id = if bambu {
+            let Some(id) = ids.get(model) else { continue };
+            id.clone()
+        } else {
+            model.trim().to_string()
+        };
         machine_model.insert(name.clone(), id.clone());
         let mut lim = ModelLimits { names: [model.to_string()].into(), ..Default::default() };
         lim.bed = area(m.get("printable_area"));
@@ -252,8 +331,21 @@ pub fn harvest(vendor_dir: &Path, source: &str) -> Data {
         for t in templates(m) {
             let mut r = Reach::new();
             for line in template::lines(&t) {
-                r.see(&data, &line);
-                if let Lexed::Command(c) = lex::lex(&line, |c| data.is_text(c), true) {
+                let command = if bambu {
+                    r.see(data, &line);
+                    match lex::lex(&line, |c| data.is_text(c), true) {
+                        Lexed::Command(c) => Some(lex::Command { code: c.code, words: c.words, text: None }),
+                        _ => None,
+                    }
+                } else {
+                    other_extended_temps(&line, &mut lim);
+                    let c = other_line(&line);
+                    if let Some(c) = &c {
+                        r.see_command(c);
+                    }
+                    c
+                };
+                if let Some(c) = command {
                     let s = c.num(b'S');
                     match c.code.key().as_str() {
                         "M104" | "M109" => {
@@ -273,7 +365,8 @@ pub fn harvest(vendor_dir: &Path, source: &str) -> Data {
             union(&mut lim.below_plate, &r.below);
             min_opt(&mut lim.min_z, r.min_z);
         }
-        data.models.entry(id.clone()).or_default().merge(&lim);
+        let to = if bambu { &mut data.models } else { &mut data.printers };
+        to.entry(id.clone()).or_default().merge(&lim);
     }
 
     // Materials, and what each model's filaments ask for.
@@ -291,23 +384,23 @@ pub fn harvest(vendor_dir: &Path, source: &str) -> Data {
         };
         let bed = beds.iter().copied().fold(0.0, f64::max);
         let m = MaterialLimits { nozzle_min: lo, nozzle_max: hi, bed_max: bed };
-        match data.materials.get_mut(&kind) {
+        let materials = if bambu { &mut data.materials } else { &mut data.other_materials };
+        match materials.get_mut(&kind) {
             Some(e) => e.merge(&m),
             None => {
-                data.materials.insert(kind, m);
+                materials.insert(kind, m);
             }
         }
         let chamber = nums(f.get("chamber_temperatures")).into_iter().chain(nums(f.get("chamber_temperature"))).reduce(f64::max);
         for printer in strings(f.get("compatible_printers")).iter().flat_map(|s| s.split(';').map(str::to_string).collect::<Vec<_>>()) {
             if let Some(id) = machine_model.get(printer.trim()) {
-                let lim = data.models.entry(id.clone()).or_default();
+                let lim = if bambu { &mut data.models } else { &mut data.printers }.entry(id.clone()).or_default();
                 max_opt(&mut lim.nozzle_max, Some(hi));
                 max_opt(&mut lim.bed_max, Some(bed));
                 max_opt(&mut lim.chamber_max, chamber);
             }
         }
     }
-    data
 }
 
 fn to_json(d: &Data) -> String {
@@ -349,6 +442,30 @@ mod tests {
         assert!(
             committed == fresh,
             "src/gcode/data/orca.json is stale: run FARMSLICER_REGEN_GCODE_DATA=1 cargo test gcode::harvest"
+        );
+    }
+
+    /// `data/printers.json` matches the submodule's other vendors.
+    #[test]
+    fn printers_data_is_fresh() {
+        let dir = repo().join("extern/OrcaSlicer/resources/profiles");
+        if !dir.join("Prusa").is_dir() {
+            eprintln!("skipped: no OrcaSlicer profiles at {}", dir.display());
+            return;
+        }
+        let version = std::fs::read_to_string(repo().join("extern/OrcaSlicer/version.inc"))
+            .ok()
+            .and_then(|v| v.lines().find(|l| l.contains("SoftFever_VERSION")).map(|l| l.split('"').nth(1).unwrap_or("").to_string()))
+            .unwrap_or_default();
+        let fresh = to_json(&harvest_others(&dir, &format!("OrcaSlicer {version} profiles (every vendor but BBL)")));
+        let path = repo().join("src/gcode/data/printers.json");
+        if regen() {
+            std::fs::write(&path, &fresh).unwrap();
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+        assert!(
+            committed == fresh,
+            "src/gcode/data/printers.json is stale: run FARMSLICER_REGEN_GCODE_DATA=1 cargo test gcode::harvest"
         );
     }
 
