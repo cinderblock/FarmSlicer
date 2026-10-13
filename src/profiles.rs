@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// OrcaSlicer's shared filament library: generic and brand filaments for
+/// printers of every vendor.
+const FILAMENT_LIBRARY: &str = "OrcaFilamentLibrary";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileEntry {
@@ -86,19 +90,9 @@ impl ProfileStore {
                 ("process", &mut processes),
                 ("filament", &mut filaments),
             ] {
-                let dir = vendor_entry.path().join(subdir);
-                if !dir.is_dir() {
-                    continue;
-                }
-                let Ok(entries) = std::fs::read_dir(&dir) else {
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                        continue;
-                    }
-
+                // Vendors file presets in subdirectories too (Elegoo's
+                // machine/ECC/, BBL's filament/Polymaker/, ...).
+                for path in json_files(&vendor_entry.path().join(subdir)) {
                     // Check for machine_model entries (base models with nozzle lists)
                     if subdir == "machine" {
                         if let Some((name, nozzles, model_id)) = load_machine_model_nozzles(&path) {
@@ -279,8 +273,20 @@ impl ProfileStore {
             .collect()
     }
 
+    /// Filaments for a machine, as OrcaSlicer offers them: the ones that
+    /// name it, its vendor's general ones, and the shared library's, except
+    /// library filaments the vendor has its own version of for this machine
+    /// (same alias: "Generic PLA @System" gives way to "Generic PLA @BBL X1C").
     pub fn filaments_for_machine(&self, machine_name: &str) -> Vec<&ProfileEntry> {
         let vendor = self.vendor_for_machine(machine_name);
+        let names_machine =
+            |f: &ProfileEntry| f.compatible_printers.as_ref().is_some_and(|cp| cp.iter().any(|c| c == machine_name));
+        let own_aliases: HashSet<&str> = self
+            .filaments
+            .iter()
+            .filter(|f| f.vendor != FILAMENT_LIBRARY && names_machine(f))
+            .map(|f| alias(&f.name))
+            .collect();
         self.filaments
             .iter()
             .filter(|f| {
@@ -288,7 +294,8 @@ impl ProfileStore {
                     return false;
                 }
                 match &f.compatible_printers {
-                    Some(cp) if !cp.is_empty() => cp.contains(&machine_name.to_string()),
+                    Some(cp) if !cp.is_empty() => names_machine(f),
+                    _ if f.vendor == FILAMENT_LIBRARY => vendor.is_some() && !own_aliases.contains(alias(&f.name)),
                     _ => vendor.is_some_and(|v| f.vendor == v),
                 }
             })
@@ -493,6 +500,31 @@ fn load_profile_entry(path: &Path, vendor: &str, profile_type: &str) -> Option<P
     })
 }
 
+/// A preset's name without its " @..." qualifier, as OrcaSlicer matches
+/// presets across vendors ("Generic PLA @System" → "Generic PLA").
+fn alias(name: &str) -> &str {
+    name.split(" @").next().unwrap_or(name).trim()
+}
+
+/// Every `.json` file under `dir`, at any depth, in a stable order.
+fn json_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(d) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// Find the longest common prefix of a set of strings, trimmed of trailing whitespace.
 /// Used to derive vendor display names from model names (e.g., "Bambu Lab" from
 /// ["Bambu Lab A1", "Bambu Lab X1 Carbon", ...]).
@@ -513,4 +545,39 @@ fn common_prefix(strings: &[String]) -> String {
         }
     }
     strings[0][..len].trim_end().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(root: &Path, rel: &str, json: Value) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, json.to_string()).unwrap();
+    }
+
+    #[test]
+    fn nested_presets_and_the_filament_library() {
+        let root = std::env::temp_dir().join(format!("farmslicer-profiles-{}", uuid::Uuid::new_v4()));
+        let machine = |name: &str| json!({"type": "machine", "name": name, "instantiation": "true"});
+        let filament = |name: &str, cp: Vec<&str>| {
+            json!({"type": "filament", "name": name, "instantiation": "true", "compatible_printers": cp})
+        };
+        write(&root, "Acme/machine/A1/Acme A1 0.4 nozzle.json", machine("Acme A1 0.4 nozzle"));
+        write(&root, "Acme/filament/Brand/Generic PLA @Acme A1.json", filament("Generic PLA @Acme A1", vec!["Acme A1 0.4 nozzle"]));
+        write(&root, "Bolt/machine/Bolt 0.4 nozzle.json", machine("Bolt 0.4 nozzle"));
+        write(&root, "OrcaFilamentLibrary/filament/Generic PLA @System.json", filament("Generic PLA @System", vec![]));
+        write(&root, "OrcaFilamentLibrary/filament/Base/Generic PETG @System.json", filament("Generic PETG @System", vec![]));
+        let store = ProfileStore::load(&root);
+        let names = |m: &str| {
+            let mut v: Vec<String> = store.filaments_for_machine(m).iter().map(|f| f.name.clone()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(names("Acme A1 0.4 nozzle"), vec!["Generic PETG @System", "Generic PLA @Acme A1"]);
+        assert_eq!(names("Bolt 0.4 nozzle"), vec!["Generic PETG @System", "Generic PLA @System"]);
+        assert!(names("No such printer").is_empty());
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
