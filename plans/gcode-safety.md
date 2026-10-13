@@ -115,8 +115,8 @@ through the approval flow.
     A1 mini and H2D server slices checked clean; a Bambu Studio upload clean
     with its own time kept; an admin's `machine_start_gcode: M104 S300`
     override caught as review. ✅
-11. Push to origin (CI builds the image) and deploy via the ops repo. ←
-    **waiting on the user**
+11. Pushed; CI built the image (digest in the progress log). Deploy via the
+    ops repo ← **waiting on the user**
 
 ## Findings / gotchas
 
@@ -169,7 +169,9 @@ through the approval flow.
 - [x] Docs (README API, CLAUDE.md structure, Guide) (`4cbcf10`)
 - [x] Real-image verification on buildhost; containers, image and Docker
       context removed afterwards
-- [ ] Push to origin (needs the user's go-ahead)
+- [x] Pushed `12db0a1` (approved 2026-10-13); CI green (check, wasm, image):
+      `ghcr.io/cinderblock/farmslicer:12db0a1` =
+      `sha256:9c80881546398c2e5751f2b62a4f784b80795440f20a88895d081b5f9fbbd493`
 - [ ] Deploy: pin the new image digest in the ops repo (needs the user's
       per-change authorization)
 
@@ -181,8 +183,7 @@ Bambu Studio exports and two FarmSlicer packages). Delete when done.
 
 ## Open questions for the user
 
-1. Push the 10 commits to origin? (CI then builds the image; nothing deploys
-   by itself.) Recommendation: yes.
+1. ~~Push?~~ Done.
 2. Deploy to production? That's a pin change in the ops repo and needs your
    per-change yes. Recommendation: after CI, deploy; existing jobs get
    checked in the background at startup.
