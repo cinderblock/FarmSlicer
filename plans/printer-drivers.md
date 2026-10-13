@@ -156,11 +156,22 @@ Everything printer-facing is wired straight to `src/bambu/` today
       Node fake + `tests/octoprint-e2e.mjs`; Dockerfile for real OctoPrint
       (`tests/fake-octoprint/`). Conformance: passes against real
       OctoPrint 1.11.8 and 2.0.0rc6 (`pd-octoprint-test.sh`).
-- [ ] **5. PrusaLink driver** + fake ← current
-- [ ] **6. Elegoo SDCP driver** + fake.
-- [ ] **6b. Discovery for every make**: mDNS (`_moonraker._tcp`,
-      `_octoprint._tcp`, `_prusalink._tcp`) and SDCP's UDP broadcast,
-      cards per vendor on the Printers page.
+- [x] **5. PrusaLink driver** (`7db1f19`): `src/prusalink/` (polling,
+      one request at a time, remembered last job, ATTENTION/BUSY, folder +
+      Content-Length upload + separate start, pause/resume/stop by job id,
+      `/thumb/l` pictures, fast polling after a start). No speed/heat/
+      camera (Buddy has none). Print file names now ASCII. Verified
+      against the Node fake only (no PrusaLink emulator short of the
+      firmware under QEMU).
+- [x] **6. Elegoo SDCP driver** (`f6f87fd`): `src/sdcp/` (one WebSocket,
+      RequestID matching, Cmd 0 when quiet, only Elegoo's own payloads,
+      1 MiB MD5-checked parts, wait for the file check, Cmd 128 with the
+      print options and plate side, speed presets as levels, Cmd 403
+      temperatures, Cmd 386 + MJPEG camera, history-image pictures).
+      Verified against the Node fake only (no hardware, no emulator).
+- [ ] **6b. Discovery for every make** ← current: mDNS
+      (`_moonraker._tcp`, `_octoprint._tcp`, `_prusalink._tcp`) and SDCP's
+      UDP broadcast, cards per vendor on the Printers page.
 - [ ] **7. UI**: protocol-specific connection fields, capability-gated
       controls, discovery cards per vendor; docs (README, CLAUDE.md).
 
@@ -252,6 +263,16 @@ Everything printer-facing is wired straight to `src/bambu/` today
   - The fake's `current` message must keep `state` an object (the job
     body's `state` is a string): an ordering bug in the fake made every
     flag vanish.
+
+- **PrusaLink / SDCP fakes** found two driver bugs:
+  - A short print can start and finish between two idle polls (5 s), and
+    PrusaLink drops the job once finished, so the print stayed
+    "starting". After a start the link now polls at once and every 2 s
+    for two minutes.
+  - SDCP acknowledges Cmd 0 before it sends the status, and may push
+    nothing while idle: reading the cache right after the Ack is stale.
+    `Handle::refresh()` waits for the next status frame; the link asks
+    often while the machine isn't plainly idle.
 
 ## Progress log
 
