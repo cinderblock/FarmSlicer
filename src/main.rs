@@ -10,6 +10,7 @@ mod farm_api;
 mod gcode;
 mod groups;
 mod groups_api;
+mod incidents;
 mod join_api;
 mod moonraker;
 mod octoprint;

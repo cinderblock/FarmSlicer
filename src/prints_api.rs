@@ -764,6 +764,26 @@ async fn control_print(
 
 /// `POST /api/printers/{id}/control` (admins): act on whatever the printer
 /// is doing, including prints started elsewhere.
+#[derive(Deserialize)]
+struct IncidentQuery {
+    user: Option<String>,
+    limit: Option<i64>,
+}
+
+/// `GET /api/gcode-incidents?user=&limit=` (admins): custom G-code that
+/// failed its check or a print, newest first (src/incidents.rs).
+async fn list_gcode_incidents(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Query(q): Query<IncidentQuery>,
+) -> Result<Json<Value>, ApiError> {
+    auth::require_admin(&user)?;
+    let list = state
+        .db
+        .list_gcode_incidents(q.user.as_deref().filter(|u| !u.is_empty()), q.limit.unwrap_or(200).clamp(1, 2000));
+    Ok(Json(json!(list)))
+}
+
 async fn control_printer(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -789,4 +809,5 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/prints/{id}/approve", post(approve_print))
         .route("/api/prints/{id}/reject", post(reject_print))
         .route("/api/printers/{id}/control", post(control_printer))
+        .route("/api/gcode-incidents", get(list_gcode_incidents))
 }

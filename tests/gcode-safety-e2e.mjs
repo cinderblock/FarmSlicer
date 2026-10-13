@@ -11,6 +11,7 @@
 // checks pass. No dependencies beyond Node 22.
 import { createHash } from "node:crypto";
 import { BASE, check, Client, SoftAuthenticator, register, finish, zip } from "./lib.mjs";
+import { startFakeMoonraker } from "./fake-moonraker/fake-moonraker.mjs";
 
 console.log(`gcode safety e2e against ${BASE}`);
 
@@ -190,6 +191,57 @@ r = await plain("SET_KINEMATIC_POSITION Z=200\nG1 Z0 F600", "kinematic.gcode");
 check(r.json.needs_review.some((m) => /SET_KINEMATIC_POSITION/.test(m)), "faking the position needs review", json(r));
 r = await plain("G90\nG1 X900 Y10 Z5", "far.gcode");
 check(r.json.needs_review.some((m) => /X900/.test(m)), "moves off the Voron's bed need review", json(r));
+
+// ---- incident log: whose custom G-code failed its check or a print ---------------
+const ursulaId = (await user.get("/api/me")).json.id;
+r = await user.get("/api/gcode-incidents");
+check(r.status === 403, "only admins read the incident log", json(r));
+r = await owner.get(`/api/gcode-incidents?user=${ursulaId}`);
+const incidents = r.json ?? [];
+const incident = (name) => incidents.find((i) => i.job_name === name);
+check(incident("hot.gcode.3mf")?.kind === "check" && incident("hot.gcode.3mf").severity === "review" && /300 °C/.test(incident("hot.gcode.3mf").summary),
+  "an upload that needs review is logged against its uploader", json(r));
+check(incident("odd.gcode.3mf")?.severity === "block", "so is one that's blocked", json(r));
+check(incidents.some((i) => i.kind === "check" && i.source === "browser"), "and a browser result that fails its check", json(r));
+check(!incident("clean.gcode.3mf") && !incident("voron.gcode") && incidents.every((i) => i.username === "ursula"), "clean files aren't", json(r));
+r = await owner.get("/api/users");
+check(r.json.find((u) => u.username === "ursula")?.gcode_incidents === incidents.length, "the users list counts them", json(r));
+r = await owner.get("/api/gcode-incidents?user=nobody");
+check(r.status === 200 && r.json.length === 0, "and filters by user", json(r));
+
+// A print of uploaded G-code that fails on the printer is logged too.
+const fakeKlipper = await startFakeMoonraker({ apiKey: "k2", printSeconds: 60 });
+r = await owner.post("/api/printers", {
+  name: "Incident Voron", machine_profile: "Voron 2.4 350", nozzle_diameter: "0.4", protocol: "moonraker",
+  address: fakeKlipper.address, access_code: "k2",
+});
+const voronPrinter = r.json.id;
+let online = false;
+for (let i = 0; i < 60 && !online; i++) {
+  online = (await owner.get("/api/printers/status")).json?.find((s) => s.printer_id === voronPrinter)?.state === "IDLE";
+  if (!online) await new Promise((res) => setTimeout(res, 250));
+}
+check(online, "a Klipper printer to print on", "");
+const up = await user.form("/api/uploads", { file: [new Blob([klipper("G90\nM83\nG1 X100 Y100 Z0.2 E1 F3000")]), "fails.gcode"] });
+r = await owner.post(`/api/jobs/${up.json.id}/print`, { printer_id: voronPrinter });
+check(r.status === 201, "an admin sends ursula's upload", json(r));
+const failing = r.json.id;
+let p;
+for (let i = 0; i < 80 && p?.status !== "printing"; i++) {
+  p = (await owner.get(`/api/prints/${failing}`)).json;
+  if (p?.status !== "printing") await new Promise((res) => setTimeout(res, 250));
+}
+await fetch(`http://${fakeKlipper.address}/__fake/shutdown`, { method: "POST" });
+for (let i = 0; i < 80 && p?.status !== "failed"; i++) {
+  p = (await owner.get(`/api/prints/${failing}`)).json;
+  if (p?.status !== "failed") await new Promise((res) => setTimeout(res, 250));
+}
+check(p?.status === "failed", "the printer stops it", JSON.stringify(p));
+r = await owner.get(`/api/gcode-incidents?user=${ursulaId}`);
+const failed = r.json.find((i) => i.kind === "print_failed" && i.print_id === failing);
+check(failed && failed.username === "ursula" && failed.sent_by_username === "owner" && failed.printer_name === "Incident Voron" && /failed/.test(failed.summary),
+  "the failed print is logged against whose G-code it was, and who sent it", json(r));
+await fakeKlipper.close();
 
 // ---- limits --------------------------------------------------------------------------
 r = await owner.call("PUT", "/api/settings", { gcode_limits: { max_dwell_sec: 0 } });

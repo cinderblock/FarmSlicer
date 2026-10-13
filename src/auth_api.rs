@@ -645,11 +645,19 @@ async fn list_users(
 ) -> Result<Json<Value>, ApiError> {
     auth::require_admin(&user)?;
     let tree = crate::groups::Tree::load(&state.db);
+    let incidents = state.db.gcode_incident_counts();
     let users: Vec<Value> = state
         .db
         .list_users()
         .iter()
-        .map(|u| admin_user_json(&state, &tree, u))
+        .map(|u| {
+            let mut v = admin_user_json(&state, &tree, u);
+            // Custom G-code of theirs that failed its check or a print.
+            let (count, last) = incidents.get(&u.id).cloned().unwrap_or((0, String::new()));
+            v["gcode_incidents"] = json!(count);
+            v["last_gcode_incident"] = json!((count > 0).then_some(last));
+            v
+        })
         .collect();
     Ok(Json(json!(users)))
 }

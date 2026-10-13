@@ -4,6 +4,7 @@ import { apiJson, useAuth } from "../auth";
 import type { User } from "../auth";
 import { useJson } from "../api";
 import { QuotaRulesEditor } from "../components/Quota";
+import GcodeIncidents from "../components/GcodeIncidents";
 import type { Rule } from "../groups";
 import { ruleText } from "../groups";
 
@@ -13,6 +14,9 @@ interface AdminUser extends User {
   /** Per-user limits; null = the site default for the account kind. */
   quotas: Rule[] | null;
   groups: { group_id: string; path: string; role: string; status: string }[];
+  /** Their custom G-code that failed its check or a print. */
+  gcode_incidents: number;
+  last_gcode_incident: string | null;
 }
 
 /** Admin page: accounts and invite links. Admins cannot touch the owner; nobody can delete it. */
@@ -22,6 +26,7 @@ export default function UsersPage() {
   const users = useJson<AdminUser[]>("/api/users", rev).data ?? [];
   const load = async () => setRev((r) => r + 1);
   const [editing, setEditing] = useState<string | null>(null);
+  const [incidentsOf, setIncidentsOf] = useState<{ id: string; username: string } | null>(null);
   const [draft, setDraft] = useState<Rule[]>([]);
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
@@ -138,6 +143,7 @@ export default function UsersPage() {
             <th>Groups</th>
             <th>Limits</th>
             <th>Last login</th>
+            <th>G-code incidents</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -215,6 +221,15 @@ export default function UsersPage() {
                 </td>
                 <td>{u.last_login ?? "—"}</td>
                 <td>
+                  {u.gcode_incidents > 0 ? (
+                    <button className="btn-sm" onClick={() => setIncidentsOf({ id: u.id, username: u.username })}>
+                      {u.gcode_incidents}
+                    </button>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td>
                   <button className="btn-sm" onClick={() => reissue(u)} disabled={locked}>
                     New invite link
                   </button>{" "}
@@ -229,6 +244,8 @@ export default function UsersPage() {
           })}
         </tbody>
       </table>
+
+      <GcodeIncidents user={incidentsOf} onClear={() => setIncidentsOf(null)} rev={rev} />
 
       <h3>Add user</h3>
       <form className="printer-form" onSubmit={create}>

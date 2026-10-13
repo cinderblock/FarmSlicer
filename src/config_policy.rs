@@ -48,6 +48,12 @@ pub fn parse(json: &str) -> Result<Map<String, Value>, String> {
     }
 }
 
+/// Whether overrides set anything beyond the Slice page's settings (an
+/// admin's custom start G-code and the like).
+pub fn beyond_schema(overrides: &Map<String, Value>) -> bool {
+    overrides.keys().any(|k| !schema().contains_key(k))
+}
+
 /// Why these overrides aren't allowed, if they aren't.
 pub fn check(overrides: &Map<String, Value>, admin: bool) -> Result<(), String> {
     let mut problems = Vec::new();

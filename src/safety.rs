@@ -64,6 +64,7 @@ pub fn check_job(state: &AppState, job_id: &str) -> Result<Package, String> {
             );
         }
     }
+    crate::incidents::after_check(state, &job, &pkg);
     Ok(pkg)
 }
 

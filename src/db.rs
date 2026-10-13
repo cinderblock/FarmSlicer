@@ -118,6 +118,44 @@ pub struct PrintRecord {
     pub updated_at: String,
 }
 
+/// Custom G-code that failed its check or a print (src/incidents.rs).
+#[derive(Debug, Serialize, Clone)]
+pub struct GcodeIncident {
+    pub id: String,
+    pub created_at: String,
+    /// Whoever the G-code came from (the job's creator).
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    /// Whoever sent the print (print incidents).
+    pub sent_by: Option<String>,
+    pub sent_by_username: Option<String>,
+    pub job_id: Option<String>,
+    pub print_id: Option<String>,
+    pub job_name: String,
+    pub printer_name: Option<String>,
+    /// upload | browser | server
+    pub source: String,
+    /// check | print_failed | printer_error
+    pub kind: String,
+    /// block | review | error
+    pub severity: String,
+    pub summary: String,
+}
+
+pub struct NewIncident<'a> {
+    pub user_id: Option<&'a str>,
+    pub sent_by: Option<&'a str>,
+    pub job_id: Option<&'a str>,
+    pub print_id: Option<&'a str>,
+    pub job_name: &'a str,
+    pub printer_name: Option<&'a str>,
+    pub source: &'a str,
+    pub kind: &'a str,
+    pub severity: &'a str,
+    pub summary: &'a str,
+    pub dedupe: &'a str,
+}
+
 /// Print statuses that still need the printer.
 pub const ACTIVE_PRINT_STATUSES: &[&str] = &["uploading", "starting", "printing", "paused"];
 
@@ -460,6 +498,26 @@ impl Db {
         if conn.prepare("SELECT safety_review FROM prints LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE prints ADD COLUMN safety_review INTEGER NOT NULL DEFAULT 0;").ok();
         }
+        // Custom G-code that failed its check or a print (src/incidents.rs).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS gcode_incidents (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                user_id TEXT, -- whoever the G-code came from (the job's creator)
+                sent_by TEXT, -- whoever sent the print, for print incidents
+                job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+                print_id TEXT REFERENCES prints(id) ON DELETE SET NULL,
+                job_name TEXT NOT NULL,
+                printer_name TEXT,
+                source TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                dedupe TEXT NOT NULL UNIQUE
+            );
+            CREATE INDEX IF NOT EXISTS gcode_incidents_user ON gcode_incidents(user_id, created_at);",
+        )
+        .expect("failed to create gcode_incidents");
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
              CREATE INDEX IF NOT EXISTS jobs_user ON jobs(user_id);"
@@ -1219,6 +1277,84 @@ impl Db {
     }
 
     // -- Printer reports --
+
+    // -- G-code incidents --
+
+    /// Record an incident unless one with the same `dedupe` key exists;
+    /// true if it was new.
+    pub fn record_gcode_incident(&self, i: &NewIncident<'_>) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO gcode_incidents
+                (id, user_id, sent_by, job_id, print_id, job_name, printer_name, source, kind, severity, summary, dedupe)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                i.user_id,
+                i.sent_by,
+                i.job_id,
+                i.print_id,
+                i.job_name,
+                i.printer_name,
+                i.source,
+                i.kind,
+                i.severity,
+                i.summary,
+                i.dedupe
+            ],
+        )
+        .unwrap()
+            > 0
+    }
+
+    /// Newest first; `user_id` narrows to one user's G-code.
+    pub fn list_gcode_incidents(&self, user_id: Option<&str>, limit: i64) -> Vec<GcodeIncident> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT i.id, i.created_at, i.user_id, u.username, i.sent_by, s.username, i.job_id, i.print_id,
+                        i.job_name, i.printer_name, i.source, i.kind, i.severity, i.summary
+                 FROM gcode_incidents i
+                 LEFT JOIN users u ON u.id = i.user_id
+                 LEFT JOIN users s ON s.id = i.sent_by
+                 WHERE ?1 IS NULL OR i.user_id = ?1
+                 ORDER BY i.created_at DESC, i.rowid DESC LIMIT ?2",
+            )
+            .unwrap();
+        stmt.query_map(params![user_id, limit], |r| {
+            Ok(GcodeIncident {
+                id: r.get(0)?,
+                created_at: r.get(1)?,
+                user_id: r.get(2)?,
+                username: r.get(3)?,
+                sent_by: r.get(4)?,
+                sent_by_username: r.get(5)?,
+                job_id: r.get(6)?,
+                print_id: r.get(7)?,
+                job_name: r.get(8)?,
+                printer_name: r.get(9)?,
+                source: r.get(10)?,
+                kind: r.get(11)?,
+                severity: r.get(12)?,
+                summary: r.get(13)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// Per user: how many incidents, and when the last was.
+    pub fn gcode_incident_counts(&self) -> std::collections::HashMap<String, (i64, String)> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT user_id, COUNT(*), MAX(created_at) FROM gcode_incidents WHERE user_id IS NOT NULL GROUP BY user_id")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?))))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
 
     pub fn create_printer_report(&self, printer: &Printer, user_id: Option<&str>, description: &str) -> String {
         let id = uuid::Uuid::new_v4().to_string();

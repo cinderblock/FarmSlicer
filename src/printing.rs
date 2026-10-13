@@ -346,6 +346,7 @@ pub fn spawn_send(state: Arc<AppState>, print: PrintRecord, package_path: String
         if let Err(e) = send(&state, &print, &package_path, &plate, &mapping, &options).await {
             eprintln!("Print {} ({} on {}): {e}", print.id, print.name, print.printer_name);
             state.db.update_print(&print.id, "failed", None, Some(&e));
+            crate::incidents::print_failed(&state, &print, &e);
         }
     });
 }
@@ -512,7 +513,14 @@ fn apply(state: &AppState, status: &PrinterStatus) {
         if print.status == "uploading" {
             continue;
         }
+        // Errors the printer raises while it prints our job.
+        if matches!(print.status.as_str(), "printing" | "paused") && match_print(&print, status) == Match::Ours {
+            crate::incidents::printer_errors(state, &print, status);
+        }
         if let Some((new_status, progress, error)) = transition(&print, status) {
+            if new_status == "failed" && print.status != "failed" {
+                crate::incidents::print_failed(state, &print, error.as_deref().unwrap_or("the print failed"));
+            }
             if state.db.update_print(&print.id, new_status, progress, error.as_deref()) && new_status != print.status {
                 println!(
                     "Print {} ({} on {}): {} -> {new_status}{}",
@@ -547,6 +555,7 @@ pub async fn track(state: Arc<AppState>) {
                 for print in state.db.list_prints(None, true, 200) {
                     if print.status == "starting" && age_secs(&print.updated_at) > START_DEADLINE_SECS {
                         state.db.update_print(&print.id, "failed", None, Some("the printer never started this print"));
+                        crate::incidents::print_failed(&state, &print, "the printer never started this print");
                         eprintln!("Print {}: never started on {}; giving up", print.id, print.printer_name);
                     }
                     // A print whose upload task died with the process.
