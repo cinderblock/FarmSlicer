@@ -21,10 +21,12 @@ pub enum Protocol {
     Bambu,
     /// Klipper through Moonraker: WebSocket JSON-RPC, HTTP uploads.
     Moonraker,
+    /// OctoPrint (1.x, 2.0): REST and its push socket.
+    OctoPrint,
 }
 
 impl Protocol {
-    pub const ALL: &[Protocol] = &[Protocol::Bambu, Protocol::Moonraker];
+    pub const ALL: &[Protocol] = &[Protocol::Bambu, Protocol::Moonraker, Protocol::OctoPrint];
 
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|p| p.as_str() == s)
@@ -35,6 +37,7 @@ impl Protocol {
         match self {
             Protocol::Bambu => "bambu",
             Protocol::Moonraker => "moonraker",
+            Protocol::OctoPrint => "octoprint",
         }
     }
 
@@ -42,6 +45,7 @@ impl Protocol {
         match self {
             Protocol::Bambu => "Bambu Lab (LAN)",
             Protocol::Moonraker => "Klipper (Moonraker)",
+            Protocol::OctoPrint => "OctoPrint",
         }
     }
 
@@ -67,6 +71,16 @@ impl Protocol {
                        moonraker.conf doesn't list this server under trusted_clients; Mainsail shows it \
                        under Settings → General.",
             },
+            Protocol::OctoPrint => Connection {
+                fields: vec![
+                    Field::new("address", "Address", "octopi.local, 192.168.1.60:5000 or http://host/octoprint"),
+                    Field::new("access_code", "API key", "From OctoPrint: User Settings → Application Keys").secret(),
+                ],
+                hint: "OctoPrint's address: a host (port 80, as on OctoPi), host:port (OctoPrint itself \
+                       listens on 5000), or a URL. Make an application key for FarmSlicer in OctoPrint's \
+                       User Settings → Application Keys (or use your API key); the account needs to \
+                       be allowed to print and control the printer.",
+            },
         }
     }
 
@@ -89,7 +103,8 @@ impl Protocol {
                 package: PackageFormat::Bambu3mf,
                 outside_pictures: true,
             },
-            Protocol::Moonraker => Capabilities {
+            // Klipper and OctoPrint: the same controls.
+            Protocol::Moonraker | Protocol::OctoPrint => Capabilities {
                 pause: true,
                 stop: true,
                 speed: Some(SpeedControl::Percent),

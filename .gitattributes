@@ -10,3 +10,4 @@ Dockerfile  text eol=lf
 tests/fake-printer/*.conf text eol=lf
 tests/fake-printer/*.yml text eol=lf
 tests/fake-printer/*.py text eol=lf
+tests/fake-octoprint/*.yaml text eol=lf

@@ -380,6 +380,7 @@ async fn send(
             crate::bambu::send::send(state, &printer, print, &data, plate, mapping, options, &mut step).await
         }
         Some(Protocol::Moonraker) => crate::moonraker::send(state, &printer, print, &data, &mut step).await,
+        Some(Protocol::OctoPrint) => crate::octoprint::send(state, &printer, print, &data, &mut step).await,
         None => Err(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
     }
 }

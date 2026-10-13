@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use super::{Command, PrinterStatus, Protocol, protocol_of};
-use crate::{bambu, db, moonraker};
+use crate::{bambu, db, moonraker, octoprint};
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -76,6 +76,7 @@ impl StatusSink {
 pub enum DriverHandle {
     Bambu(bambu::link::Handle),
     Moonraker(moonraker::link::Handle),
+    OctoPrint(octoprint::link::Handle),
 }
 
 impl DriverHandle {
@@ -85,6 +86,7 @@ impl DriverHandle {
         match self {
             DriverHandle::Bambu(h) => h.command(command).await,
             DriverHandle::Moonraker(h) => h.command(command).await,
+            DriverHandle::OctoPrint(h) => h.command(command).await,
         }
     }
 
@@ -93,6 +95,7 @@ impl DriverHandle {
         match self {
             DriverHandle::Bambu(h) => h.raw(),
             DriverHandle::Moonraker(h) => h.raw(),
+            DriverHandle::OctoPrint(h) => h.raw(),
         }
     }
 
@@ -100,7 +103,7 @@ impl DriverHandle {
         match self {
             DriverHandle::Bambu(h) => h.shutdown(),
             // Aborting the link's task closes its socket.
-            DriverHandle::Moonraker(_) => {}
+            DriverHandle::Moonraker(_) | DriverHandle::OctoPrint(_) => {}
         }
     }
 }
@@ -110,6 +113,7 @@ impl DriverHandle {
 enum LinkConfig {
     Bambu(bambu::link::Config),
     Moonraker(moonraker::link::Config),
+    OctoPrint(octoprint::link::Config),
 }
 
 impl LinkConfig {
@@ -117,6 +121,7 @@ impl LinkConfig {
         match protocol_of(p)? {
             Protocol::Bambu => bambu::link::Config::from_printer(p).map(Self::Bambu),
             Protocol::Moonraker => moonraker::link::Config::from_printer(p).map(Self::Moonraker),
+            Protocol::OctoPrint => octoprint::link::Config::from_printer(p).map(Self::OctoPrint),
         }
     }
 
@@ -126,6 +131,7 @@ impl LinkConfig {
         match (self, other) {
             (Self::Bambu(a), Self::Bambu(b)) => a.same_endpoint(b),
             (Self::Moonraker(a), Self::Moonraker(b)) => a.same_endpoint(b),
+            (Self::OctoPrint(a), Self::OctoPrint(b)) => a.same_endpoint(b),
             _ => false,
         }
     }
@@ -134,6 +140,7 @@ impl LinkConfig {
         match self {
             Self::Bambu(c) => &c.name,
             Self::Moonraker(c) => &c.name,
+            Self::OctoPrint(c) => &c.name,
         }
     }
 
@@ -146,6 +153,10 @@ impl LinkConfig {
             Self::Moonraker(c) => {
                 let (handle, task) = moonraker::link::start(c.clone(), sink);
                 (DriverHandle::Moonraker(handle), task)
+            }
+            Self::OctoPrint(c) => {
+                let (handle, task) = octoprint::link::start(c.clone(), sink);
+                (DriverHandle::OctoPrint(handle), task)
             }
         }
     }

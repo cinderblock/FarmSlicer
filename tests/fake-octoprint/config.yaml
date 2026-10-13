@@ -1,0 +1,22 @@
+server:
+  firstRun: false
+  onlineCheck: {enabled: false}
+  pluginBlacklist: {enabled: false}
+  seenWizards: {corewizard: 4}
+plugins:
+  virtual_printer:
+    _config_version: 1
+    enabled: true
+    # The default injects resends (line 105 stalls for a timeout).
+    simulated_errors: []
+  classicwebcam:
+    # Without the version the first start wipes the URLs.
+    _config_version: 1
+    stream: /webcam/?action=stream
+    snapshot: http://127.0.0.1:8080/?action=snapshot
+  tracking: {enabled: false}
+  announcements: {_config_version: 1, enabled_channels: []}
+serial:
+  port: VIRTUAL
+  baudrate: 115200
+  autoconnect: true

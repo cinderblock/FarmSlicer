@@ -1,0 +1,9 @@
+_version: 2
+admin:
+  active: true
+  apikey: FARMSLICERTESTKEY0123456789ABCDEF
+  groups: [admins, users]
+  # Not a usable password: tests use the API key.
+  password: "x"
+  permissions: []
+  settings: {}

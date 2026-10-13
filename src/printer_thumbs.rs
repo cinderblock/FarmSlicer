@@ -6,7 +6,8 @@
 //! - Bambu: the project file is on its storage under the job's name, in
 //!   `/cache/` (cloud and SD prints) or `/` (LAN uploads), and its plate PNG
 //!   is taken out of it (FTPS);
-//! - Moonraker: the thumbnails it extracted from the G-code file.
+//! - Moonraker: the thumbnails it extracted from the G-code file;
+//! - OctoPrint: its own thumbnails (2.0) or the Slicer Thumbnails plugin's.
 //!
 //! Found pictures are cached for half an hour, misses for a minute, and
 //! fetches are one at a time per printer.
@@ -128,6 +129,12 @@ async fn fetch(printer: &crate::db::Printer, status: &crate::printer::PrinterSta
         }
         Some(Protocol::Moonraker) => match status.job_file.as_deref() {
             Some(file) => Ok(crate::moonraker::picture(printer, file)
+                .await?
+                .map(|img| (Bytes::from(img.bytes), img.content_type))),
+            None => Ok(None),
+        },
+        Some(Protocol::OctoPrint) => match status.job_file.as_deref() {
+            Some(file) => Ok(crate::octoprint::picture(printer, file)
                 .await?
                 .map(|img| (Bytes::from(img.bytes), img.content_type))),
             None => Ok(None),

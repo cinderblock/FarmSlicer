@@ -232,6 +232,7 @@ async fn camera_kind(state: &AppState, p: &Printer) -> Result<CameraKind, String
             Ok(crate::camera::bambu_kind(model_id.as_deref(), p.address.trim(), p.access_code.trim()))
         }
         Some(Protocol::Moonraker) => crate::moonraker::camera(p).await,
+        Some(Protocol::OctoPrint) => crate::octoprint::camera(p).await,
         None => Err("FarmSlicer can't show this printer's camera".into()),
     }
 }
