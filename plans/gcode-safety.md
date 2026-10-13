@@ -115,8 +115,8 @@ through the approval flow.
     A1 mini and H2D server slices checked clean; a Bambu Studio upload clean
     with its own time kept; an admin's `machine_start_gcode: M104 S300`
     override caught as review. ✅
-11. Pushed; CI built the image (digest in the progress log). Deploy via the
-    ops repo ← **waiting on the user**
+11. Pushed; CI built the image; deployed (ops `632cb73`, approved
+    2026-10-13). ✅
 
 ## Findings / gotchas
 
@@ -178,21 +178,18 @@ through the approval flow.
 - [x] Pushed `12db0a1` (approved 2026-10-13); CI green (check, wasm, image):
       `ghcr.io/cinderblock/farmslicer:12db0a1` =
       `sha256:9c80881546398c2e5751f2b62a4f784b80795440f20a88895d081b5f9fbbd493`
-- [ ] Deploy: pin the new image digest in the ops repo (needs the user's
-      per-change authorization)
-
-Left on buildhost on purpose (for regenerating data / re-running the
-corpus): `~/farmslicer-gcode-safety` (sources), `-target` (3.1 GB cargo
-cache), `-bs` (BambuStudio profiles of nine releases), `-corpus` (122
-FarmSlicer packages) + `-corpus.json`, `-samples` (the maintainer's three
-Bambu Studio exports and two FarmSlicer packages). Delete when done.
+- [x] Deployed `12db0a1` (approved 2026-10-13): ops `632cb73` pins
+      `sha256:9c80…d493`; ops deploy run 38464696073 green; sentinel's
+      `farmslicer` healthy on that digest, the site answers. (The printer
+      drivers merged later into master are not in this deploy.)
+- [x] Build artifacts on buildhost and local scratch deleted (user, 2026-10-13).
+      Regenerating BambuStudio data or re-running the corpus means fetching
+      the profiles and re-slicing again (see Findings).
 
 ## Open questions for the user
 
 1. ~~Push?~~ Done.
-2. Deploy to production? That's a pin change in the ops repo and needs your
-   per-change yes. Recommendation: after CI, deploy; existing jobs get
-   checked in the background at startup.
+2. ~~Deploy?~~ Done.
 3. Defaults: max single pause 15 min, max heated idle 45 min, nozzle/plate
    margin 10 °C, reach margin 5 mm, uploads allowed. Recommendation: keep,
    adjust in Settings after a week of real prints.
