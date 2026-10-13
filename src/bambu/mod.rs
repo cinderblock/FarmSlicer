@@ -7,4 +7,3 @@ pub mod link;
 pub mod models;
 pub mod send;
 pub mod status;
-mod tls;

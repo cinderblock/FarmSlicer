@@ -1,13 +1,15 @@
-//! TLS for talking to Bambu Lab printers on the LAN (MQTT on 8883, FTPS on 990).
+//! TLS for talking to printers on the LAN: Bambu's MQTT (8883) and FTPS
+//! (990), and HTTPS for printers (or their hosts) that serve it.
 //!
-//! A printer presents a certificate chained to Bambu's own CA and issued for
-//! its serial number, while we reach it by IP address: nothing a public trust
-//! store can vouch for. We accept it without checks. Real printers send an
-//! X.509 *v1* certificate, which webpki refuses to parse
-//! (`UnsupportedCertVersion`), so the handshake signatures can't be checked
-//! through it either; and with any certificate accepted, that check would
-//! prove nothing anyway (an impostor signs with its own key). Pinning each
-//! printer's certificate on first contact would be the real protection.
+//! A Bambu printer presents a certificate chained to Bambu's own CA and
+//! issued for its serial number, while we reach it by IP address: nothing a
+//! public trust store can vouch for; Klipper and OctoPrint hosts that serve
+//! HTTPS do so with self-signed certificates. We accept them without checks.
+//! Real Bambu printers send an X.509 *v1* certificate, which webpki refuses
+//! to parse (`UnsupportedCertVersion`), so the handshake signatures can't be
+//! checked through it either; and with any certificate accepted, that check
+//! would prove nothing anyway (an impostor signs with its own key). Pinning
+//! each printer's certificate on first contact would be the real protection.
 
 use std::sync::{Arc, OnceLock};
 
@@ -71,6 +73,11 @@ fn build() -> ClientConfig {
 pub fn mqtt_config() -> Arc<ClientConfig> {
     static CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
     CONFIG.get_or_init(|| Arc::new(build())).clone()
+}
+
+/// Client config for HTTPS to printers (see [`super::http`]).
+pub fn https_config() -> ClientConfig {
+    build()
 }
 
 /// Client config for one FTPS session, with a session cache of its own.

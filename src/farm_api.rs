@@ -135,7 +135,9 @@ async fn heat(state: &AppState, p: &Printer, nozzle: i64, bed: i64) -> Result<Js
 #[derive(Deserialize)]
 struct Preheat {
     /// Heat for the filament in this tray slot (see status `Tray::slot`).
-    slot: i64,
+    slot: Option<i64>,
+    /// Or for a material, on printers that don't know what's loaded.
+    material: Option<String>,
 }
 
 async fn preheat(
@@ -146,18 +148,26 @@ async fn preheat(
 ) -> Result<Json<Value>, ApiError> {
     let p = printer(&state, &id)?;
     let status = idle(&state, &p)?;
-    let tray = status
-        .ams
-        .iter()
-        .flat_map(|u| u.trays.iter())
-        .chain(status.external.iter())
-        .find(|t| t.slot == body.slot && t.material.is_some())
-        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "that slot holds no filament"))?;
-    let material = tray.material.clone().unwrap_or_default();
-    let (default_nozzle, bed) = material_temps(&material);
-    let nozzle = match (tray.nozzle_temp_min, tray.nozzle_temp_max) {
-        (Some(lo), Some(hi)) if lo > 0 && hi >= lo => (lo + hi) / 2 / 5 * 5,
-        _ => default_nozzle,
+    let (material, nozzle, bed) = match (body.slot, body.material.as_deref().map(str::trim)) {
+        (Some(slot), _) => {
+            let tray = status
+                .loaded_trays()
+                .into_iter()
+                .find(|t| t.slot == slot)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "that slot holds no filament"))?;
+            let material = tray.material.clone().unwrap_or_default();
+            let (default_nozzle, bed) = material_temps(&material);
+            let nozzle = match (tray.nozzle_temp_min, tray.nozzle_temp_max) {
+                (Some(lo), Some(hi)) if lo > 0 && hi >= lo => (lo + hi) / 2 / 5 * 5,
+                _ => default_nozzle,
+            };
+            (material, nozzle, bed)
+        }
+        (None, Some(material)) if !material.is_empty() => {
+            let (nozzle, bed) = material_temps(material);
+            (material.to_string(), nozzle, bed)
+        }
+        _ => return Err(err(StatusCode::BAD_REQUEST, "say which slot or material to heat for")),
     };
     println!("Printer {}: {} pre-heats for {material} (nozzle {nozzle}, bed {bed})", p.name, user.username);
     let result = heat(&state, &p, nozzle, bed).await?;

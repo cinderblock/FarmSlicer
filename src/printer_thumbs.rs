@@ -1,11 +1,15 @@
 //! The picture of what a printer is printing (or just printed).
 //!
 //! Prints sent from FarmSlicer use their job's package. Prints started
-//! elsewhere (Bambu Studio, the printer's screen, the cloud) are fetched from
-//! the printer: the project file is on its storage under the job's name, in
-//! `/cache/` (cloud and SD prints) or `/` (LAN uploads), and its plate PNG is
-//! taken out of it. Found pictures are cached for half an hour, misses for a
-//! minute, and fetches are one at a time per printer.
+//! elsewhere (a slicer, the printer's screen, the cloud) are fetched from the
+//! printer, as its protocol allows:
+//! - Bambu: the project file is on its storage under the job's name, in
+//!   `/cache/` (cloud and SD prints) or `/` (LAN uploads), and its plate PNG
+//!   is taken out of it (FTPS);
+//! - Moonraker: the thumbnails it extracted from the G-code file.
+//!
+//! Found pictures are cached for half an hour, misses for a minute, and
+//! fetches are one at a time per printer.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -30,22 +34,25 @@ const MISS_TTL: Duration = Duration::from_secs(60);
 /// Projects bigger than this aren't downloaded for their picture.
 const MAX_PROJECT: usize = 128 << 20;
 
+/// Image bytes and their MIME type.
+type Picture = (Bytes, &'static str);
+
 #[derive(Default)]
 pub struct PrinterThumbs {
-    cache: Mutex<HashMap<(String, String), (Option<Bytes>, Instant)>>,
+    cache: Mutex<HashMap<(String, String), (Option<Picture>, Instant)>>,
     /// One fetch at a time per printer.
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl PrinterThumbs {
-    fn cached(&self, key: &(String, String)) -> Option<Option<Bytes>> {
+    fn cached(&self, key: &(String, String)) -> Option<Option<Picture>> {
         let cache = self.cache.lock().unwrap();
         let (png, at) = cache.get(key)?;
         let ttl = if png.is_some() { HIT_TTL } else { MISS_TTL };
         (at.elapsed() < ttl).then(|| png.clone())
     }
 
-    fn store(&self, key: (String, String), png: Option<Bytes>) {
+    fn store(&self, key: (String, String), png: Option<Picture>) {
         let mut cache = self.cache.lock().unwrap();
         cache.retain(|_, (_, at)| at.elapsed() < HIT_TTL);
         cache.insert(key, (png, Instant::now()));
@@ -79,7 +86,7 @@ fn candidates(job: &str) -> Vec<String> {
         .collect()
 }
 
-async fn fetch_from_printer(host: &str, code: &str, job: &str, plate: u32) -> Result<Option<Bytes>, String> {
+async fn fetch_from_bambu(host: &str, code: &str, job: &str, plate: u32) -> Result<Option<Bytes>, String> {
     let mut session = ftps::Session::open(host, ftps::FTPS_PORT, code).await.map_err(|e| e.to_string())?;
     let mut found = None;
     for path in candidates(job) {
@@ -102,11 +109,31 @@ async fn fetch_from_printer(host: &str, code: &str, job: &str, plate: u32) -> Re
 }
 
 fn image(img: Image) -> Response {
-    ([(header::CONTENT_TYPE, img.content_type), (header::CACHE_CONTROL, "private, max-age=60")], img.bytes).into_response()
+    respond((Bytes::from(img.bytes), img.content_type))
 }
 
-fn png(bytes: Bytes) -> Response {
-    ([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "private, max-age=60")], bytes).into_response()
+fn respond((bytes, content_type): Picture) -> Response {
+    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "private, max-age=60")], bytes).into_response()
+}
+
+/// Fetch the picture of `job_name` (the printer's current or last job) from
+/// the printer itself.
+async fn fetch(printer: &crate::db::Printer, status: &crate::printer::PrinterStatus, job_name: &str) -> Result<Option<Picture>, String> {
+    match protocol_of(printer) {
+        Some(Protocol::Bambu) => {
+            let plate = plate_index(status.job_file.as_deref());
+            Ok(fetch_from_bambu(printer.address.trim(), printer.access_code.trim(), job_name, plate)
+                .await?
+                .map(|png| (png, "image/png")))
+        }
+        Some(Protocol::Moonraker) => match status.job_file.as_deref() {
+            Some(file) => Ok(crate::moonraker::picture(printer, file)
+                .await?
+                .map(|img| (Bytes::from(img.bytes), img.content_type))),
+            None => Ok(None),
+        },
+        None => Ok(None),
+    }
 }
 
 fn none() -> Response {
@@ -118,7 +145,6 @@ async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<St
     let Some(printer) = state.db.get_printer(&id) else { return none() };
     let Some(status) = state.printers.status(&id) else { return none() };
     let Some(job_name) = status.job_key.clone() else { return none() };
-    let plate = plate_index(status.job_file.as_deref());
 
     // One of ours? Its package has the picture.
     for print in state.db.list_prints(Some(&id), false, 20) {
@@ -132,20 +158,19 @@ async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<St
     }
 
     // From the printer.
-    if protocol_of(&printer) != Some(Protocol::Bambu) {
+    if !protocol_of(&printer).is_some_and(|p| p.capabilities().outside_pictures) {
         return none();
     }
     let key = (id.clone(), job_name.clone());
     if let Some(hit) = state.printer_thumbs.cached(&key) {
-        return hit.map(png).unwrap_or_else(none);
+        return hit.map(respond).unwrap_or_else(none);
     }
     let lock = state.printer_thumbs.lock_for(&id);
     let _guard = lock.lock().await;
     if let Some(hit) = state.printer_thumbs.cached(&key) {
-        return hit.map(png).unwrap_or_else(none);
+        return hit.map(respond).unwrap_or_else(none);
     }
-    let result = fetch_from_printer(printer.address.trim(), printer.access_code.trim(), &job_name, plate).await;
-    let picture = match result {
+    let picture = match fetch(&printer, &status, &job_name).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Printer {}: can't fetch the picture of {job_name}: {e}", printer.name);
@@ -153,7 +178,7 @@ async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<St
         }
     };
     state.printer_thumbs.store(key, picture.clone());
-    picture.map(png).unwrap_or_else(none)
+    picture.map(respond).unwrap_or_else(none)
 }
 
 pub fn routes() -> Router<Arc<AppState>> {

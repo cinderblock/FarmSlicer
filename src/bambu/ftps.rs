@@ -18,7 +18,7 @@ use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
 
-use super::tls;
+use crate::printer::tls;
 
 pub const FTPS_PORT: u16 = 990;
 const STEP_TIMEOUT: Duration = Duration::from_secs(20);

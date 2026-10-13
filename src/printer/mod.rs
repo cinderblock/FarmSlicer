@@ -3,8 +3,10 @@
 //! uses. Each protocol's driver lives in its own module (`crate::bambu`, ...)
 //! and plugs into [`PrinterHub`].
 
+pub mod http;
 pub mod hub;
 pub mod status;
+pub mod tls;
 
 use serde::Serialize;
 
@@ -17,10 +19,12 @@ pub use status::PrinterStatus;
 pub enum Protocol {
     /// Bambu Lab LAN mode: MQTT status and commands, FTPS uploads.
     Bambu,
+    /// Klipper through Moonraker: WebSocket JSON-RPC, HTTP uploads.
+    Moonraker,
 }
 
 impl Protocol {
-    pub const ALL: &[Protocol] = &[Protocol::Bambu];
+    pub const ALL: &[Protocol] = &[Protocol::Bambu, Protocol::Moonraker];
 
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|p| p.as_str() == s)
@@ -30,12 +34,14 @@ impl Protocol {
     pub fn as_str(self) -> &'static str {
         match self {
             Protocol::Bambu => "bambu",
+            Protocol::Moonraker => "moonraker",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Protocol::Bambu => "Bambu Lab (LAN)",
+            Protocol::Moonraker => "Klipper (Moonraker)",
         }
     }
 
@@ -58,6 +64,17 @@ impl Protocol {
                 package: PackageFormat::Bambu3mf,
                 outside_pictures: true,
             },
+            Protocol::Moonraker => Capabilities {
+                pause: true,
+                stop: true,
+                speed: Some(SpeedControl::Percent),
+                heat: true,
+                camera: false,
+                filament_mapping: false,
+                print_options: &[],
+                package: PackageFormat::Gcode,
+                outside_pictures: true,
+            },
         }
     }
 }
@@ -72,6 +89,8 @@ pub fn protocol_of(p: &crate::db::Printer) -> Option<Protocol> {
 pub enum SpeedControl {
     /// Bambu's four levels: 1 silent, 2 standard, 3 sport, 4 ludicrous.
     Levels,
+    /// A speed factor in percent.
+    Percent,
 }
 
 /// What FarmSlicer can do with a printer of some protocol. The UI shows

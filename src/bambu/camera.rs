@@ -27,7 +27,7 @@ use tokio::sync::broadcast;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::ServerName;
 
-use super::tls;
+use crate::printer::tls;
 
 pub const RTSP_PORT: u16 = 322;
 pub const JPEG_PORT: u16 = 6000;

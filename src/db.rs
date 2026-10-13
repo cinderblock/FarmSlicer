@@ -259,6 +259,10 @@ impl Db {
             );"
         ).expect("failed to create tables");
 
+        // Printers added as "klipper" before FarmSlicer spoke Moonraker.
+        conn.execute("UPDATE printers SET protocol = 'moonraker' WHERE protocol = 'klipper'", [])
+            .expect("failed to migrate printer protocols");
+
         // Migrations — add columns that may not exist in older databases
         for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code", "area", "plate_type"] {
             if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {

@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use super::{Command, PrinterStatus, Protocol, protocol_of};
-use crate::{bambu, db};
+use crate::{bambu, db, moonraker};
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -75,6 +75,7 @@ impl StatusSink {
 #[derive(Clone)]
 pub enum DriverHandle {
     Bambu(bambu::link::Handle),
+    Moonraker(moonraker::link::Handle),
 }
 
 impl DriverHandle {
@@ -83,6 +84,7 @@ impl DriverHandle {
     pub async fn command(&self, command: &Command) -> Result<Option<Value>, CommandError> {
         match self {
             DriverHandle::Bambu(h) => h.command(command).await,
+            DriverHandle::Moonraker(h) => h.command(command).await,
         }
     }
 
@@ -90,12 +92,15 @@ impl DriverHandle {
     fn raw(&self) -> Option<Value> {
         match self {
             DriverHandle::Bambu(h) => h.raw(),
+            DriverHandle::Moonraker(h) => h.raw(),
         }
     }
 
     fn shutdown(&self) {
         match self {
             DriverHandle::Bambu(h) => h.shutdown(),
+            // Aborting the link's task closes its socket.
+            DriverHandle::Moonraker(_) => {}
         }
     }
 }
@@ -104,12 +109,14 @@ impl DriverHandle {
 #[derive(Clone)]
 enum LinkConfig {
     Bambu(bambu::link::Config),
+    Moonraker(moonraker::link::Config),
 }
 
 impl LinkConfig {
     fn from_printer(p: &db::Printer) -> Option<Self> {
         match protocol_of(p)? {
             Protocol::Bambu => bambu::link::Config::from_printer(p).map(Self::Bambu),
+            Protocol::Moonraker => moonraker::link::Config::from_printer(p).map(Self::Moonraker),
         }
     }
 
@@ -118,12 +125,15 @@ impl LinkConfig {
     fn same_endpoint(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Bambu(a), Self::Bambu(b)) => a.same_endpoint(b),
+            (Self::Moonraker(a), Self::Moonraker(b)) => a.same_endpoint(b),
+            _ => false,
         }
     }
 
     fn name(&self) -> &str {
         match self {
             Self::Bambu(c) => &c.name,
+            Self::Moonraker(c) => &c.name,
         }
     }
 
@@ -132,6 +142,10 @@ impl LinkConfig {
             Self::Bambu(c) => {
                 let (handle, task) = bambu::link::start(c.clone(), sink);
                 (DriverHandle::Bambu(handle), task)
+            }
+            Self::Moonraker(c) => {
+                let (handle, task) = moonraker::link::start(c.clone(), sink);
+                (DriverHandle::Moonraker(handle), task)
             }
         }
     }

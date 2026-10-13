@@ -188,6 +188,31 @@ fn loaded_trays(status: &PrinterStatus) -> Vec<&Tray> {
     status.loaded_trays()
 }
 
+/// Does sending to `printer` map the plate's filaments to its trays (Bambu's
+/// AMS)? Elsewhere the G-code names its tools and people load the spools.
+pub fn maps_filaments(printer: &Printer) -> bool {
+    protocol_of(printer).is_some_and(|p| p.capabilities().filament_mapping)
+}
+
+/// The filament mapping to send with a print: the one asked for, or the
+/// suggestion; none for printers that don't map filaments.
+pub fn mapping_for(printer: &Printer, plate: &Plate, asked: Option<Vec<i64>>, status: Option<&PrinterStatus>) -> Vec<i64> {
+    if !maps_filaments(printer) {
+        return Vec::new();
+    }
+    asked.unwrap_or_else(|| suggest_mapping(plate, status))
+}
+
+/// Everything wrong with sending `plate` to `printer` with `mapping` as
+/// things stand: the build plate, and the trays (where mapped).
+pub fn send_problems(plate: &Plate, printer: &Printer, mapping: &[i64], status: Option<&PrinterStatus>) -> Vec<String> {
+    let mut problems: Vec<String> = plate_problem(plate, printer).into_iter().collect();
+    if maps_filaments(printer) {
+        problems.extend(check_mapping(plate, mapping, status));
+    }
+    problems
+}
+
 /// A tray for each filament the plate uses: same material, nearest colour,
 /// each tray used once while unused ones remain. Index = filament id - 1;
 /// -1 = not used by this plate (or nothing suitable is loaded).
@@ -354,6 +379,7 @@ async fn send(
         Some(Protocol::Bambu) => {
             crate::bambu::send::send(state, &printer, print, &data, plate, mapping, options, &mut step).await
         }
+        Some(Protocol::Moonraker) => crate::moonraker::send(state, &printer, print, &data, &mut step).await,
         None => Err(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
     }
 }

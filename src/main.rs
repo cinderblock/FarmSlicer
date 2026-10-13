@@ -8,6 +8,7 @@ mod farm_api;
 mod groups;
 mod groups_api;
 mod join_api;
+mod moonraker;
 mod overlay;
 mod package;
 mod printer;

@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::status;
-use super::tls;
+use crate::printer::tls;
 use crate::db;
 use crate::printer::hub::StatusSink;
 use crate::printer::{Command, CommandError, Speed};

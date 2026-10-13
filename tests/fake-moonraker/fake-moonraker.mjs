@@ -1,0 +1,403 @@
+#!/usr/bin/env node
+// A fake Klipper printer behind Moonraker: the subset of Moonraker's API
+// FarmSlicer's driver uses, with the same shapes (plans/printer-drivers/
+// moonraker.md), and a print simulation fast enough for tests.
+//
+//   node tests/fake-moonraker/fake-moonraker.mjs [port] [--api-key KEY] [--print-seconds N]
+//
+// or, from a test: `const fake = await startFakeMoonraker({ port, apiKey })`.
+//
+// Speaks: WebSocket JSON-RPC on /websocket (identify, server.info,
+// printer.objects.list/subscribe with notify_status_update deltas,
+// server.files.metadata, printer.print.start/pause/resume/cancel,
+// printer.gcode.script for M220 / SET_HEATER_TEMPERATURE / M104 / M140),
+// HTTP /access/info, /server/info, POST /server/files/upload (multipart),
+// /server/files/metadata, GET /server/files/gcodes/<path> (thumbnails).
+// Quirks kept: a start while paused replaces the paused job; a start while
+// printing fails with "SD busy"; pause/resume/cancel at the wrong time are
+// harmless no-ops. Test hooks: POST /__fake/outside-print (a print FarmSlicer
+// didn't send, with a thumbnail), POST /__fake/shutdown, GET /__fake/state.
+// No dependencies beyond Node 22.
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+
+const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+// ---- minimal WebSocket server framing --------------------------------------------
+function wsAccept(req, socket) {
+  const key = req.headers["sec-websocket-key"];
+  const accept = createHash("sha1").update(key + GUID).digest("base64");
+  socket.write(
+    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  );
+  let buf = Buffer.alloc(0);
+  const conn = {
+    onText: () => {},
+    onClose: () => {},
+    send(text) {
+      const payload = Buffer.from(text, "utf8");
+      let head;
+      if (payload.length < 126) head = Buffer.from([0x81, payload.length]);
+      else if (payload.length < 65536) {
+        head = Buffer.alloc(4);
+        head[0] = 0x81;
+        head[1] = 126;
+        head.writeUInt16BE(payload.length, 2);
+      } else {
+        head = Buffer.alloc(10);
+        head[0] = 0x81;
+        head[1] = 127;
+        head.writeBigUInt64BE(BigInt(payload.length), 2);
+      }
+      if (!socket.destroyed) socket.write(Buffer.concat([head, payload]));
+    },
+    close() {
+      if (!socket.destroyed) socket.end(Buffer.from([0x88, 0]));
+    },
+  };
+  socket.on("data", (chunk) => {
+    buf = Buffer.concat([buf, chunk]);
+    for (;;) {
+      if (buf.length < 2) return;
+      const op = buf[0] & 0x0f;
+      let len = buf[1] & 0x7f;
+      let off = 2;
+      if (len === 126) {
+        if (buf.length < 4) return;
+        len = buf.readUInt16BE(2);
+        off = 4;
+      } else if (len === 127) {
+        if (buf.length < 10) return;
+        len = Number(buf.readBigUInt64BE(2));
+        off = 10;
+      }
+      const masked = buf[1] & 0x80;
+      const maskOff = off;
+      if (masked) off += 4;
+      if (buf.length < off + len) return;
+      const data = Buffer.from(buf.subarray(off, off + len));
+      if (masked) for (let i = 0; i < data.length; i++) data[i] ^= buf[maskOff + (i % 4)];
+      buf = buf.subarray(off + len);
+      if (op === 0x1) conn.onText(data.toString("utf8"));
+      else if (op === 0x8) {
+        conn.close();
+        conn.onClose();
+      } else if (op === 0x9) {
+        // ping → pong
+        const head = Buffer.from([0x8a, data.length]);
+        if (!socket.destroyed) socket.write(Buffer.concat([head, data]));
+      }
+    }
+  });
+  socket.on("close", () => conn.onClose());
+  socket.on("error", () => {});
+  return conn;
+}
+
+// ---- multipart (just enough for Moonraker's upload form) ----------------------------
+function parseMultipart(body, contentType) {
+  const boundary = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType ?? "");
+  if (!boundary) return {};
+  const sep = Buffer.from(`--${boundary[1] ?? boundary[2]}`);
+  const fields = {};
+  let pos = body.indexOf(sep);
+  while (pos !== -1) {
+    const start = pos + sep.length + 2;
+    const next = body.indexOf(sep, start);
+    if (next === -1) break;
+    const part = body.subarray(start, next - 2);
+    const headerEnd = part.indexOf("\r\n\r\n");
+    const headers = part.subarray(0, headerEnd).toString();
+    const content = part.subarray(headerEnd + 4);
+    const name = /name="([^"]*)"/.exec(headers)?.[1];
+    const filename = /filename="([^"]*)"/.exec(headers)?.[1];
+    if (name) fields[name] = filename !== undefined ? { filename, content } : content.toString();
+    pos = next;
+  }
+  return fields;
+}
+
+// What Moonraker's metadata parser would find in OrcaSlicer G-code (abridged).
+function metadataOf(path, content) {
+  const text = content.toString("utf8");
+  const meta = { filename: path, size: content.length, slicer: /; generated by (\S+)/.exec(text)?.[1] ?? null };
+  const time = /; estimated printing time \(normal mode\) = (.+)/.exec(text)?.[1];
+  if (time) {
+    let s = 0;
+    for (const [, n, u] of time.matchAll(/(\d+)([dhms])/g)) s += Number(n) * { d: 86400, h: 3600, m: 60, s: 1 }[u];
+    meta.estimated_time = s;
+  }
+  const layers = /; total layers count = (\d+)/.exec(text)?.[1];
+  if (layers) meta.layer_count = Number(layers);
+  const thumbs = [];
+  const files = {};
+  for (const m of text.matchAll(/; thumbnail begin (\d+)x(\d+) \d+\n([\s\S]*?); thumbnail end/g)) {
+    const data = Buffer.from(m[3].replace(/^; ?/gm, "").replace(/\s/g, ""), "base64");
+    const base = path.split("/").pop().replace(/\.gcode$/, "");
+    const rel = `.thumbs/${base}-${m[1]}x${m[2]}.png`;
+    thumbs.push({ width: Number(m[1]), height: Number(m[2]), size: data.length, relative_path: rel });
+    const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+    files[dir + rel] = data;
+  }
+  if (thumbs.length) meta.thumbnails = thumbs;
+  return { meta, thumbFiles: files };
+}
+
+export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds = 6, host = "127.0.0.1" } = {}) {
+  const files = new Map(); // gcodes path → Buffer
+  const metadata = new Map(); // path → metadata
+  const thumbs = new Map(); // gcodes path → Buffer
+  const scripts = []; // G-code scripts received
+  const objects = {
+    webhooks: { state: "ready", state_message: "Printer is ready" },
+    print_stats: { state: "standby", filename: "", print_duration: 0, total_duration: 0, message: "", info: { current_layer: null, total_layer: null } },
+    virtual_sdcard: { progress: 0, is_active: false },
+    display_status: { progress: 0, message: null },
+    pause_resume: { is_paused: false },
+    gcode_move: { speed_factor: 1, extrude_factor: 1 },
+    toolhead: { extruder: "extruder" },
+    extruder: { temperature: 24, target: 0, power: 0 },
+    heater_bed: { temperature: 23, target: 0, power: 0 },
+    fan: { speed: 0 },
+  };
+  let dirty = {};
+  const clients = new Set();
+  let job = null; // { started: ms, elapsed: s, file }
+
+  const set = (obj, fields) => {
+    Object.assign(objects[obj], fields);
+    dirty[obj] = { ...(dirty[obj] ?? {}), ...fields };
+  };
+  const notify = (method, params) => {
+    const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
+    for (const c of clients) c.send(msg);
+  };
+
+  const startJob = (file) => {
+    job = { elapsed: 0, file };
+    set("print_stats", { state: "printing", filename: file, print_duration: 0, total_duration: 0, message: "" });
+    set("pause_resume", { is_paused: false });
+    set("display_status", { progress: 0 });
+    set("virtual_sdcard", { progress: 0, is_active: true });
+    notify("notify_history_changed", [{ action: "added", job: { job_id: "0000A1", filename: file, status: "in_progress" } }]);
+  };
+  const endJob = (state, message = "") => {
+    set("print_stats", { state, message });
+    set("virtual_sdcard", { is_active: false });
+    notify("notify_history_changed", [{ action: "finished", job: { job_id: "0000A1", filename: job?.file, status: state === "complete" ? "completed" : state } }]);
+    job = null;
+  };
+
+  // The simulation: 1 s heating (no print_duration yet), then printSeconds of
+  // printing at the speed factor; temperatures ramp toward their targets.
+  const TICK = 250;
+  const timer = setInterval(() => {
+    for (const h of ["extruder", "heater_bed"]) {
+      const o = objects[h];
+      const t = o.temperature + Math.sign(o.target - o.temperature) * Math.min(Math.abs(o.target - o.temperature), 20);
+      if (t !== o.temperature) set(h, { temperature: Math.round(t * 10) / 10 });
+    }
+    if (job && objects.print_stats.state === "printing") {
+      job.elapsed += TICK / 1000;
+      const printing = Math.max(0, job.elapsed - 1) * objects.gcode_move.speed_factor;
+      const progress = Math.min(1, printing / printSeconds);
+      set("print_stats", { print_duration: printing, total_duration: job.elapsed });
+      set("display_status", { progress });
+      set("virtual_sdcard", { progress });
+      if (progress >= 1) endJob("complete");
+    }
+    if (Object.keys(dirty).length) {
+      notify("notify_status_update", [dirty, Date.now() / 1000]);
+      dirty = {};
+    }
+  }, TICK);
+
+  const authorized = (req) => !apiKey || req.headers["x-api-key"] === apiKey;
+
+  const rpc = (method, params) => {
+    switch (method) {
+      case "server.connection.identify":
+        return { connection_id: 1 };
+      case "server.info":
+        return { klippy_connected: true, klippy_state: objects.webhooks.state === "ready" ? "ready" : objects.webhooks.state, components: [], failed_components: [], api_version: [1, 5, 0], moonraker_version: "fake" };
+      case "printer.objects.list":
+        return { objects: Object.keys(objects) };
+      case "printer.objects.subscribe": {
+        const status = {};
+        for (const name of Object.keys(params?.objects ?? {})) if (objects[name]) status[name] = structuredClone(objects[name]);
+        return { eventtime: Date.now() / 1000, status };
+      }
+      case "server.files.metadata": {
+        const m = metadata.get(params?.filename);
+        if (!m) throw { code: 404, message: `Metadata not available for <${params?.filename}>` };
+        return m;
+      }
+      case "printer.print.start": {
+        const file = params?.filename;
+        if (!files.has(file)) throw { code: 400, message: `File ${file} not found` };
+        if (objects.print_stats.state === "printing") throw { code: 400, message: "SD busy" };
+        if (objects.webhooks.state !== "ready") throw { code: 503, message: "Klippy Host not connected" };
+        if (job) endJob("cancelled"); // paused job replaced, as Klipper does
+        startJob(file);
+        return "ok";
+      }
+      case "printer.print.pause":
+        if (objects.print_stats.state === "printing") {
+          set("print_stats", { state: "paused" });
+          set("pause_resume", { is_paused: true });
+          set("virtual_sdcard", { is_active: false });
+        }
+        return "ok";
+      case "printer.print.resume":
+        if (objects.print_stats.state === "paused") {
+          set("print_stats", { state: "printing" });
+          set("pause_resume", { is_paused: false });
+          set("virtual_sdcard", { is_active: true });
+        }
+        return "ok";
+      case "printer.print.cancel":
+        if (job) endJob("cancelled");
+        return "ok";
+      case "printer.gcode.script": {
+        const script = String(params?.script ?? "");
+        scripts.push(script);
+        for (const line of script.split("\n").map((l) => l.trim()).filter(Boolean)) {
+          let m;
+          if ((m = /^M220 S(\d+)/i.exec(line))) set("gcode_move", { speed_factor: Number(m[1]) / 100 });
+          else if ((m = /^M104 S(\d+)/i.exec(line))) set("extruder", { target: Number(m[1]) });
+          else if ((m = /^M140 S(\d+)/i.exec(line))) set("heater_bed", { target: Number(m[1]) });
+          else if ((m = /^SET_HEATER_TEMPERATURE HEATER=(\w+) TARGET=(\d+)/i.exec(line)) && objects[m[1]]) set(m[1], { target: Number(m[2]) });
+          else if (/^TURN_OFF_HEATERS/i.test(line)) {
+            set("extruder", { target: 0 });
+            set("heater_bed", { target: 0 });
+          } else throw { code: 400, message: `Unknown command:"${line.split(" ")[0].toUpperCase()}"` };
+        }
+        return "ok";
+      }
+      default:
+        throw { code: 404, message: `Method not found: ${method}` };
+    }
+  };
+
+  const json = (res, code, body) => {
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      const url = new URL(req.url, "http://fake");
+      const body = Buffer.concat(chunks);
+      if (url.pathname === "/access/info") return json(res, 200, { result: { default_source: "moonraker", available_sources: ["moonraker"], login_required: false, trusted: !apiKey } });
+      if (url.pathname.startsWith("/__fake/")) {
+        if (url.pathname === "/__fake/state") return json(res, 200, { objects, files: [...files.keys()], scripts });
+        if (url.pathname === "/__fake/shutdown") {
+          set("webhooks", { state: "shutdown", state_message: "Emergency stop" });
+          if (job) endJob("error", "Emergency stop");
+          notify("notify_klippy_shutdown", []);
+          return json(res, 200, { ok: true });
+        }
+        if (url.pathname === "/__fake/outside-print") {
+          const png = Buffer.from("89504e470d0a1a0a6f7574736964652d7072696e74", "hex");
+          const path = "Outside_Print.gcode";
+          const gcode = Buffer.from(`; generated by PrusaSlicer 2.8.1\n; thumbnail begin 2x2 ${png.toString("base64").length}\n; ${png.toString("base64")}\n; thumbnail end\nG28\n`);
+          files.set(path, gcode);
+          const { meta, thumbFiles } = metadataOf(path, gcode);
+          metadata.set(path, meta);
+          for (const [p, d] of Object.entries(thumbFiles)) thumbs.set(p, d);
+          if (job) endJob("cancelled");
+          startJob(path);
+          return json(res, 200, { ok: true, path });
+        }
+      }
+      if (!authorized(req)) return json(res, 401, { error: { code: 401, message: "Unauthorized" } });
+      if (url.pathname === "/server/info") return json(res, 200, { result: rpc("server.info") });
+      if (url.pathname === "/server/files/upload" && req.method === "POST") {
+        const form = parseMultipart(body, req.headers["content-type"]);
+        if (!form.file?.filename) return json(res, 400, { error: { code: 400, message: "No file name specified in upload form" } });
+        const dir = typeof form.path === "string" && form.path ? `${form.path.replace(/\/$/, "")}/` : "";
+        const path = dir + form.file.filename;
+        if (form.checksum && createHash("sha256").update(form.file.content).digest("hex") !== form.checksum) {
+          return json(res, 422, { error: { code: 422, message: "File checksum mismatch" } });
+        }
+        if (job && job.file === path) return json(res, 403, { error: { code: 403, message: "File is loaded, upload not permitted" } });
+        files.set(path, form.file.content);
+        const { meta, thumbFiles } = metadataOf(path, form.file.content);
+        metadata.set(path, meta);
+        for (const [p, d] of Object.entries(thumbFiles)) thumbs.set(p, d);
+        return json(res, 201, { result: { item: { path, root: "gcodes", size: form.file.content.length, permissions: "rw" }, print_started: false, print_queued: false, action: "create_file" } });
+      }
+      if (url.pathname === "/server/files/metadata") {
+        const m = metadata.get(url.searchParams.get("filename"));
+        return m ? json(res, 200, { result: m }) : json(res, 404, { error: { code: 404, message: "Metadata not available" } });
+      }
+      if (url.pathname.startsWith("/server/files/gcodes/")) {
+        const path = decodeURIComponent(url.pathname.slice("/server/files/gcodes/".length));
+        const data = thumbs.get(path) ?? files.get(path);
+        if (!data) return json(res, 404, { error: { code: 404, message: "File not found" } });
+        res.writeHead(200, { "Content-Type": path.endsWith(".png") ? "image/png" : "application/octet-stream" });
+        return res.end(data);
+      }
+      json(res, 404, { error: { code: 404, message: "Not Found" } });
+    });
+  });
+
+  server.on("upgrade", (req, socket) => {
+    if (new URL(req.url, "http://fake").pathname !== "/websocket") return socket.destroy();
+    if (!authorized(req)) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    const conn = wsAccept(req, socket);
+    clients.add(conn);
+    conn.onClose = () => clients.delete(conn);
+    conn.onText = (text) => {
+      let msg;
+      try {
+        msg = JSON.parse(text);
+      } catch {
+        return;
+      }
+      try {
+        conn.send(JSON.stringify({ jsonrpc: "2.0", result: rpc(msg.method, msg.params), id: msg.id }));
+      } catch (e) {
+        conn.send(JSON.stringify({ jsonrpc: "2.0", error: { code: e.code ?? 500, message: e.message ?? String(e) }, id: msg.id }));
+      }
+    };
+  });
+
+  await new Promise((resolve) => server.listen(port, host, resolve));
+  const actualPort = server.address().port;
+  return {
+    port: actualPort,
+    address: `${host}:${actualPort}`,
+    objects,
+    files,
+    scripts,
+    async close() {
+      clearInterval(timer);
+      for (const c of clients) c.close();
+      await new Promise((resolve) => server.close(resolve));
+      server.closeAllConnections?.();
+    },
+  };
+}
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("fake-moonraker.mjs")) {
+  const args = process.argv.slice(2);
+  const opt = (name) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const port = Number(args.find((a) => /^\d+$/.test(a)) ?? 7125);
+  const fake = await startFakeMoonraker({
+    port,
+    host: opt("--host") ?? "0.0.0.0",
+    apiKey: opt("--api-key") ?? null,
+    printSeconds: Number(opt("--print-seconds") ?? 30),
+  });
+  console.log(`fake Moonraker on :${fake.port}${opt("--api-key") ? " (API key required)" : ""}`);
+}
