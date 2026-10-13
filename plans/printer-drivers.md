@@ -105,7 +105,7 @@ Everything printer-facing is wired straight to `src/bambu/` today
 
 ## Plan / steps
 
-- [ ] **0. Research** (background agents): one reference per protocol in
+- [x] **0. Research** (background agents): one reference per protocol in
       `plans/printer-drivers/<protocol>.md` — API, auth, status fields and
       state machine, upload/start/control, camera, discovery, fake-printer
       approach, slicer specifics (thumbnail formats, file type, OrcaSlicer
@@ -127,7 +127,7 @@ Everything printer-facing is wired straight to `src/bambu/` today
       libslic3r build: Voron 2.4, Prusa MK4S, Elegoo CC, X1C (unchanged).
       Side fix (own commit `05bb1a4`): nested preset folders and the
       OrcaFilamentLibrary were never loaded.
-- [ ] **3. Moonraker driver** + fake ← current
+- [x] **3. Moonraker driver** + fake
       - [x] Backend (`f965d00`): `src/moonraker/` (WebSocket JSON-RPC
             link, status, HTTP upload + start, controls, heat, outside
             pictures); shared `reqwest` client (`printer/http.rs`), LAN TLS
@@ -148,7 +148,7 @@ Everything printer-facing is wired straight to `src/bambu/` today
             per capability. Checked in Chrome against the dev setup
             (`pd-ui.sh`): form, cameras (Klipper sim's mjpg-streamer plays),
             send dialog, live card, speed change.
-      - [ ] Discovery: moved to step 6b (mDNS serves Moonraker, OctoPrint
+      - [x] Discovery: done in step 6b (mDNS serves Moonraker, OctoPrint
             and PrusaLink alike).
 - [x] **4. OctoPrint driver** (`910b819`): `src/octoprint/` (push socket +
       REST, outcome from events, select+print, integer feedrate, pictures
@@ -169,11 +169,18 @@ Everything printer-facing is wired straight to `src/bambu/` today
       print options and plate side, speed presets as levels, Cmd 403
       temperatures, Cmd 386 + MJPEG camera, history-image pictures).
       Verified against the Node fake only (no hardware, no emulator).
-- [ ] **6b. Discovery for every make** ← current: mDNS
-      (`_moonraker._tcp`, `_octoprint._tcp`, `_prusalink._tcp`) and SDCP's
-      UDP broadcast, cards per vendor on the Printers page.
-- [ ] **7. UI**: protocol-specific connection fields, capability-gated
-      controls, discovery cards per vendor; docs (README, CLAUDE.md).
+- [x] **6b. Discovery for every make** (`7394cc5`): `src/discovery/`
+      (`ssdp.rs` Bambu, `mdns.rs` Moonraker/OctoPrint/PrusaLink, `sdcp.rs`
+      M99999). Checked on buildhost: the farm's Bambu printers, real
+      OctoPrint over mDNS, the SDCP fake's responder.
+- [x] **7. UI and docs**: UI done alongside each driver (`a1c08b6` and
+      after); README + CLAUDE.md (`1c3b4e6`). Final browser pass with all
+      five kinds on one page: cards gate camera/pre-heat by capability,
+      the send dialog rules out printers by model and package format.
+- [x] **Final regression** on the final code: all seven e2e suites (326
+      checks) + 66 unit tests; libslic3r release build; fake Bambu printer
+      (send, controls, preheat) and both Bambu camera kinds; real Klipper;
+      real OctoPrint 1.11.8 and 2.0.0rc6.
 
 ## Findings / gotchas
 
@@ -280,6 +287,14 @@ Everything printer-facing is wired straight to `src/bambu/` today
 - [x] Baseline on buildhost before the refactor: 35 unit tests, all e2e pass.
 - [x] Phase 1 committed (driver layer + Bambu driver + UI field renames).
 - [x] Phase 2 committed (`8a5866e`), profile fix (`05bb1a4`).
+- [x] Drivers: Moonraker (`f965d00`, `f57d737`), UI (`a1c08b6`), OctoPrint
+      (`910b819`), PrusaLink (`7db1f19`), SDCP (`f6f87fd`), discovery
+      (`7394cc5`), docs (`1c3b4e6`).
+- buildhost test kit (stopped, kept): containers `pd-vkp` (Klipper sim),
+  `pd-octo1`/`pd-octo2` (OctoPrint 1.11.8 / 2.0.0rc6), `fake-printer`,
+  `fs-pd-cxx`; images `pd-vkp-image`, `fake-octoprint`, `fake-octoprint:2`,
+  `fake-bambu`; scripts `pd-*-test.sh`, `pd-ui.sh`, `pd-cxx.sh`, `check.sh`
+  in `~/farmslicer-printer-drivers`.
 - libslic3r build on buildhost: container `fs-pd-cxx` (image
   `farmslicer:libslic3r`, host network, volumes `fs-cxx-cargo` →
   `/usr/local/cargo`, `fs-pd-target` → `/target`, the work dir → `/app`);
@@ -298,9 +313,30 @@ Everything printer-facing is wired straight to `src/bambu/` today
 ## Open questions for the user
 
 1. **Elegoo Centauri Carbon 2** speaks MQTT, not SDCP, so it needs its own
-   driver. In scope? Recommendation: yes, after the original CC's SDCP
-   driver (same fake-first approach); until then CC2 printers are listed as
-   unsupported.
+   driver. In scope? Recommendation: yes, as a follow-up (same fake-first
+   approach; the research is in `sdcp.md` §§1-9); until then the form says
+   it isn't supported.
+2. **Push `printer-drivers` and merge it into master?** Nothing is pushed.
+   Recommendation: push the branch (CI runs the new suites), then merge.
+   Bambu behaviour is unchanged (checked against the fake printer); a
+   short look at the live farm after deploying would confirm it on
+   hardware.
+3. **Hardware checks** when printers are at hand: PrusaLink and SDCP are
+   proven against fakes only. A first real print on each, per print with
+   your OK, as with the Bambu test prints.
+
+## Later (not started)
+
+- Moonraker's API key can't be cleared from the form (secret fields keep
+  their value when left empty); `PATCH {"access_code": ""}` does it.
+- Prusa-Link on a Raspberry Pi (MK3) has speed/temperature/camera endpoints
+  the Buddy firmware lacks; PrusaLink is treated as Buddy throughout.
+- Elegoo CANVAS multi-colour mapping (SDCP Cmd 324 / `slot_map`) is
+  unverified and not sent.
+- `.bgcode` for Prusa printers (smaller, faster uploads) would need
+  libbgcode; OrcaSlicer 2.4.2 can't write it.
+- SDCP printers added by address don't store the mainboard id they report,
+  so a discovered card for them shows until the address matches.
 
 ## Things not to do
 
