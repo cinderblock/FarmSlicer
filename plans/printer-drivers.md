@@ -37,6 +37,12 @@ Everything printer-facing is wired straight to `src/bambu/` today
   tracking, approvals). Ship and commit one vendor at a time.
 - Testing against fakes only (Docker on buildhost / in-process test servers).
 - Nothing deployment-specific in the repo (public).
+- **The goal is a printer-agnostic design, not every printer of each
+  protocol family** (2026-10-13): the Centauri Carbon 2 (MQTT) is not
+  planned.
+- No non-Bambu hardware is available: untested printers are tracked in
+  `issues/untested-printers.md` instead of waiting on test prints.
+- **Merged into master and pushed** (approved 2026-10-13).
 
 ## Design
 
@@ -312,18 +318,9 @@ Everything printer-facing is wired straight to `src/bambu/` today
 
 ## Open questions for the user
 
-1. **Elegoo Centauri Carbon 2** speaks MQTT, not SDCP, so it needs its own
-   driver. In scope? Recommendation: yes, as a follow-up (same fake-first
-   approach; the research is in `sdcp.md` §§1-9); until then the form says
-   it isn't supported.
-2. **Push `printer-drivers` and merge it into master?** Nothing is pushed.
-   Recommendation: push the branch (CI runs the new suites), then merge.
-   Bambu behaviour is unchanged (checked against the fake printer); a
-   short look at the live farm after deploying would confirm it on
-   hardware.
-3. **Hardware checks** when printers are at hand: PrusaLink and SDCP are
-   proven against fakes only. A first real print on each, per print with
-   your OK, as with the Bambu test prints.
+None. Answered 2026-10-13: Centauri Carbon 2 not planned (printer-agnostic
+design is the goal); merge into master and push; no hardware, so untested
+printers go on a tracking list (`issues/untested-printers.md`).
 
 ## Later (not started)
 

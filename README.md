@@ -64,7 +64,9 @@ License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
   ask on their screen when unsure; such a print waits "at the printer" until
   someone answers there.
 - The Elegoo Centauri Carbon 2 speaks another protocol (MQTT) and isn't
-  supported yet.
+  supported.
+- What has been tried on real printers, and what only against simulators
+  or fakes: [`issues/untested-printers.md`](issues/untested-printers.md).
 - `tests/fake-*` hold a fake printer per protocol (and a Dockerfile for real
   OctoPrint with its Virtual Printer); `tests/*-e2e.mjs` drive them.
 

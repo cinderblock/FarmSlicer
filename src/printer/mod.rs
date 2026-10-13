@@ -109,7 +109,7 @@ impl Protocol {
                 hint: "The Centauri Carbon (and Centauri) needs no password on the LAN. It takes five \
                        connections in all (the Elegoo app, slicers and Home Assistant count) and about \
                        one camera viewer. The Centauri Carbon 2 speaks another protocol and isn't \
-                       supported yet.",
+                       supported.",
             },
         }
     }

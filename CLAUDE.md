@@ -242,7 +242,8 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `mainsail-crew/virtual-klipper-printer` built locally); OctoPrint against
   real OctoPrint 1.11.8 and 2.0.0rc6 (Virtual Printer); PrusaLink and the
   Elegoo Centauri Carbon (SDCP) against the Node fakes only: no hardware,
-  no emulator. The Centauri Carbon 2 (MQTT) isn't supported.
+  no emulator. Tracked per model in `issues/untested-printers.md` (update
+  it when a printer is tried). The Centauri Carbon 2 (MQTT) isn't supported.
 - Profiles' `compatible_printers_condition` isn't evaluated (OrcaSlicer runs
   it through its PlaceholderParser); filaments and processes with only a
   condition are offered to every printer of the vendor.
