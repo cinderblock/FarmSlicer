@@ -95,6 +95,27 @@ through the approval flow.
   nozzle/bed margin 10 °C, reach margin 5 mm); `uploads` allow|review|deny
   (site + inherited group setting; admins and group managers exempt).
 
+### Incident log (requested 2026-10-13) ✅
+
+"Log if certain users upload custom G-code that fails or causes an error
+during printing." A table `gcode_incidents` (user = whoever the G-code came
+from, sender, job, print, printer, source, kind, severity, summary; a unique
+`dedupe` key so re-checks and repeated printer reports don't duplicate),
+written by `src/incidents.rs`, plus a server log line each:
+
+- **Custom G-code** = uploaded files; server slices whose overrides set keys
+  outside the Slice page's settings (an admin's start G-code); and any job
+  whose check found something to hold it for (blocked/review), which is
+  where tampered browser results show up. A clean browser slice is
+  FarmSlicer's own engine's output, not custom.
+- Kinds: `check` (blocked or review findings, logged for any source but a
+  plain server slice); `print_failed` (the printer reported a failure, refused
+  to start it, never started it; not "another print replaced it" or upload
+  interruptions); `printer_error` (HMS / print error codes raised while it
+  prints, once per code per print). Print kinds only for custom G-code.
+- Admins: `GET /api/gcode-incidents?user=&limit=`; Users page shows each
+  user's count and the list.
+
 ## Plan / steps
 
 1. Plan doc. ✅
@@ -205,7 +226,13 @@ through the approval flow.
       ops `9f417dd`, `sha256:71331c99…2add`, healthy.
 - [x] Every make checked, Bambu's allowlist for Bambu only (`3f8545b`):
       104 unit tests, 8 e2e suites, 496-file corpus clean.
-- [ ] Push and deploy `3f8545b` (needs the user's yes)
+- [x] Pushed `3f8545b`/`2dccc22`; CI green: `ghcr.io/cinderblock/farmslicer:2dccc22` =
+      `sha256:666fff9c361fbf5304492770c104c37ab5a5a779c573526fee30e0d854f40d54`
+- [ ] Deploy it (needs the user's yes)
+- [x] Incident log: `src/incidents.rs`, `gcode_incidents` table, API, Users
+      page; e2e covers a check incident, a browser one, filtering, counts and
+      a real print failure on the fake Klipper printer (108 unit tests, 8 e2e
+      suites)
       Regenerating BambuStudio data or re-running the corpus means fetching
       the profiles and re-slicing again (see Findings).
 

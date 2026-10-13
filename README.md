@@ -42,8 +42,11 @@ can run in the user's browser.
   block a plate; anything unusual waits for an admin. Packages are refused
   when their zip is ambiguous or their G-code was changed after slicing;
   per-job overrides can't carry G-code; print rules, quotas and costs use
-  the G-code's own time and filament when a file understates them. See
-  `plans/gcode-safety.md`.
+  the G-code's own time and filament when a file understates them. Custom
+  G-code (uploads, settings beyond the Slice page's, anything the check
+  held) that fails its check, fails on the printer or makes it raise an
+  error is logged against whoever it came from; admins see it per user on
+  the Users page. See `plans/gcode-safety.md`.
 - **Cameras:** live view on demand, one upstream feed per printer however
   many watch; Bambu X1/H2-class (RTSPS) passed through as H.264 for the
   browser to decode, A1/P1 (JPEG over TLS), Klipper and OctoPrint webcams
@@ -291,6 +294,7 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/groups/{id}/links`, `PUT/DELETE /api/groups/{id}/links/{link}` | join links |
 | `POST /api/join/resolve`, `/api/join/finish`, `/api/join/register/{start,finish}`, `/api/join/guest` | the join flow |
 | `POST /api/auth/guest/signin` | guest sign-in with a one-time code |
+| `GET /api/gcode-incidents?user=&limit=` | custom G-code that failed its check or a print, newest first, with whose it was and who sent it (admins); `GET /api/users` carries each user's `gcode_incidents` count |
 | `GET /api/me/usage`, `GET/PUT /api/settings` | own quota usage; site-wide settings (admins), including `uploads` (allow / review / deny) and `gcode_limits` |
 
 ## Repository layout

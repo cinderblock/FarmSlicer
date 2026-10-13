@@ -141,6 +141,11 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `FARMSLICER_REGEN_GCODE_DATA=1 cargo test gcode::harvest` (Orca; add
   `BAMBUSTUDIO_PROFILES=<release>=<dir>:...` for BambuStudio). Plan:
   `plans/gcode-safety.md`
+- `src/incidents.rs` — the G-code incident log (`gcode_incidents`): custom
+  G-code (uploads, overrides beyond the settings schema, anything the check
+  held) that fails its check (`safety::check_job`), fails a print or makes
+  the printer raise an error (`printing.rs`: send, `apply`, the sweep);
+  deduplicated by key; `GET /api/gcode-incidents`, Users page
 - `src/config_policy.rs` — overrides/custom profiles: members get the
   settings-schema keys only (no G-code keys), nobody gets `post_process`
 - `src/package/zipcheck.rs` — refuses ambiguous zips (duplicate names,
