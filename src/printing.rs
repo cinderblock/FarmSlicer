@@ -11,10 +11,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::bambu::models;
-use crate::bambu::package::{Package, Plate};
 use crate::db::{Job, Printer, PrintRecord};
+use crate::package::{Package, PackageFormat, Plate};
 use crate::printer::status::{PrinterStatus, Tray, state};
-use crate::printer::{PackageFormat, Protocol, protocol_of};
+use crate::printer::{Protocol, protocol_of};
 use crate::profiles::ProfileStore;
 use crate::server::AppState;
 
@@ -62,12 +62,51 @@ fn same_family(a: &str, b: &str) -> bool {
     a == b || FAMILIES.iter().any(|f| f.contains(&a) && f.contains(&b))
 }
 
-/// Why `plate` can't print on `printer`, if it can't.
-pub fn incompatibility(store: &ProfileStore, printer: &Printer, plate: &Plate) -> Option<String> {
-    match protocol_of(printer).map(|p| p.capabilities().package) {
-        Some(PackageFormat::Bambu3mf) => {}
-        None => return Some(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
+/// Why `plate` (of a package in `format`) can't print on `printer`, if it
+/// can't.
+pub fn incompatibility(store: &ProfileStore, printer: &Printer, format: PackageFormat, plate: &Plate) -> Option<String> {
+    let Some(protocol) = protocol_of(printer) else {
+        return Some(format!("FarmSlicer can't send prints to {} printers", printer.protocol));
+    };
+    let takes = protocol.capabilities().package;
+    if takes != format {
+        return Some(format!("{} takes {}; this is {}", printer.name, takes.label(), format.label()));
     }
+    let model_problem = match format {
+        PackageFormat::Bambu3mf => bambu_model_problem(store, printer, plate),
+        PackageFormat::Gcode => model_problem(store, printer, plate),
+    };
+    if model_problem.is_some() {
+        return model_problem;
+    }
+    if let Some(nozzles) = plate.nozzle_diameters.as_deref() {
+        let wanted: Vec<f64> = nozzles.split([',', ';']).filter_map(|n| n.trim().parse().ok()).collect();
+        if let Ok(have) = printer.nozzle_diameter.trim().parse::<f64>() {
+            if !wanted.is_empty() && wanted.iter().any(|w| (w - have).abs() > 1e-6) {
+                return Some(format!(
+                    "sliced for a {nozzles} mm nozzle; {} has {} mm",
+                    printer.name, printer.nozzle_diameter
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Plain G-code: the model it was sliced for must be the printer's, when
+/// the slicer named a model OrcaSlicer's profiles know (other slicers name
+/// models their own way: "MK4S" for "Prusa MK4S").
+fn model_problem(store: &ProfileStore, printer: &Printer, plate: &Plate) -> Option<String> {
+    let want = plate.printer_model.as_deref()?.trim();
+    let have = printer.machine_profile.trim();
+    if have.is_empty() || want.eq_ignore_ascii_case(have) || store.machine_model(want).is_none() {
+        return None;
+    }
+    Some(format!("sliced for {want}; {} is a {have}", printer.name))
+}
+
+/// Bambu projects carry the model id (`C12`); families print each other's.
+fn bambu_model_problem(store: &ProfileStore, printer: &Printer, plate: &Plate) -> Option<String> {
     let have = store
         .machine_model(&printer.machine_profile)
         .and_then(|m| m.model_id.clone())
@@ -83,17 +122,6 @@ pub fn incompatibility(store: &ProfileStore, printer: &Printer, plate: &Plate) -
                 "sliced for {sliced_for}; {} is a {}",
                 printer.name, printer.machine_profile
             ));
-        }
-    }
-    if let Some(nozzles) = plate.nozzle_diameters.as_deref() {
-        let wanted: Vec<f64> = nozzles.split([',', ';']).filter_map(|n| n.trim().parse().ok()).collect();
-        if let Ok(have) = printer.nozzle_diameter.trim().parse::<f64>() {
-            if !wanted.is_empty() && wanted.iter().any(|w| (w - have).abs() > 1e-6) {
-                return Some(format!(
-                    "sliced for a {nozzles} mm nozzle; {} has {} mm",
-                    printer.name, printer.nozzle_diameter
-                ));
-            }
         }
     }
     None
@@ -254,8 +282,8 @@ pub fn display_name(model_name: &str) -> String {
 
 /// The file's name on the printer: unique per print so reports can't be
 /// confused with another print of the same model.
-pub fn file_name(display: &str, print_id: &str) -> String {
-    format!("{}-{}.gcode.3mf", display.replace(' ', "_"), &print_id[..8])
+pub fn file_name(display: &str, print_id: &str, format: PackageFormat) -> String {
+    format!("{}-{}{}", display.replace(' ', "_"), &print_id[..8], format.extension())
 }
 
 // -- Sending ---------------------------------------------------------------------
@@ -347,7 +375,12 @@ pub(crate) fn started_on_printer(state: &AppState, print: &PrintRecord) -> bool 
 /// The job name we send (and the printer shows): the file's stem, unique per
 /// print.
 pub fn task_name(print: &PrintRecord) -> String {
-    print.file_name.strip_suffix(".gcode.3mf").unwrap_or(&print.file_name).to_string()
+    let name = &print.file_name;
+    [PackageFormat::Bambu3mf, PackageFormat::Gcode]
+        .iter()
+        .find_map(|f| name.strip_suffix(f.extension()))
+        .unwrap_or(name)
+        .to_string()
 }
 
 #[derive(Debug, PartialEq)]
@@ -492,7 +525,7 @@ fn age_secs(sqlite_time: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bambu::package::FilamentUse;
+    use crate::package::FilamentUse;
     use crate::printer::status::AmsUnit;
 
     fn tray(slot: i64, material: &str, color: &str) -> Tray {
@@ -520,6 +553,7 @@ mod tests {
         Plate {
             index: 1,
             printer_model_id: Some("C12".into()),
+            printer_model: None,
             nozzle_diameters: Some("0.4".into()),
             print_time_sec: None,
             weight_g: None,
@@ -560,7 +594,8 @@ mod tests {
     fn names_are_safe_and_unique() {
         assert_eq!(display_name("C:\\parts\\Bracket v2 (final).3mf"), "Bracket v2 (final)");
         assert_eq!(display_name("weird/na\"me.gcode.3mf"), "na_me");
-        assert_eq!(file_name("Bracket v2", "1a2b3c4d-xxxx"), "Bracket_v2-1a2b3c4d.gcode.3mf");
+        assert_eq!(file_name("Bracket v2", "1a2b3c4d-xxxx", PackageFormat::Bambu3mf), "Bracket_v2-1a2b3c4d.gcode.3mf");
+        assert_eq!(file_name("Bracket v2", "1a2b3c4d-xxxx", PackageFormat::Gcode), "Bracket_v2-1a2b3c4d.gcode");
     }
 
     fn record(status: &str) -> PrintRecord {

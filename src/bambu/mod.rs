@@ -5,7 +5,6 @@ pub mod camera;
 pub mod ftps;
 pub mod link;
 pub mod models;
-pub mod package;
 pub mod send;
 pub mod status;
 mod tls;

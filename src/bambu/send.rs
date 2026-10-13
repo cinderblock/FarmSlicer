@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::ftps;
-use super::package::Plate;
 use crate::db::{PrintRecord, Printer};
+use crate::package::Plate;
 use crate::printer::{CommandError, DriverHandle};
 use crate::printing::{self, PrintOptions, SendStep};
 use crate::server::AppState;

@@ -9,6 +9,7 @@ mod groups;
 mod groups_api;
 mod join_api;
 mod overlay;
+mod package;
 mod printer;
 mod printer_thumbs;
 mod printers_api;

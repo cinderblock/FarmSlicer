@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::auth::{self, CurrentUser};
-use crate::bambu::package;
+use crate::package;
 use crate::db::{Job, PrintRecord, Printer, User};
 use crate::groups::{PrintRules, Tree, Viewer};
 use crate::printer::status::state;
@@ -28,6 +28,8 @@ use crate::server::{AppState, finish_job};
 use crate::{groups_api, quota};
 
 type ApiError = (StatusCode, Json<Value>);
+
+const NO_PACKAGE: &str = "this job has nothing printable (re-slice it, or upload a sliced .gcode.3mf or .gcode)";
 
 fn api_err(code: StatusCode, msg: impl Into<String>) -> ApiError {
     (code, Json(json!({"error": msg.into()})))
@@ -44,8 +46,8 @@ fn visible_job(state: &AppState, user: &User, id: &str) -> Result<(Job, Tree, Vi
 // -- Uploading a sliced project --------------------------------------------------
 
 /// `POST /api/uploads` (multipart `file`, optional `group_id`): a sliced
-/// `.gcode.3mf` from Bambu Studio or OrcaSlicer becomes a finished job that
-/// can be sent to printers.
+/// file becomes a finished job that can be sent to printers: a `.gcode.3mf`
+/// from Bambu Studio or OrcaSlicer, or plain G-code from any slicer.
 async fn upload_package(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -60,7 +62,7 @@ async fn upload_package(
     {
         match field.name().unwrap_or("") {
             "file" => {
-                let name = field.file_name().unwrap_or("upload.gcode.3mf").to_string();
+                let name = field.file_name().unwrap_or("upload.gcode").to_string();
                 let data = field.bytes().await.map_err(|e| api_err(StatusCode::BAD_REQUEST, e.to_string()))?;
                 file = Some((name, data));
             }
@@ -88,7 +90,7 @@ async fn upload_package(
 
     let dir = state.data_dir.join("packages");
     std::fs::create_dir_all(&dir).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let staging = dir.join(format!("upload-{}.gcode.3mf", uuid::Uuid::new_v4()));
+    let staging = dir.join(format!("upload-{}", uuid::Uuid::new_v4()));
     std::fs::write(&staging, &data).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let pkg = match package::inspect(&staging) {
         Ok(p) => p,
@@ -101,7 +103,7 @@ async fn upload_package(
     let job = state
         .db
         .create_job(&name, "", None, "auto", None, None, "upload", Some(&user.id), group_id.as_deref(), 0);
-    let path = dir.join(format!("{}.gcode.3mf", job.id));
+    let path = dir.join(format!("{}{}", job.id, pkg.format.extension()));
     std::fs::rename(&staging, &path).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = path.to_string_lossy().to_string();
     let first = &pkg.plates[0];
@@ -141,17 +143,18 @@ async fn job_thumbnail(
     let pkg = printing::package_of(&job).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no package"))?;
     let index = q.plate.unwrap_or(pkg.plates[0].index);
     let path = job.package_path.clone().ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no package"))?;
-    let png = tokio::task::spawn_blocking(move || package::thumbnail(std::path::Path::new(&path), index))
+    let format = pkg.format;
+    let img = tokio::task::spawn_blocking(move || package::thumbnail(std::path::Path::new(&path), format, index))
         .await
         .ok()
         .flatten()
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no thumbnail"))?;
     Ok((
         [
-            (header::CONTENT_TYPE, "image/png"),
+            (header::CONTENT_TYPE, img.content_type),
             (header::CACHE_CONTROL, "private, max-age=86400"),
         ],
-        png,
+        img.bytes,
     ))
 }
 
@@ -216,7 +219,7 @@ async fn job_targets(
 ) -> Result<Json<Value>, ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
     let pkg = printing::package_of(&job).ok_or_else(|| {
-        api_err(StatusCode::CONFLICT, "this job has no printable package (re-slice it, or upload a .gcode.3mf)")
+        api_err(StatusCode::CONFLICT, NO_PACKAGE)
     })?;
     let plate = pkg
         .plate(q.plate.unwrap_or(pkg.plates[0].index))
@@ -236,7 +239,7 @@ async fn job_targets(
                 "name": p.name,
                 "machine_profile": p.machine_profile,
                 "nozzle_diameter": p.nozzle_diameter,
-                "incompatible": printing::incompatibility(&state.profile_store, p, plate),
+                "incompatible": printing::incompatibility(&state.profile_store, p, pkg.format, plate),
                 "busy": busy_reason(&state, p),
                 "ams_mapping": mapping,
                 "problems": printing::plate_problem(plate, p)
@@ -249,6 +252,7 @@ async fn job_targets(
         .collect();
     let prices = crate::cost::Prices::load(&state.db);
     Ok(Json(json!({
+        "format": pkg.format,
         "plates": pkg.plates,
         "targets": targets,
         "needs_approval": needs_approval,
@@ -281,7 +285,7 @@ async fn send_job(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
     let pkg = printing::package_of(&job).ok_or_else(|| {
-        api_err(StatusCode::CONFLICT, "this job has no printable package (re-slice it, or upload a .gcode.3mf)")
+        api_err(StatusCode::CONFLICT, NO_PACKAGE)
     })?;
     let package_path = job
         .package_path
@@ -297,7 +301,7 @@ async fn send_job(
         .get_printer(&body.printer_id)
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such printer"))?;
 
-    if let Some(why) = printing::incompatibility(&state.profile_store, &printer, &plate) {
+    if let Some(why) = printing::incompatibility(&state.profile_store, &printer, pkg.format, &plate) {
         return Err(api_err(StatusCode::CONFLICT, format!("can't print here: {why}")));
     }
     let violations = rules_for(&tree, &viewer, &job)
@@ -337,7 +341,7 @@ async fn send_job(
         &printer,
         Some(&user.id),
         job.group_id.as_deref(),
-        &printing::file_name(&name, &print_id),
+        &printing::file_name(&name, &print_id, pkg.format),
         &name,
         &serde_json::to_string(&mapping).expect("mappings serialize"),
         &serde_json::to_string(&body.options).expect("options serialize"),
@@ -501,7 +505,7 @@ async fn approve_print(
         .as_deref()
         .and_then(|p| state.db.get_printer(p))
         .ok_or_else(|| api_err(StatusCode::CONFLICT, "the printer was removed"))?;
-    if let Some(why) = printing::incompatibility(&state.profile_store, &printer, &plate) {
+    if let Some(why) = printing::incompatibility(&state.profile_store, &printer, pkg.format, &plate) {
         return Err(api_err(StatusCode::CONFLICT, format!("can't print there any more: {why}")));
     }
     if let Some(why) = busy_reason(&state, &printer) {

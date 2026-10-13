@@ -8,6 +8,7 @@ pub mod status;
 
 use serde::Serialize;
 
+pub use crate::package::PackageFormat;
 pub use hub::{CommandError, DriverHandle, PrinterHub};
 pub use status::PrinterStatus;
 
@@ -73,14 +74,6 @@ pub enum SpeedControl {
     Levels,
 }
 
-/// What a printer takes to print.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PackageFormat {
-    /// A sliced Bambu project (`.gcode.3mf`).
-    Bambu3mf,
-}
-
 /// What FarmSlicer can do with a printer of some protocol. The UI shows
 /// only the controls a printer has.
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +89,7 @@ pub struct Capabilities {
     pub filament_mapping: bool,
     /// The [`crate::printing::PrintOptions`] that mean something here.
     pub print_options: &'static [&'static str],
+    /// What the printer takes to print.
     pub package: PackageFormat,
     /// Pictures of prints started elsewhere can be fetched from the printer.
     pub outside_pictures: bool,

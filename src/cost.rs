@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::bambu::package::Plate;
+use crate::package::Plate;
 use crate::db::{Db, Job};
 
 const DEFAULTS: &[(&str, f64)] = &[
@@ -116,7 +116,7 @@ fn round(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bambu::package::FilamentUse;
+    use crate::package::FilamentUse;
 
     #[test]
     fn prices_by_material() {
@@ -128,6 +128,7 @@ mod tests {
         let plate = Plate {
             index: 1,
             printer_model_id: None,
+            printer_model: None,
             nozzle_diameters: None,
             print_time_sec: None,
             weight_g: None,

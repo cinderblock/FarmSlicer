@@ -22,50 +22,8 @@ use std::path::Path;
 
 use md5::{Digest, Md5};
 use quick_xml::events::{BytesStart, Event};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FilamentUse {
-    /// 1-based filament number in the project (`ams_mapping` index + 1).
-    pub id: u32,
-    pub material: String,
-    /// `#RRGGBB`
-    pub color: String,
-    /// Bambu filament id (`GFA00`), empty for custom filaments.
-    pub filament_id: String,
-    pub used_g: f64,
-    pub used_m: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Plate {
-    /// 1-based, as in `Metadata/plate_N.gcode`.
-    pub index: u32,
-    /// Bambu model id the plate was sliced for (`BL-P001`, `C12`, `N1`, ...).
-    pub printer_model_id: Option<String>,
-    pub nozzle_diameters: Option<String>,
-    pub print_time_sec: Option<f64>,
-    pub weight_g: Option<f64>,
-    pub filaments: Vec<FilamentUse>,
-    pub has_thumbnail: bool,
-    /// Upper-case hex MD5 of the plate's G-code.
-    pub gcode_md5: String,
-    /// The build plate it was sliced for (`curr_bed_type`), when known.
-    #[serde(default)]
-    pub bed_type: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Package {
-    /// Only plates that carry G-code, in index order.
-    pub plates: Vec<Plate>,
-}
-
-impl Package {
-    pub fn plate(&self, index: u32) -> Option<&Plate> {
-        self.plates.iter().find(|p| p.index == index)
-    }
-}
+use super::{FilamentUse, Package, PackageFormat, Plate};
 
 pub fn gcode_entry(index: u32) -> String {
     format!("Metadata/plate_{index}.gcode")
@@ -124,6 +82,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
         plates.push(Plate {
             index,
             printer_model_id: meta.printer_model_id,
+            printer_model: None,
             nozzle_diameters: meta.nozzle_diameters,
             print_time_sec: meta.prediction,
             weight_g: meta.weight,
@@ -133,7 +92,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
             bed_type: bed_type.clone(),
         });
     }
-    Ok(Package { plates })
+    Ok(Package { format: PackageFormat::Bambu3mf, plates })
 }
 
 fn thumbnail_entry(index: u32) -> String {

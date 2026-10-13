@@ -838,16 +838,20 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
 }
 
 /// Read a freshly written package and attach it to the job (sendable now).
-pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str) {
-    match crate::bambu::package::inspect(std::path::Path::new(path)) {
+/// `own_file`: the package is a file of its own (a `.gcode.3mf`), not the
+/// job's G-code itself, so it counts towards the job's storage too.
+pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_file: bool) {
+    match crate::package::inspect(std::path::Path::new(path)) {
         Ok(pkg) => {
-            let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
             state
                 .db
                 .set_job_package(job_id, path, &serde_json::to_string(&pkg).expect("packages serialize"));
-            state.db.add_job_stored_bytes(job_id, size);
+            if own_file {
+                let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
+                state.db.add_job_stored_bytes(job_id, size);
+            }
         }
-        Err(e) => eprintln!("job {job_id}: the sliced project {path} is unreadable: {e}"),
+        Err(e) => eprintln!("job {job_id}: the sliced file {path} is unreadable: {e}"),
     }
 }
 
@@ -885,8 +889,11 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json:
             result.filament_used_g,
             &warnings,
         );
+        // Bambu printers take the sliced project; everything else the G-code.
         if !result.package_path.is_empty() {
-            record_package(state, job_id, &result.package_path);
+            record_package(state, job_id, &result.package_path, true);
+        } else {
+            record_package(state, job_id, &result.gcode_path, false);
         }
         println!(
             "job {job_id}: sliced OK ({} layers, {:.0} s, {:.1} g)",
@@ -1063,12 +1070,15 @@ async fn upload_job_result(
     }
 
     finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
-    if let Some(pkg) = package.filter(|p| !p.is_empty()) {
-        let path = package_output_path(&state, &id);
-        match std::fs::write(&path, &pkg) {
-            Ok(()) => record_package(&state, &id, &path),
-            Err(e) => eprintln!("job {id}: can't store the sliced project: {e}"),
+    match package.filter(|p| !p.is_empty()) {
+        Some(pkg) => {
+            let path = package_output_path(&state, &id);
+            match std::fs::write(&path, &pkg) {
+                Ok(()) => record_package(&state, &id, &path, true),
+                Err(e) => eprintln!("job {id}: can't store the sliced project: {e}"),
+            }
         }
+        None => record_package(&state, &id, &output_path, false),
     }
     println!(
         "job {id}: browser slice uploaded ({} bytes, {:.0} s, {:.1} g)",

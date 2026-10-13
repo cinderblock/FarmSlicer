@@ -19,7 +19,8 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::json;
 
-use crate::bambu::{ftps, package};
+use crate::bambu::ftps;
+use crate::package::{self, Image};
 use crate::printer::{Protocol, protocol_of};
 use crate::printing;
 use crate::server::AppState;
@@ -84,7 +85,7 @@ async fn fetch_from_printer(host: &str, code: &str, job: &str, plate: u32) -> Re
     for path in candidates(job) {
         match session.retrieve(&path, MAX_PROJECT).await {
             Ok(Some(bytes)) => {
-                found = package::thumbnail_from_bytes(&bytes, plate).map(Bytes::from);
+                found = package::bambu::thumbnail_from_bytes(&bytes, plate).map(Bytes::from);
                 if found.is_some() {
                     break;
                 }
@@ -98,6 +99,10 @@ async fn fetch_from_printer(host: &str, code: &str, job: &str, plate: u32) -> Re
     }
     session.quit().await;
     Ok(found)
+}
+
+fn image(img: Image) -> Response {
+    ([(header::CONTENT_TYPE, img.content_type), (header::CACHE_CONTROL, "private, max-age=60")], img.bytes).into_response()
 }
 
 fn png(bytes: Bytes) -> Response {
@@ -118,13 +123,11 @@ async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<St
     // One of ours? Its package has the picture.
     for print in state.db.list_prints(Some(&id), false, 20) {
         if printing::task_name(&print) == job_name {
-            let picture = print
-                .job_id
-                .as_deref()
-                .and_then(|j| state.db.get_job(j))
-                .and_then(|job| job.package_path)
-                .and_then(|path| package::thumbnail(std::path::Path::new(&path), print.plate as u32));
-            return picture.map(|p| png(Bytes::from(p))).unwrap_or_else(none);
+            let picture = print.job_id.as_deref().and_then(|j| state.db.get_job(j)).and_then(|job| {
+                let format = printing::package_of(&job)?.format;
+                package::thumbnail(std::path::Path::new(job.package_path.as_deref()?), format, print.plate as u32)
+            });
+            return picture.map(image).unwrap_or_else(none);
         }
     }
 
