@@ -288,11 +288,12 @@ which we must not copy):
 - Camera: RTSP on 322 for X1-class; A1/P1 use a TLS JPEG stream on port 6000.
 - SSDP model codes: `3DPrinter-X1-Carbon`/`3DPrinter-X1`/`BL-P001`/`BL-P002`
   → X1C, `3DPrinter-X1E`/`C13` → X1E, `C11` P1P, `C12` P1S, `N1` A1 mini,
-  `N2S` A1, `H2D`/`O1D` H2D (O1D unverified), `H2C`, `H2S`, `P2S`.
+  `N2S` A1, `H2D`/`O1D` H2D (O1D confirmed), `H2C`, `H2S`, `P2S`.
 - A 25 s listen on buildhost's UDP 1990/1900 saw no printer NOTIFYs (only our
   own M-SEARCH loopback). Printers announce on 2021, which production FarmSlicer
-  holds without `SO_REUSEADDR`, so it couldn't be checked from outside the
-  process; production discovery is unverified until it logs sightings.
+  held without `SO_REUSEADDR` before this branch. Since `4e9c2c9` is
+  deployed, production logs "Discovery: found ..." for all four printers
+  within seconds of starting.
 
 ### Sending details (from OrcaSlicer's GUI source)
 
@@ -333,8 +334,11 @@ which we must not copy):
   printers): status for three X1Cs and an H2D, both camera kinds, outside-
   print pictures, and two test prints (sent, started, stopped during
   calibration) all work.
-- Plate type + tracker race fix committed; then pushed, CI image built and
-  deployed through the ops repo.
+- [x] Plate type + tracker race fix committed (`99b7597`, `03221ad`), pushed;
+      CI built `4e9c2c9` and ops `f5c6749` pinned it; running and healthy on
+      the production host since 2026-10-12.
+- [x] Dev server (9341), its container and the fake printers stopped, so no
+      dev client holds a printer MQTT slot.
 - Dev setup: stub server on buildhost `127.0.0.1:9340`
   (`~/farmslicer-printer-control/pc-dev.sh`, auth off), reached with
   `ssh -L 9340:127.0.0.1:9340`; fake printer = Docker `fake-printer`
