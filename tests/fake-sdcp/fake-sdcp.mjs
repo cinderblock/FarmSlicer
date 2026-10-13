@@ -23,13 +23,14 @@
 // (every connection drops) and is recorded in `fake.crashes`.
 // No dependencies beyond Node 22.
 import { createHash, randomUUID } from "node:crypto";
+import { createSocket } from "node:dgram";
 import { createServer } from "node:http";
 import { parseMultipart, wsAccept } from "../fake-lib.mjs";
 
 const KNOWN = new Set([0, 1, 128, 129, 130, 131, 386, 403]);
 const START_KEYS = ["Calibration_switch", "Filename", "PrintPlatformType", "StartLayer", "Tlp_Switch"];
 
-export async function startFakeSdcp({ printSeconds = 6, host = "127.0.0.1", wsPort = 0, httpPort = 0, videoPort = 0 } = {}) {
+export async function startFakeSdcp({ printSeconds = 6, host = "127.0.0.1", wsPort = 0, httpPort = 0, videoPort = 0, discoveryPort = null } = {}) {
   const mainboard = "1c7319d30105041800009c0000000000";
   const files = new Map(); // "/local/<name>" → Buffer
   const uploads = new Map(); // Uuid → { chunks, got, total, md5, name }
@@ -250,6 +251,18 @@ export async function startFakeSdcp({ printSeconds = 6, host = "127.0.0.1", wsPo
     });
   });
 
+  // ---- discovery: M99999 on UDP (3000 on a real printer) ---------------------------------
+  let udp = null;
+  if (discoveryPort !== null) {
+    udp = createSocket({ type: "udp4", reuseAddr: true });
+    udp.on("message", (msg, from) => {
+      if (msg.toString() !== "M99999") return;
+      const reply = { Id: "fake", Data: { Name: "Fake Carbon", MachineName: "Centauri Carbon", BrandName: "ELEGOO", MainboardIP: host, MainboardID: mainboard, ProtocolVersion: "V3.0.0", FirmwareVersion: "V1.1.46" } };
+      udp.send(JSON.stringify(reply), from.port, from.address);
+    });
+    await new Promise((resolve) => udp.bind(discoveryPort, resolve));
+  }
+
   const listen = (server, port) => new Promise((resolve) => server.listen(port, host, resolve));
   await Promise.all([listen(ws, wsPort), listen(http, httpPort), listen(video, videoPort)]);
   const ports = { ws: ws.address().port, http: http.address().port, video: video.address().port };
@@ -266,6 +279,7 @@ export async function startFakeSdcp({ printSeconds = 6, host = "127.0.0.1", wsPo
     },
     async close() {
       clearInterval(timer);
+      udp?.close();
       for (const c of clients) c.close();
       await Promise.all([ws, http, video].map((s) => new Promise((resolve) => s.close(resolve))));
       for (const s of [ws, http, video]) s.closeAllConnections?.();
@@ -285,6 +299,7 @@ if (process.argv[1]?.endsWith("fake-sdcp.mjs")) {
     httpPort: Number(opt("--http", 8080)),
     videoPort: Number(opt("--video", 3031)),
     printSeconds: Number(opt("--print-seconds", 30)),
+    discoveryPort: Number(opt("--discovery", 3000)),
   });
   console.log(`fake Centauri Carbon: ws ${fake.ports.ws}, http ${fake.ports.http}, video ${fake.ports.video}`);
 }

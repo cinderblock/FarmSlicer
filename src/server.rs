@@ -232,15 +232,7 @@ async fn list_discovered(State(state): State<Arc<AppState>>) -> Json<Value> {
     let printers: Vec<_> = map
         .values()
         .map(|p| {
-            json!({
-                "serial": p.serial,
-                "name": p.name,
-                "model_code": p.model_code,
-                "model_name": p.model_name,
-                "machine_profile": p.machine_profile,
-                "ip": p.ip,
-                "signal": p.signal,
-            })
+            json!(p)
         })
         .collect();
     Json(json!(printers))

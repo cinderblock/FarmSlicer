@@ -1,16 +1,20 @@
-use serde::Serialize;
-use std::collections::HashMap;
+//! Bambu Lab printers announce themselves over SSDP on port 2021 (not the
+//! standard 1900); we also send an M-SEARCH now and then.
+
 use socket2::{Domain, Protocol, Socket, Type};
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::time;
 
+use super::{DiscoveredPrinter, DiscoveryMap, found};
+
 const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 const BAMBU_PORT: u16 = 2021;
-const BAMBU_NT: &str = "urn:bambulab-com:device:3dprinter:1";
-const STALE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Printers announce every few seconds: gone after a minute of silence.
+const TTL: Duration = Duration::from_secs(60);
 const PROBE_INTERVAL: Duration = Duration::from_secs(15);
 
 const M_SEARCH: &[u8] = b"\
@@ -20,21 +24,6 @@ MAN: \"ssdp:discover\"\r\n\
 MX: 3\r\n\
 ST: urn:bambulab-com:device:3dprinter:1\r\n\
 \r\n";
-
-pub type DiscoveryMap = Mutex<HashMap<String, DiscoveredPrinter>>;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DiscoveredPrinter {
-    pub serial: String,
-    pub name: String,
-    pub model_code: String,
-    pub model_name: String,
-    pub machine_profile: String,
-    pub ip: String,
-    pub signal: String,
-    #[serde(skip)]
-    pub last_seen: Instant,
-}
 
 pub async fn run(discovered: Arc<DiscoveryMap>) {
     let socket = match create_multicast_socket() {
@@ -70,24 +59,6 @@ pub async fn run(discovered: Arc<DiscoveryMap>) {
                 if let Err(e) = socket.send_to(M_SEARCH, dest).await {
                     eprintln!("Discovery: M-SEARCH send error: {e}");
                 }
-
-                // Evict stale entries
-                let mut map = discovered.lock().unwrap();
-                let now = Instant::now();
-                map.retain(|_, p| {
-                    let fresh = now.duration_since(p.last_seen) < STALE_TIMEOUT;
-                    if !fresh {
-                        println!(
-                            "Discovery: lost {} \"{}\" (serial {}) at {}: silent for {}s",
-                            p.model_name,
-                            p.name,
-                            p.serial,
-                            p.ip,
-                            STALE_TIMEOUT.as_secs()
-                        );
-                    }
-                    fresh
-                });
             }
         }
     }
@@ -108,7 +79,7 @@ fn create_multicast_socket() -> std::io::Result<UdpSocket> {
     UdpSocket::from_std(socket.into())
 }
 
-fn handle_packet(data: &[u8], src: SocketAddr, discovered: &DiscoveryMap) {
+fn handle_packet(data: &[u8], src: SocketAddr, discovered: &Arc<DiscoveryMap>) {
     let text = match std::str::from_utf8(data) {
         Ok(s) => s,
         Err(_) => return,
@@ -141,29 +112,19 @@ fn handle_packet(data: &[u8], src: SocketAddr, discovered: &DiscoveryMap) {
     let model_code = headers.get("devmodel.bambu.com").cloned().unwrap_or_default();
 
     let printer = DiscoveredPrinter {
-        serial: serial.clone(),
+        protocol: "bambu",
+        id: serial.clone(),
+        serial,
         name: headers.get("devname.bambu.com").cloned().unwrap_or_default(),
         model_name: model_name(&model_code).to_string(),
         machine_profile: machine_profile(&model_code).to_string(),
         model_code,
+        address: ip.clone(),
         ip,
         signal: headers.get("devsignal.bambu.com").cloned().unwrap_or_default(),
-        last_seen: Instant::now(),
+        ..DiscoveredPrinter::seen(TTL)
     };
-
-    let mut map = discovered.lock().unwrap();
-    match map.get(&serial) {
-        None => println!(
-            "Discovery: found {} \"{}\" (serial {}, model code {}) at {}",
-            printer.model_name, printer.name, printer.serial, printer.model_code, printer.ip
-        ),
-        Some(prev) if prev.ip != printer.ip => println!(
-            "Discovery: {} \"{}\" (serial {}) moved from {} to {}",
-            printer.model_name, printer.name, printer.serial, prev.ip, printer.ip
-        ),
-        Some(_) => {}
-    }
-    map.insert(serial, printer);
+    found(discovered, printer);
 }
 
 fn parse_headers(text: &str) -> HashMap<String, String> {

@@ -11,15 +11,32 @@ interface MachineModel {
   nozzle_diameters: string[];
 }
 
+/** A printer seen on the LAN (src/discovery/). */
 interface DiscoveredPrinter {
+  /** The protocol to add it with. */
+  protocol: string;
+  /** What tells it apart (Bambu serial, SDCP mainboard id, mDNS instance). */
+  id: string;
+  /** For the serial number field; "" when the protocol has none. */
   serial: string;
   name: string;
   model_code: string;
   model_name: string;
   machine_profile: string;
   ip: string;
+  /** For the address field (may carry a port). */
+  address: string;
   signal: string;
 }
+
+/** The host part of an address as typed or discovered. */
+const hostOf = (address: string) =>
+  address
+    .trim()
+    .replace(/^[a-z]+:\/\//, "")
+    .split(/[/?]/)[0]
+    .replace(/:\d+$/, "")
+    .toLowerCase();
 
 interface OpenReport {
   id: string;
@@ -192,9 +209,14 @@ export default function PrintersPage() {
   };
 
   const handleAddDiscovered = (d: DiscoveredPrinter) => {
-    // Discovery provides the full profile name (e.g., "Bambu Lab A1 0.4 nozzle").
-    // Find the matching model and extract vendor + nozzle.
-    const matchedModel = models.find((m) => d.machine_profile.startsWith(m.name));
+    // Discovery may name a profile ("Bambu Lab A1 0.4 nozzle") or a base model
+    // ("Elegoo Centauri Carbon"); find the model and the nozzle in it. The
+    // longest model name that fits wins ("Prusa MK4S" over "Prusa MK4").
+    const matchedModel = d.machine_profile
+      ? models
+          .filter((m) => d.machine_profile.startsWith(m.name))
+          .sort((a, b) => b.name.length - a.name.length)[0]
+      : undefined;
     const nozzleMatch = matchedModel
       ? d.machine_profile.slice(matchedModel.name.length).trim().match(/^([\d.]+)\s*nozzle/)
       : null;
@@ -203,13 +225,13 @@ export default function PrintersPage() {
       ...EMPTY,
       name: d.name,
       vendor: matchedModel?.vendor_display ?? "",
-      model: matchedModel?.name ?? d.machine_profile,
+      model: matchedModel?.name ?? "",
       nozzle:
         nozzleMatch && matchedModel?.nozzle_diameters.includes(nozzleMatch[1])
           ? nozzleMatch[1]
           : defaultNozzle(matchedModel),
-      protocol: "bambu",
-      address: d.ip,
+      protocol: d.protocol,
+      address: d.address,
       serial: d.serial,
     });
   };
@@ -222,15 +244,17 @@ export default function PrintersPage() {
   const setField = (key: string, value: string) =>
     set(key === "address" ? { address: value } : key === "serial_number" ? { serial: value } : { accessCode: value });
 
-  // Discovered printers not in the farm yet, and farm printers whose address
-  // changed (DHCP) since they were added.
+  // Discovered printers not in the farm yet (by serial where the protocol
+  // has one, else by address), and farm printers whose address changed
+  // (DHCP) since they were added.
   const bySerial = new Map(
     printers.filter((p) => p.serial_number).map((p) => [p.serial_number as string, p]),
   );
-  const newDiscovered = discovered.filter((d) => !bySerial.has(d.serial));
+  const hosts = new Set(printers.map((p) => hostOf(p.address)).filter(Boolean));
+  const newDiscovered = discovered.filter((d) => (d.serial ? !bySerial.has(d.serial) : !hosts.has(hostOf(d.address))));
   const moved = discovered
-    .map((d) => ({ d, p: bySerial.get(d.serial) }))
-    .filter((x): x is { d: DiscoveredPrinter; p: Printer } => !!x.p && x.p.address !== x.d.ip);
+    .map((d) => ({ d, p: d.serial ? bySerial.get(d.serial) : undefined }))
+    .filter((x): x is { d: DiscoveredPrinter; p: Printer } => !!x.p && hostOf(x.p.address) !== hostOf(x.d.address));
 
   return (
     <div className="page">
@@ -404,13 +428,13 @@ export default function PrintersPage() {
           <h3>Address Changed</h3>
           <div className="card-grid">
             {moved.map(({ d, p }) => (
-              <div key={d.serial} className="card discovered-card">
+              <div key={`${d.protocol}:${d.id}`} className="card discovered-card">
                 <h3>{p.name}</h3>
                 <p className="hint">
-                  Configured at {p.address || "no address"}, now announcing from {d.ip}.
+                  Configured at {p.address || "no address"}, now announcing from {d.address}.
                 </p>
-                <button className="btn-sm" style={{ marginTop: "0.5rem" }} onClick={() => handleUpdateAddress(p, d.ip)}>
-                  Use {d.ip}
+                <button className="btn-sm" style={{ marginTop: "0.5rem" }} onClick={() => handleUpdateAddress(p, d.address)}>
+                  Use {d.address}
                 </button>
               </div>
             ))}
@@ -423,14 +447,14 @@ export default function PrintersPage() {
           <h3>Detected on Network</h3>
           <div className="card-grid">
             {newDiscovered.map((d) => (
-              <div key={d.serial} className="card discovered-card">
+              <div key={`${d.protocol}:${d.id}`} className="card discovered-card">
                 <div className="printer-header">
                   <h3>{d.name || d.model_name}</h3>
                   <span className="pulse-dot" />
                 </div>
                 <p className="hint">{d.model_name}</p>
-                <p className="hint">{d.ip}</p>
-                <p className="hint">S/N: {d.serial}</p>
+                <p className="hint">{d.address}</p>
+                {d.serial && <p className="hint">S/N: {d.serial}</p>}
                 <button
                   className="btn-sm"
                   style={{ marginTop: "0.5rem" }}
