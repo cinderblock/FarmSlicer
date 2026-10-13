@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiJson } from "../auth";
+import { apiJson, useAuth } from "../auth";
 import { errorText } from "../api";
+import GcodeCheckDetails from "./GcodeCheck";
 import {
   describeState,
   formatCost,
   formatMinutes,
   loadedTrays,
   slotLabel,
+  type GcodeCheck,
   type Plate,
   type PrintOptions,
   type PrintRecord,
@@ -18,6 +20,13 @@ interface Targets {
   targets: Target[];
   /** Why this plate needs approval for the caller (empty = it doesn't). */
   needs_approval: string[];
+  /** G-code findings that stop the plate from being sent at all. */
+  blocked: string[];
+  /** G-code findings an admin must review (admins acknowledge them). */
+  needs_review: string[];
+  /** Set when the upload policy no longer lets this job be printed. */
+  uploads_denied: string | null;
+  gcode_check: GcodeCheck | null;
   estimated_cost: number;
   currency: string;
 }
@@ -55,6 +64,8 @@ export default function SendDialog({
     layer_inspect: false,
   });
   const [force, setForce] = useState(false);
+  const { isAdmin } = useAuth();
+  const [acknowledged, setAcknowledged] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
@@ -86,8 +97,13 @@ export default function SendDialog({
 
   const currentPlate = data?.plates.find((p) => p.index === plate) ?? data?.plates[0];
   const targets = useMemo(() => data?.targets ?? [], [data]);
+  const review = data?.needs_review ?? [];
+  const blocked = (data?.blocked.length ?? 0) > 0 || !!data?.uploads_denied;
+  // Admins acknowledge a G-code review themselves; anyone else's request
+  // waits for one.
+  const adminReview = review.length > 0 && !isAdmin;
   // A request that needs approval can name a busy printer: it's sent when approved.
-  const waits = (data?.needs_approval.length ?? 0) > 0;
+  const waits = (data?.needs_approval.length ?? 0) > 0 || adminReview;
   const usable = targets.filter((t) => !t.incompatible && (waits || !t.busy));
   // Default: the first free, fitting printer.
   const selected = targets.find((t) => t.printer_id === printerId) ?? usable[0];
@@ -133,6 +149,7 @@ export default function SendDialog({
         ams_mapping: mapsFilaments ? mapping : undefined,
         options,
         ignore_mapping_problems: force,
+        acknowledge_review: isAdmin && acknowledged,
       });
       onSent(print);
     } catch (e) {
@@ -180,14 +197,20 @@ export default function SendDialog({
                 )}
                 <p className="hint">
                   {[
-                    currentPlate.print_time_sec ? formatMinutes(Math.round(currentPlate.print_time_sec / 60)) : null,
-                    currentPlate.weight_g ? `${currentPlate.weight_g.toFixed(1)} g` : null,
+                    // What FarmSlicer goes by (the G-code's, when the file understates it).
+                    (data.gcode_check?.time_sec ?? currentPlate.print_time_sec)
+                      ? formatMinutes(Math.round((data.gcode_check?.time_sec ?? currentPlate.print_time_sec ?? 0) / 60))
+                      : null,
+                    (data.gcode_check?.grams ?? currentPlate.weight_g)
+                      ? `${(data.gcode_check?.grams ?? currentPlate.weight_g ?? 0).toFixed(1)} g`
+                      : null,
                     `about ${formatCost(data.estimated_cost, data.currency)} of filament`,
                     currentPlate.nozzle_diameters ? `${currentPlate.nozzle_diameters} mm nozzle` : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
+                {data.gcode_check && <GcodeCheckDetails check={data.gcode_check} />}
               </div>
             </div>
 
@@ -287,13 +310,14 @@ export default function SendDialog({
                 {optionLabels.length > 0 && <h4>Options</h4>}
                 <div className="send-options">
                   {optionLabels.map(([key, label, help]) => (
-                    <label key={key} title={help}>
+                    <label key={key}>
                       <input
                         type="checkbox"
                         checked={options[key]}
                         onChange={(e) => setOptions((o) => ({ ...o, [key]: e.target.checked }))}
                       />{" "}
                       {label}
+                      <span className="hint"> · {help}</span>
                     </label>
                   ))}
                 </div>
@@ -314,6 +338,31 @@ export default function SendDialog({
               </>
             )}
 
+            {data.uploads_denied && <div className="send-blocked">{data.uploads_denied}.</div>}
+            {data.blocked.length > 0 && (
+              <div className="send-blocked">
+                <strong>This plate can't be sent:</strong> its G-code {data.blocked.join("; ")}. FarmSlicer can't
+                tell what a printer would do with it. Re-slice it, or export it again from your slicer.
+              </div>
+            )}
+            {review.length > 0 && data.blocked.length === 0 && (
+              <div className="send-review">
+                <strong>Its G-code does things Bambu's own G-code doesn't:</strong>
+                <ul>
+                  {review.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+                {isAdmin ? (
+                  <label>
+                    <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />{" "}
+                    I've reviewed these and want to print it anyway (recorded on the print)
+                  </label>
+                ) : (
+                  <span>Sending asks an admin to review it; it prints once they approve.</span>
+                )}
+              </div>
+            )}
             {data.needs_approval.length > 0 && (
               <div className="send-approval">
                 <strong>Needs approval:</strong> {data.needs_approval.join("; ")}. Sending asks an admin or a
@@ -335,15 +384,17 @@ export default function SendDialog({
                 disabled={
                   !selected ||
                   !!selected.incompatible ||
-                  (!!selected.busy && data.needs_approval.length === 0) ||
+                  blocked ||
+                  (review.length > 0 && isAdmin && !acknowledged) ||
+                  (!!selected.busy && !waits) ||
                   sending ||
-                  (problems.length > 0 && !force && data.needs_approval.length === 0)
+                  (problems.length > 0 && !force && !waits)
                 }
                 onClick={send}
               >
                 {sending
                   ? "Sending…"
-                  : data.needs_approval.length > 0
+                  : waits
                     ? `Ask to print on ${selected?.name ?? "…"}`
                     : selected
                       ? `Print on ${selected.name}`

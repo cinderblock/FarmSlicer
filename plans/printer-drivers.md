@@ -42,7 +42,9 @@ Everything printer-facing is wired straight to `src/bambu/` today
   planned.
 - No non-Bambu hardware is available: untested printers are tracked in
   `issues/untested-printers.md` instead of waiting on test prints.
-- **Merged into master and pushed** (approved 2026-10-13).
+- **Merge into master and push** approved 2026-10-13 ("yes, do it").
+- Merging with G-code safety: plain G-code is checked too and fails
+  closed (review), never skipped.
 
 ## Design
 
@@ -187,6 +189,32 @@ Everything printer-facing is wired straight to `src/bambu/` today
       checks) + 66 unit tests; libslic3r release build; fake Bambu printer
       (send, controls, preheat) and both Bambu camera kinds; real Klipper;
       real OctoPrint 1.11.8 and 2.0.0rc6.
+- [ ] **8. Merge into master** ← current (merge committed, push next).
+      origin/master had moved on (15c09ff..12db0a1: another thread's
+      G-code safety, `plans/gcode-safety.md`), so no fast-forward: a merge
+      commit, no rewrite. 8 conflicts. Integration decisions:
+      - `src/bambu/zipcheck.rs` → `src/package/zipcheck.rs` (next to the
+        `.gcode.3mf` reader that uses it); `crate::bambu::package` →
+        `crate::package`; `Plate.check` on the shared `Plate`;
+        `MAX_GCODE_BYTES` shared (plain G-code capped too).
+      - Plain G-code packages go through the same simulator (the file is
+        the plate's G-code), `Declared::other_firmware` set: the lexer
+        reads Bambu's syntax, so a line it can't read needs review, not a
+        block (non-ASCII and over-long lines still block). Without this
+        no real non-Bambu print could be sent: Klipper `PRINT_START`,
+        Prusa `M862.3 P "MK4S"` were blocked.
+      - Non-Bambu plates always need review (no vendor data:
+        `unknown_model`); admins acknowledge, members wait. Logged in
+        ISSUES.md with the probe numbers; the e2e suites send with
+        `acknowledge_review` and assert the review.
+      - The job's own plain G-code keeps the slicer's reported time and
+        weight where its comments are silent (the check had reset a
+        browser job's numbers to 0 and broken quotas).
+      - Verified: 99 unit tests, all 8 e2e suites (372 checks, exit 0),
+        web build, libslic3r release build; real slices: X1 Carbon clean,
+        Voron 2.4 / MK4S / Centauri Carbon review, none blocked.
+      - Then: push `HEAD:master` (fast-forward of origin), fast-forward
+        the main checkout after checking its status.
 
 ## Findings / gotchas
 

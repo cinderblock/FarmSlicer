@@ -194,6 +194,11 @@ check(
   "Bambu printers don't take plain G-code",
   json(r),
 );
+check(
+  r.json?.gcode_check && r.json.blocked.length === 0 && r.json.needs_review.some((m) => /Voron 2\.4 350, which FarmSlicer has no data for/.test(m)),
+  "plain G-code is checked too; no data for its model means review",
+  json(r),
+);
 r = await user.form("/api/uploads", { file: [new Blob(["solid cube\nfacet normal 0 0 0\n"]), "cube.stl"] });
 check(r.status === 400 && /doesn't look like G-code/.test(r.json.error), "a file that isn't G-code is refused", json(r));
 

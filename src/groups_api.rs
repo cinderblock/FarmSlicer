@@ -663,6 +663,8 @@ fn settings_json(state: &AppState) -> Value {
         "print_rules": groups::PrintRules::site_default(&state.db),
         "filament_prices": crate::cost::Prices::load(&state.db),
         "guide_notes": state.db.get_setting("guide_notes").unwrap_or_default(),
+        "uploads": groups::site_uploads(&state.db),
+        "gcode_limits": crate::gcode::site_limits(&state.db),
     })
 }
 
@@ -693,6 +695,13 @@ struct UpdateSettings {
     /// The farm's own notes on the Guide page (plain text).
     #[serde(default)]
     guide_notes: Option<String>,
+    /// Pre-sliced uploads for personal jobs and groups that set none:
+    /// allow | review | deny.
+    #[serde(default)]
+    uploads: Option<String>,
+    /// What the G-code check tolerates (src/gcode/check.rs `Limits`).
+    #[serde(default)]
+    gcode_limits: Option<crate::gcode::Limits>,
 }
 
 async fn update_settings(
@@ -738,6 +747,18 @@ async fn update_settings(
         p.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
         state.db.set_setting("filament_prices", Some(&serde_json::to_string(p).unwrap()));
     }
+    if let Some(u) = &body.uploads {
+        groups::validate_uploads(u).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+        state.db.set_setting("uploads", Some(u));
+    }
+    if let Some(l) = &body.gcode_limits {
+        l.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+        if *l != crate::gcode::site_limits(&state.db) {
+            state.db.set_setting("gcode_limits", Some(&serde_json::to_string(l).unwrap()));
+            // Stored checks were made with the old limits.
+            crate::safety::spawn_recheck(state.clone());
+        }
+    }
     Ok(Json(settings_json(&state)))
 }
 
@@ -746,6 +767,8 @@ async fn guide(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({
         "notes": state.db.get_setting("guide_notes").unwrap_or_default(),
         "print_rules": groups::PrintRules::site_default(&state.db),
+        "gcode_limits": crate::gcode::site_limits(&state.db),
+        "uploads": groups::site_uploads(&state.db),
     }))
 }
 

@@ -157,7 +157,9 @@ export default function ProfilesPage() {
         body: JSON.stringify({ name, overrides: overridesJson }),
       });
       if (!res.ok) {
-        setError("Failed to update profile");
+        // Members may only change the Slice page's settings (src/config_policy.rs).
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Failed to update profile");
         return;
       }
     } else {

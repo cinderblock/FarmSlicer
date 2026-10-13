@@ -1,0 +1,353 @@
+{
+  "sources": [
+    "slicer.json: what libslic3r writes between the templates (hand-written)"
+  ],
+  "commands": {
+    "G0": {
+      "why": "travel",
+      "words": {
+        "X": {
+          "any": true
+        },
+        "Y": {
+          "any": true
+        },
+        "Z": {
+          "any": true
+        },
+        "E": {
+          "any": true
+        },
+        "F": {
+          "any": true
+        }
+      }
+    },
+    "G1": {
+      "why": "moves and extrusion",
+      "words": {
+        "X": {
+          "any": true
+        },
+        "Y": {
+          "any": true
+        },
+        "Z": {
+          "any": true
+        },
+        "E": {
+          "any": true
+        },
+        "F": {
+          "any": true
+        }
+      }
+    },
+    "G2": {
+      "why": "arc fitting (clockwise)",
+      "words": {
+        "X": {
+          "any": true
+        },
+        "Y": {
+          "any": true
+        },
+        "Z": {
+          "any": true
+        },
+        "E": {
+          "any": true
+        },
+        "F": {
+          "any": true
+        },
+        "I": {
+          "any": true
+        },
+        "J": {
+          "any": true
+        }
+      }
+    },
+    "G3": {
+      "why": "arc fitting (counter-clockwise)",
+      "words": {
+        "X": {
+          "any": true
+        },
+        "Y": {
+          "any": true
+        },
+        "Z": {
+          "any": true
+        },
+        "E": {
+          "any": true
+        },
+        "F": {
+          "any": true
+        },
+        "I": {
+          "any": true
+        },
+        "J": {
+          "any": true
+        }
+      }
+    },
+    "G4": {
+      "why": "dwell (cooling, timelapse); length is checked",
+      "words": {
+        "P": {
+          "any": true
+        },
+        "S": {
+          "any": true
+        }
+      }
+    },
+    "G17": {
+      "why": "arc plane XY, before arcs",
+      "bare": true
+    },
+    "G21": {
+      "why": "millimetres",
+      "bare": true
+    },
+    "G90": {
+      "why": "absolute positioning",
+      "bare": true
+    },
+    "G91": {
+      "why": "relative positioning",
+      "bare": true
+    },
+    "G92": {
+      "why": "set position (extruder resets)",
+      "words": {
+        "E": {
+          "any": true
+        }
+      }
+    },
+    "M82": {
+      "why": "absolute extrusion",
+      "bare": true
+    },
+    "M83": {
+      "why": "relative extrusion",
+      "bare": true
+    },
+    "M104": {
+      "why": "nozzle temperature; checked against the material",
+      "words": {
+        "S": {
+          "any": true
+        }
+      }
+    },
+    "M109": {
+      "why": "nozzle temperature and wait; checked against the material",
+      "words": {
+        "S": {
+          "any": true
+        }
+      }
+    },
+    "M140": {
+      "why": "plate temperature; checked against the material",
+      "words": {
+        "S": {
+          "any": true
+        }
+      }
+    },
+    "M190": {
+      "why": "plate temperature and wait; checked against the material",
+      "words": {
+        "S": {
+          "any": true
+        }
+      }
+    },
+    "M106": {
+      "why": "fan speed 0-255",
+      "words": {
+        "P": {
+          "min": 0,
+          "max": 10
+        },
+        "S": {
+          "min": 0,
+          "max": 255
+        }
+      }
+    },
+    "M107": {
+      "why": "fan off",
+      "bare": true
+    },
+    "M204": {
+      "why": "acceleration: print, retract, travel, or all; bounded by the machine maxima",
+      "words": {
+        "S": {
+          "min": 0,
+          "max": 30000
+        },
+        "P": {
+          "min": 0,
+          "max": 20000
+        },
+        "R": {
+          "min": 0,
+          "max": 30000
+        },
+        "T": {
+          "min": 0,
+          "max": 20000
+        }
+      }
+    },
+    "M73": {
+      "why": "progress and time remaining for the printer's display (E: filament change progress)",
+      "words": {
+        "P": {
+          "any": true
+        },
+        "R": {
+          "any": true
+        },
+        "E": {
+          "any": true
+        }
+      }
+    },
+    "M624": {
+      "why": "start of a labelled object (skip object)",
+      "any_text": true
+    },
+    "M625": {
+      "why": "end of a labelled object",
+      "bare": true
+    },
+    "M400": {
+      "why": "wait for moves to finish",
+      "bare": true
+    },
+    "T": {
+      "why": "tool change",
+      "any_tool": true
+    },
+    "M201": {
+      "why": "machine acceleration limits from the machine profile; bounded by the largest any Bambu profile has",
+      "words": {
+        "X": {
+          "min": 0,
+          "max": 20000
+        },
+        "Y": {
+          "min": 0,
+          "max": 20000
+        },
+        "Z": {
+          "min": 0,
+          "max": 1500
+        },
+        "E": {
+          "min": 0,
+          "max": 30000
+        }
+      }
+    },
+    "M203": {
+      "why": "machine speed limits from the machine profile; bounded by the largest any Bambu profile has",
+      "words": {
+        "X": {
+          "min": 0,
+          "max": 1000
+        },
+        "Y": {
+          "min": 0,
+          "max": 1000
+        },
+        "Z": {
+          "min": 0,
+          "max": 30
+        },
+        "E": {
+          "min": 0,
+          "max": 120
+        }
+      }
+    },
+    "M205": {
+      "why": "jerk limits from the machine profile; bounded by the largest any Bambu profile has",
+      "words": {
+        "X": {
+          "min": 0,
+          "max": 9
+        },
+        "Y": {
+          "min": 0,
+          "max": 9
+        },
+        "Z": {
+          "min": 0,
+          "max": 5
+        },
+        "E": {
+          "min": 0,
+          "max": 5
+        }
+      }
+    },
+    "M220": {
+      "why": "speed factor: B saves it and R restores it around the wipe tower",
+      "words": {
+        "B": {
+          "flag": true
+        },
+        "R": {
+          "flag": true
+        }
+      }
+    },
+    "M976": {
+      "why": "first-layer scan before the second layer (enable_first_layer_inspection)",
+      "words": {
+        "S": {
+          "min": 1,
+          "max": 3
+        },
+        "P": {
+          "min": 1,
+          "max": 1
+        }
+      }
+    },
+    "M981": {
+      "why": "spaghetti detector on/off and its sensitivity",
+      "words": {
+        "S": {
+          "min": 0,
+          "max": 1
+        },
+        "P": {
+          "any": true
+        }
+      }
+    },
+    "M1003": {
+      "why": "power-loss recovery on/off",
+      "words": {
+        "S": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    }
+  },
+  "text_commands": [
+    "M624"
+  ]
+}

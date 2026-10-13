@@ -87,7 +87,7 @@ const gcode = [
 ].join("\n");
 r = await owner.form("/api/uploads", { file: [new Blob([gcode]), "Hook.gcode"] });
 const jobId = r.json.id;
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 201, "send starts", json(r));
 const first = r.json.id;
 let p = await printOf(first, (x) => x?.status === "printing");
@@ -96,7 +96,7 @@ check(fake.files.has(`farmslicer/${p.file_name}`), "the file landed in farmslice
 check(fake.files.get(`farmslicer/${p.file_name}`)?.userdata?.farmslicer?.print_id === first, "tagged with the print", "");
 s = await statusOf(id, (x) => x?.state === "RUNNING");
 check(s?.job_key === p.file_name.replace(/\.gcode$/, "") && s.remaining_minutes !== null, "status names the job", JSON.stringify(s));
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 409, "a busy printer refuses another send", json(r));
 p = await printOf(first, (x) => x?.status === "finished");
 check(p?.status === "finished", "the print finishes (PrintDone)", JSON.stringify(p));
@@ -104,7 +104,7 @@ s = await statusOf(id, (x) => x?.state === "FINISH");
 check(s?.state === "FINISH", "OctoPrint's 'Operational' with the file still selected reads as finished", JSON.stringify(s));
 
 // ---- controls -----------------------------------------------------------------------------
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 const second = r.json.id;
 p = await printOf(second, (x) => x?.status === "printing");
 check(p?.status === "printing", "a second print starts on the finished printer", JSON.stringify(p));

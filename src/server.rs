@@ -14,13 +14,14 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::auth::{self, CurrentUser};
 use crate::auth_api;
-use crate::printer::PrinterHub;
+use crate::config_policy;
 use crate::db::{Db, Job, JobFilter, User};
 use crate::discovery;
 use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
 use crate::overlay;
+use crate::printer::PrinterHub;
 use crate::printers_api;
 use crate::prints_api;
 use crate::profiles::ProfileStore;
@@ -272,6 +273,9 @@ async fn create_custom_profile(
         ));
     }
     let overrides = body.overrides.as_deref().unwrap_or("{}");
+    config_policy::parse(overrides)
+        .and_then(|m| config_policy::check(&m, auth::is_admin(&user)))
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
     let profile = state.db.create_custom_profile(
         &body.name,
         &body.profile_type,
@@ -292,19 +296,22 @@ async fn update_custom_profile(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
     Json(body): Json<UpdateCustomProfile>,
-) -> StatusCode {
-    if auth::require_full(&user).is_err() {
-        return StatusCode::FORBIDDEN;
-    }
+) -> Result<StatusCode, ApiError> {
+    auth::require_full(&user)?;
     let Some(existing) = state.db.get_custom_profile(&id) else {
-        return StatusCode::NOT_FOUND;
+        return Err(api_err(StatusCode::NOT_FOUND, "no such profile"));
     };
     let name = body.name.as_deref().unwrap_or(&existing.name);
     let overrides = body.overrides.as_deref().unwrap_or(&existing.overrides);
+    if body.overrides.is_some() {
+        config_policy::parse(overrides)
+            .and_then(|m| config_policy::check(&m, auth::is_admin(&user)))
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+    }
     if state.db.update_custom_profile(&id, name, overrides) {
-        StatusCode::OK
+        Ok(StatusCode::OK)
     } else {
-        StatusCode::NOT_FOUND
+        Err(api_err(StatusCode::NOT_FOUND, "no such profile"))
     }
 }
 
@@ -605,12 +612,21 @@ async fn create_job(
         _ => quota::check(&state.db, &tree, &user, group_id.as_deref())
             .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e)),
     };
-    if let Err(e) = admission {
-        if !model_path.is_empty() {
-            std::fs::remove_file(&model_path).ok();
+    // Overrides may only touch what the caller is allowed to (no G-code).
+    let overrides = admission.and_then(|()| {
+        config_policy::parse(&overrides_str)
+            .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+    });
+    let overrides = match overrides {
+        Ok(o) => o,
+        Err(e) => {
+            if !model_path.is_empty() {
+                std::fs::remove_file(&model_path).ok();
+            }
+            return Err(e);
         }
-        return Err(e);
-    }
+    };
     let keep_model = group_id
         .as_deref()
         .is_some_and(|g| tree.effective(g).keep_models);
@@ -650,14 +666,12 @@ async fn create_job(
             })?;
 
         // Merge per-job overrides on top of resolved config
-        if !overrides_str.is_empty() {
-            if let Ok(overrides) = serde_json::from_str::<serde_json::Map<String, Value>>(&overrides_str) {
-                if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
-                    for (k, v) in overrides {
-                        config.insert(k, v);
-                    }
-                    config_str = serde_json::to_string(&Value::Object(config)).unwrap();
+        if !overrides.is_empty() {
+            if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
+                for (k, v) in overrides {
+                    config.insert(k, v);
                 }
+                config_str = serde_json::to_string(&Value::Object(config)).unwrap();
             }
         }
 
@@ -829,12 +843,25 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
     options
 }
 
-/// Read a freshly written package and attach it to the job (sendable now).
-/// `own_file`: the package is a file of its own (a `.gcode.3mf`), not the
-/// job's G-code itself, so it counts towards the job's storage too.
-pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_file: bool) {
+/// Read a freshly written package, attach it to the job (sendable now) and
+/// check its G-code (src/safety.rs). `own_file`: the package is a file of
+/// its own (a `.gcode.3mf`), not the job's G-code itself, so it counts
+/// towards the job's storage too. Blocking: the check reads all of the
+/// G-code. Returns whether the job has a package now.
+pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_file: bool) -> bool {
     match crate::package::inspect(std::path::Path::new(path)) {
-        Ok(pkg) => {
+        Ok(mut pkg) => {
+            // The job's own G-code: where its comments are silent, what the
+            // slicer reported stands (the check raises it if the G-code
+            // takes more, never lowers it).
+            if !own_file {
+                if let Some(job) = state.db.get_job(job_id) {
+                    for plate in &mut pkg.plates {
+                        plate.print_time_sec = plate.print_time_sec.or(job.print_time_sec.filter(|t| *t > 0.0));
+                        plate.weight_g = plate.weight_g.or(job.filament_used_g.filter(|g| *g > 0.0));
+                    }
+                }
+            }
             state
                 .db
                 .set_job_package(job_id, path, &serde_json::to_string(&pkg).expect("packages serialize"));
@@ -842,8 +869,15 @@ pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_fil
                 let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
                 state.db.add_job_stored_bytes(job_id, size);
             }
+            if let Err(e) = crate::safety::check_job(state, job_id) {
+                eprintln!("job {job_id}: can't check its G-code: {e}");
+            }
+            true
         }
-        Err(e) => eprintln!("job {job_id}: the sliced file {path} is unreadable: {e}"),
+        Err(e) => {
+            eprintln!("job {job_id}: the sliced file {path} is unreadable: {e}");
+            false
+        }
     }
 }
 
@@ -1062,16 +1096,31 @@ async fn upload_job_result(
     }
 
     finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
-    match package.filter(|p| !p.is_empty()) {
+    // The client's numbers and G-code are whatever it sent: check them
+    // like an upload's (off the async runtime; it reads every line).
+    let package = package.filter(|p| !p.is_empty());
+    let checker = state.clone();
+    let job_id = id.clone();
+    tokio::task::spawn_blocking(move || match package {
         Some(pkg) => {
-            let path = package_output_path(&state, &id);
+            let path = package_output_path(&checker, &job_id);
             match std::fs::write(&path, &pkg) {
-                Ok(()) => record_package(&state, &id, &path, true),
-                Err(e) => eprintln!("job {id}: can't store the sliced project: {e}"),
+                Ok(()) => {
+                    record_package(&checker, &job_id, &path, true);
+                }
+                Err(e) => eprintln!("job {job_id}: can't store the sliced project: {e}"),
             }
         }
-        None => record_package(&state, &id, &output_path, false),
-    }
+        // Plain G-code is its own package; if it can't be one, the job
+        // can't be sent, but its numbers still count.
+        None => {
+            if !record_package(&checker, &job_id, &output_path, false) {
+                crate::safety::settle_gcode_stats(&checker, &job_id, &output_path);
+            }
+        }
+    })
+    .await
+    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
     println!(
         "job {id}: browser slice uploaded ({} bytes, {:.0} s, {:.1} g)",
         gcode.len(),

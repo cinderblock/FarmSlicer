@@ -85,7 +85,14 @@ impl Prices {
     }
 
     pub fn plate(&self, plate: &Plate) -> f64 {
-        round(plate.filaments.iter().map(|f| f.used_g * self.per_kg(&f.material) / 1000.0).sum())
+        // Grams per filament as the G-code check settled them.
+        round(
+            plate
+                .filaments
+                .iter()
+                .map(|f| crate::gcode::effective_grams(plate, f.id) * self.per_kg(&f.material) / 1000.0)
+                .sum(),
+        )
     }
 
     /// A job's estimate: its package's first plate, else its weight at the
@@ -139,6 +146,7 @@ mod tests {
             has_thumbnail: false,
             gcode_md5: String::new(),
             bed_type: None,
+            check: None,
         };
         assert_eq!(p.plate(&plate), 3.47); // 1.999 + 1.4699
     }

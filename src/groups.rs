@@ -47,6 +47,11 @@ pub struct GroupSettings {
     /// default applies to personal jobs). See src/printing.rs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub print_rules: Option<PrintRules>,
+    /// Pre-sliced uploads (`.gcode.3mf` from Bambu Studio and the like):
+    /// "allow", "review" (every print of one waits for approval) or "deny".
+    /// Their G-code is checked either way (src/gcode/).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uploads: Option<String>,
     /// Not inherited. Offer this group on the sign-in page (admins only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listed: Option<bool>,
@@ -168,8 +173,29 @@ impl GroupSettings {
         if let Some(r) = &self.print_rules {
             r.validate()?;
         }
+        if let Some(u) = &self.uploads {
+            validate_uploads(u)?;
+        }
         Ok(())
     }
+}
+
+pub const UPLOAD_POLICIES: &[&str] = &["allow", "review", "deny"];
+
+pub fn validate_uploads(policy: &str) -> Result<(), String> {
+    if UPLOAD_POLICIES.contains(&policy) {
+        Ok(())
+    } else {
+        Err("uploads must be allow, review or deny".into())
+    }
+}
+
+/// The site's upload policy (setting `uploads`): personal jobs, and groups
+/// that set none.
+pub fn site_uploads(db: &Db) -> String {
+    db.get_setting("uploads")
+        .filter(|u| validate_uploads(u).is_ok())
+        .unwrap_or_else(|| "allow".to_string())
 }
 
 /// "MM-DD" → (month, day).
@@ -197,6 +223,7 @@ pub struct Effective {
     pub join_policy: String,
     pub thumbnail_label: String,
     pub print_rules: PrintRules,
+    pub uploads: String,
     pub sources: HashMap<&'static str, Option<String>>,
 }
 
@@ -207,6 +234,7 @@ pub struct Tree {
     children: HashMap<String, Vec<String>>,
     site_season_start: String,
     site_print_rules: PrintRules,
+    site_uploads: String,
 }
 
 impl Tree {
@@ -231,6 +259,7 @@ impl Tree {
             children,
             site_season_start,
             site_print_rules: PrintRules::site_default(db),
+            site_uploads: site_uploads(db),
         }
     }
 
@@ -248,6 +277,10 @@ impl Tree {
 
     pub fn site_print_rules(&self) -> &PrintRules {
         &self.site_print_rules
+    }
+
+    pub fn site_uploads(&self) -> &str {
+        &self.site_uploads
     }
 
     /// `id` first, then its parent, ... up to the root. Stops on a cycle.
@@ -332,6 +365,7 @@ impl Tree {
             join_policy: inherit!(join_policy, "approval".to_string()),
             thumbnail_label: inherit!(thumbnail_label, String::new()),
             print_rules: inherit!(print_rules, self.site_print_rules.clone()),
+            uploads: inherit!(uploads, self.site_uploads.clone()),
             sources,
         }
     }

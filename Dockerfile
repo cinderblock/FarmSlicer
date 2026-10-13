@@ -104,6 +104,9 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY .cargo .cargo
 COPY src src
 COPY cxx cxx
+# The Slice page's settings schema doubles as the overrides allowlist
+# (src/config_policy.rs includes it).
+COPY web/src/data web/src/data
 RUN CARGO_BUILD_JOBS="${JOBS:-$(nproc)}" cargo build --release --locked \
     && strip target/release/farmslicer
 

@@ -102,8 +102,12 @@ const jobId = r.json.id;
 r = await owner.get(`/api/jobs/${jobId}/targets`);
 const target = r.json?.targets?.find((t) => t.printer_id === id);
 check(target && target.incompatible === null && target.busy === null && target.problems.length === 0, "the Voron takes it and is free", json(r));
-
+// FarmSlicer's G-code data covers Bambu's own G-code only: other makes'
+// plates need review, so an admin's send says it was looked at.
 r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+check(r.status === 409 && r.json.needs_review?.length > 0, "an admin's send must acknowledge the G-code review", json(r));
+
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 201 && r.json.file_name.endsWith(".gcode"), "send starts", json(r));
 const first = r.json.id;
 let p = await printOf(first, (x) => x?.status === "printing");
@@ -112,7 +116,7 @@ check(fake.files.has(`farmslicer/${p.file_name}`), "the file landed in gcodes/fa
 s = await statusOf(id, (x) => x?.state === "RUNNING");
 check(s?.job_key === p.file_name.replace(/\.gcode$/, "") && s.total_layers === 10, "status names the job and its layers", JSON.stringify(s));
 
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 409 && /printing|busy/.test(r.json.error), "a busy printer refuses another send", json(r));
 
 p = await printOf(first, (x) => x?.status === "finished");
@@ -122,7 +126,7 @@ r = await fetch(`${BASE}/api/printers/${id}/thumbnail`, { headers: { cookie: own
 check(r.status === 200 && r.headers.get("content-type") === "image/png", "the printer card shows the job's picture", String(r.status));
 
 // ---- controls -----------------------------------------------------------------------------
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 const second = r.json.id;
 p = await printOf(second, (x) => x?.status === "printing");
 check(p?.status === "printing", "a second print starts", JSON.stringify(p));
@@ -130,7 +134,7 @@ r = await owner.post(`/api/prints/${second}/control`, { action: "pause" });
 check(r.status === 200, "pause", json(r));
 p = await printOf(second, (x) => x?.status === "paused");
 check(p?.status === "paused", "the print is paused", JSON.stringify(p));
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 409, "a paused printer refuses another send (Klipper would replace the job)", json(r));
 r = await owner.post(`/api/prints/${second}/control`, { action: "pause" });
 check(r.status === 502 && /paused/.test(r.json.error), "pausing twice is refused", json(r));

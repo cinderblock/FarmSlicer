@@ -234,6 +234,36 @@ export interface FilamentUse {
   used_m: number;
 }
 
+/** One thing the G-code check found (src/gcode/check.rs). */
+export interface GcodeFinding {
+  /** block: can't be sent; review: an admin must approve; info: worth knowing. */
+  severity: "block" | "review" | "info";
+  code: string;
+  message: string;
+  line?: number | null;
+  count: number;
+}
+
+/** What the G-code check made of a plate. */
+export interface GcodeCheck {
+  checker: string;
+  verdict: GcodeFinding["severity"] | null;
+  findings: GcodeFinding[];
+  stats: {
+    lines: number;
+    commands: number;
+    time_sec: number;
+    max_nozzle_c: number;
+    max_bed_c: number;
+    max_chamber_c: number;
+    longest_heated_idle_sec: number;
+    longest_dwell_sec: number;
+  };
+  /** Print time and filament FarmSlicer goes by (rules, quotas, cost). */
+  time_sec: number;
+  grams: number;
+}
+
 export interface Plate {
   index: number;
   printer_model_id: string | null;
@@ -245,6 +275,44 @@ export interface Plate {
   filaments: FilamentUse[];
   has_thumbnail: boolean;
   gcode_md5: string;
+  check?: GcodeCheck | null;
+}
+
+/** What the G-code check tolerates (site setting; src/gcode/check.rs `Limits`). */
+export interface GcodeLimits {
+  max_dwell_sec: number;
+  max_heated_idle_sec: number;
+  nozzle_margin_c: number;
+  bed_margin_c: number;
+  reach_margin_mm: number;
+}
+
+/** Pre-sliced uploads: site setting and inherited group setting. */
+export type UploadPolicy = "allow" | "review" | "deny";
+
+export const UPLOAD_POLICIES: [UploadPolicy, string][] = [
+  ["allow", "Allowed (their G-code is still checked)"],
+  ["review", "Allowed, but every print of one needs approval"],
+  ["deny", "Not allowed: slice in FarmSlicer instead"],
+];
+
+/** The worst verdict over a job's plates (from its `package_json`). */
+export function packageVerdict(packageJson: string | null): {
+  checked: boolean;
+  verdict: GcodeCheck["verdict"];
+} {
+  try {
+    const plates: Plate[] = JSON.parse(packageJson ?? "null")?.plates ?? [];
+    const checks = plates.map((p) => p.check).filter((c): c is GcodeCheck => !!c);
+    const order = [null, "info", "review", "block"] as const;
+    const verdict = checks.reduce<GcodeCheck["verdict"]>(
+      (worst, c) => (order.indexOf(c.verdict) > order.indexOf(worst) ? c.verdict : worst),
+      null,
+    );
+    return { checked: plates.length > 0 && checks.length === plates.length, verdict };
+  } catch {
+    return { checked: false, verdict: null };
+  }
 }
 
 export interface Target {
@@ -296,6 +364,8 @@ export interface PrintRecord {
     | "rejected";
   approval_reason: string | null;
   decided_by: string | null;
+  /** Its G-code needed review: only an admin approves it. */
+  safety_review: boolean;
   progress: number;
   error: string | null;
   created_at: string;

@@ -37,6 +37,8 @@ export interface GroupSettings {
   allow_guests?: boolean;
   allow_registration?: boolean;
   join_policy?: "open" | "approval";
+  /** Pre-sliced uploads; inherited. */
+  uploads?: import("./printers").UploadPolicy;
   listed?: boolean;
   subgroups?: SubgroupPolicy;
 }
@@ -50,6 +52,7 @@ export interface EffectiveSettings {
   allow_guests: boolean;
   allow_registration: boolean;
   join_policy: "open" | "approval";
+  uploads: import("./printers").UploadPolicy;
   /** Which group each value came from (null = site default). */
   sources: Record<string, string | null>;
 }

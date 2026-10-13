@@ -23,19 +23,29 @@ use std::path::Path;
 use md5::{Digest, Md5};
 use quick_xml::events::{BytesStart, Event};
 
-use super::{FilamentUse, Package, PackageFormat, Plate};
+use super::{FilamentUse, MAX_GCODE_BYTES, Package, PackageFormat, Plate};
 
 pub fn gcode_entry(index: u32) -> String {
     format!("Metadata/plate_{index}.gcode")
 }
 
 /// Read a package from disk. Errors are messages for the uploader.
+///
+/// The archive's structure is verified first (src/package/zipcheck.rs), and
+/// each plate's MD5 is computed from its G-code: a `.md5` entry that
+/// disagrees means the G-code was changed after slicing.
 pub fn inspect(path: &Path) -> Result<Package, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("can't open the file: {e}"))?;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("can't open the file: {e}"))?;
+    let entries = super::zipcheck::verify(&mut file)?;
     let mut zip = zip::ZipArchive::new(file)
         .map_err(|_| "this isn't a 3MF file (not a zip archive)".to_string())?;
 
-    let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
+    let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+    for e in &entries {
+        if e.name.ends_with(".gcode") && e.uncompressed_size > MAX_GCODE_BYTES {
+            return Err(format!("{} is too large ({} MB)", e.name, e.uncompressed_size >> 20));
+        }
+    }
     let mut gcode_plates: Vec<u32> = names
         .iter()
         .filter_map(|n| n.strip_prefix("Metadata/plate_")?.strip_suffix(".gcode")?.parse().ok())
@@ -66,18 +76,26 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
 
     let mut plates = Vec::new();
     for index in gcode_plates {
-        let md5 = match read_entry_from(&mut zip, &format!("{}.md5", gcode_entry(index))) {
-            Some(bytes) => String::from_utf8_lossy(&bytes).trim().to_uppercase(),
-            None => {
-                let mut f = zip
-                    .by_name(&gcode_entry(index))
-                    .map_err(|e| format!("can't read plate {index}: {e}"))?;
-                let mut hasher = Md5::new();
-                std::io::copy(&mut f, &mut HashWriter(&mut hasher))
-                    .map_err(|e| format!("can't read plate {index}: {e}"))?;
-                hex::encode_upper(hasher.finalize())
+        let md5 = {
+            let f = zip
+                .by_name(&gcode_entry(index))
+                .map_err(|e| format!("can't read plate {index}: {e}"))?;
+            let mut hasher = Md5::new();
+            let copied = std::io::copy(&mut f.take(MAX_GCODE_BYTES + 1), &mut HashWriter(&mut hasher))
+                .map_err(|e| format!("can't read plate {index}: {e}"))?;
+            if copied > MAX_GCODE_BYTES {
+                return Err(format!("plate {index}'s G-code is too large"));
             }
+            hex::encode_upper(hasher.finalize())
         };
+        if let Some(bytes) = read_entry_from(&mut zip, &format!("{}.md5", gcode_entry(index))) {
+            let declared = String::from_utf8_lossy(&bytes).trim().to_uppercase();
+            if declared != md5 {
+                return Err(format!(
+                    "plate {index}'s G-code doesn't match its checksum: it was changed after slicing"
+                ));
+            }
+        }
         let meta = info.get(&index).cloned().unwrap_or_default();
         plates.push(Plate {
             index,
@@ -90,6 +108,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
             has_thumbnail: names.iter().any(|n| n == &thumbnail_entry(index)),
             gcode_md5: md5,
             bed_type: bed_type.clone(),
+            check: None,
         });
     }
     Ok(Package { format: PackageFormat::Bambu3mf, plates })
@@ -262,7 +281,7 @@ mod tests {
         let pkg = write_package(&[
             ("Metadata/slice_info.config", SLICE_INFO.as_bytes()),
             ("Metadata/plate_2.gcode", b"G28\n"),
-            ("Metadata/plate_2.gcode.md5", b"abcdef0123456789abcdef0123456789\n"),
+            ("Metadata/plate_2.gcode.md5", b"bed3f671261ea5abc6be16b782d1c47b\n"),
             ("Metadata/plate_2.png", b"\x89PNG"),
             ("Metadata/plate_1.png", b"\x89PNG"),
             ("Metadata/project_settings.config", br#"{"curr_bed_type": "Textured PEI Plate"}"#),
@@ -273,7 +292,7 @@ mod tests {
         assert_eq!(plate.printer_model_id.as_deref(), Some("C12"));
         assert_eq!(plate.print_time_sec, Some(4405.0));
         assert_eq!(plate.weight_g, Some(24.6));
-        assert_eq!(plate.gcode_md5, "ABCDEF0123456789ABCDEF0123456789");
+        assert_eq!(plate.gcode_md5, "BED3F671261EA5ABC6BE16B782D1C47B");
         assert!(plate.has_thumbnail);
         assert_eq!(plate.filaments.len(), 2);
         assert_eq!(plate.filaments[1].id, 3);
@@ -289,6 +308,29 @@ mod tests {
         // md5("G28\n")
         assert_eq!(p.plates[0].gcode_md5, hex::encode_upper(Md5::digest(b"G28\n")));
         assert_eq!(p.plates[0].printer_model_id, None);
+    }
+
+    /// Real packages (Bambu Studio, OrcaSlicer, FarmSlicer's own) from a
+    /// local directory, when `FARMSLICER_SAMPLE_PACKAGES` names one.
+    #[test]
+    fn sample_packages_pass() {
+        let Some(dir) = std::env::var_os("FARMSLICER_SAMPLE_PACKAGES") else { return };
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.to_string_lossy().ends_with(".gcode.3mf") {
+                let p = inspect(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                assert!(!p.plates.is_empty(), "{}", path.display());
+            }
+        }
+    }
+
+    #[test]
+    fn a_checksum_that_disagrees_is_refused() {
+        let pkg = write_package(&[
+            ("Metadata/plate_1.gcode", b"M104 S300\n"),
+            ("Metadata/plate_1.gcode.md5", b"ABCDEF0123456789ABCDEF0123456789"),
+        ]);
+        assert!(inspect(&pkg.0).unwrap_err().contains("changed after slicing"));
     }
 
     #[test]

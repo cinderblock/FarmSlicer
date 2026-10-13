@@ -3,9 +3,11 @@ mod auth_api;
 mod cost;
 mod bambu;
 mod camera;
+mod config_policy;
 mod db;
 mod discovery;
 mod farm_api;
+mod gcode;
 mod groups;
 mod groups_api;
 mod join_api;
@@ -23,6 +25,7 @@ mod profiles;
 mod progress;
 mod query;
 mod quota;
+mod safety;
 mod sdcp;
 mod server;
 mod slicer;
@@ -114,6 +117,8 @@ async fn main() {
 
     // Follow sent prints through their printers' reports.
     tokio::spawn(printing::track(state.clone()));
+    // Check stored packages the current G-code checker hasn't seen.
+    safety::spawn_recheck(state.clone());
 
     let app = server::router(state);
 

@@ -3,7 +3,8 @@ import { useNavigate } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
-import { formatCost, type Prices } from "../printers";
+import { GcodeChip } from "../components/GcodeCheck";
+import { formatCost, packageVerdict, type Prices } from "../printers";
 
 interface Job {
   id: string;
@@ -127,12 +128,11 @@ export default function JobsPage() {
           style={{ width: "auto" }}
           disabled={uploading}
           onClick={() => fileInput.current?.click()}
-          title="A plate sliced elsewhere: a .gcode.3mf from Bambu Studio or OrcaSlicer for Bambu printers, a .gcode file for others"
         >
           {uploading ? "Uploading…" : "Upload a sliced file"}
         </button>
         {chargeable.length > 0 && (
-          <select value={uploadGroup} onChange={(e) => setUploadGroup(e.target.value)} title="Group to charge the upload to">
+          <select value={uploadGroup} onChange={(e) => setUploadGroup(e.target.value)} aria-label="Group to charge the upload to">
             <option value="">Personal</option>
             {chargeable.map((g) => (
               <option key={g.id} value={g.id}>
@@ -141,6 +141,10 @@ export default function JobsPage() {
             ))}
           </select>
         )}
+        <span className="hint">
+          A plate sliced elsewhere: a .gcode.3mf from Bambu Studio or OrcaSlicer for Bambu printers, a .gcode file
+          for others. Its G-code is checked before it can be printed.
+        </span>
         <input
           ref={fileInput}
           type="file"
@@ -175,7 +179,7 @@ export default function JobsPage() {
               <th>Sliced on</th>
               <th>Printer</th>
               <th>Time</th>
-              <th title="Filament at the farm's prices (Settings)">Cost</th>
+              <th>Cost</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -198,7 +202,7 @@ export default function JobsPage() {
                       <select
                         value={job.group_id ?? ""}
                         onChange={(e) => moveJob(job.id, e.target.value)}
-                        title="Move this job to one of your groups"
+                        aria-label="Move this job to one of your groups"
                       >
                         <option value="">Personal</option>
                         {job.group_id && !chargeable.some((g) => g.id === job.group_id) && (
@@ -231,9 +235,14 @@ export default function JobsPage() {
                     )}
                   </td>
                   <td>
-                    <span className={`source-badge source-${job.source}`} title={SOURCE_LABELS[job.source]?.[1]}>
+                    <span className={`source-badge source-${job.source}`}>
                       {SOURCE_LABELS[job.source]?.[0] ?? job.source}
                     </span>
+                    {job.package_json && (
+                      <div>
+                        <GcodeChip {...packageVerdict(job.package_json)} />
+                      </div>
+                    )}
                   </td>
                   <td>{job.printer_name ?? (job.routing === "auto" ? "Auto" : "—")}</td>
                   <td>
@@ -255,14 +264,22 @@ export default function JobsPage() {
                       </button>
                     )}
                     {job.error && (
-                      <span className="hint" title={job.error}>
-                        Error
-                      </span>
+                      <details className="hint">
+                        <summary>Error</summary>
+                        {job.error}
+                      </details>
                     )}
                     {warnings.length > 0 && (
-                      <span className="hint" title={warnings.join("\n")}>
-                        {warnings.length} warning{warnings.length === 1 ? "" : "s"}
-                      </span>
+                      <details className="hint">
+                        <summary>
+                          {warnings.length} warning{warnings.length === 1 ? "" : "s"}
+                        </summary>
+                        <ul>
+                          {warnings.map((w, i) => (
+                            <li key={i}>{w}</li>
+                          ))}
+                        </ul>
+                      </details>
                     )}
                   </td>
                 </tr>

@@ -1,12 +1,15 @@
 import { Link } from "react-router";
 import { useJson } from "../api";
-import { describeRules, type Printer, type PrintRules } from "../printers";
+import { describeRules, formatMinutes, type GcodeLimits, type Printer, type PrintRules, type UploadPolicy } from "../printers";
 
 interface GuideInfo {
   /** The farm's own notes (Settings), plain text. */
   notes: string;
   /** The default print rules (groups may set their own). */
   print_rules: PrintRules;
+  gcode_limits: GcodeLimits;
+  /** The default upload policy (groups may set their own). */
+  uploads: UploadPolicy;
 }
 
 /** Plain text → paragraphs and lines, with bare URLs as links. */
@@ -115,6 +118,40 @@ export default function GuidePage() {
             On <Link to="/jobs">Jobs</Link>, press "Upload a sliced file" and pick it.
           </li>
         </ol>
+        {info?.uploads === "review" && <p>Here, prints of uploaded files wait for approval.</p>}
+        {info?.uploads === "deny" && <p>Here, uploaded files aren't accepted unless your group allows them.</p>}
+      </section>
+
+      <section>
+        <h3>Why a print might wait</h3>
+        <p>
+          Before anything is sent, FarmSlicer reads every line of the plate's G-code and runs it through a model
+          of the printer, comparing it with what Bambu's own G-code does. On Jobs each plate shows what it found.
+          FarmSlicer knows only Bambu's G-code so far, so prints for other makes always need review.
+        </p>
+        <ul>
+          <li>
+            <strong>Can't be sent:</strong> lines a printer might read differently from FarmSlicer, or a file
+            changed after it was sliced. Slice it again.
+          </li>
+          <li>
+            <strong>Needs review:</strong> commands Bambu's G-code never uses, the nozzle hotter than the
+            filament is ever printed at, moves outside where the printer's own G-code goes or into the plate,
+            {info && (
+              <>
+                {" "}
+                a single pause over {formatMinutes(Math.round(info.gcode_limits.max_dwell_sec / 60))}, or a heater
+                left on for {formatMinutes(Math.round(info.gcode_limits.max_heated_idle_sec / 60))} with nothing
+                printed
+              </>
+            )}
+            . An admin looks at it before it prints.
+          </li>
+          <li>
+            Print time and filament are worked out from the G-code too: if a file says less than it uses, the
+            rules and your limits go by what it really uses.
+          </li>
+        </ul>
       </section>
 
       <section>

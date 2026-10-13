@@ -68,7 +68,7 @@ export default function PrintsPage() {
               <th>By</th>
               <th>Status</th>
               <th>Progress</th>
-              <th title="Filament at the farm's prices">Cost</th>
+              <th>Cost</th>
               <th>Sent</th>
               <th>Ended</th>
               <th></th>
@@ -96,16 +96,29 @@ export default function PrintsPage() {
                 <td>{p.username ?? "—"}</td>
                 <td>
                   <span className={`status-badge print-${p.status}`}>{STATUS_LABELS[p.status] ?? p.status}</span>
+                  {p.status === "pending_approval" && p.safety_review && (
+                    <div>
+                      <span className="gcode-chip gcode-review">G-code review: admins only</span>
+                    </div>
+                  )}
                   {p.status === "pending_approval" && p.approval_reason && (
                     <div className="hint">{p.approval_reason}</div>
+                  )}
+                  {p.status !== "pending_approval" && p.safety_review && p.decided_by && (
+                    <div className="hint">
+                      G-code reviewed by {p.decided_by}: {p.approval_reason?.replace(/^G-code review: /, "")}
+                    </div>
                   )}
                   {p.error && <div className="printer-error">{p.error}</div>}
                 </td>
                 <td>
                   {ACTIVE_PRINT.includes(p.status) ? (
-                    <div className="progress-bar" title={p.status === "uploading" ? "Upload" : "Print"}>
-                      <div className="progress-fill" style={{ width: `${p.progress}%` }} />
-                    </div>
+                    <>
+                      <div className="progress-bar">
+                        <div className="progress-fill" style={{ width: `${p.progress}%` }} />
+                      </div>
+                      <span className="hint">{p.status === "uploading" ? "Upload" : "Print"}</span>
+                    </>
                   ) : p.status === "finished" ? (
                     "100%"
                   ) : p.status === "pending_approval" || p.status === "rejected" ? (

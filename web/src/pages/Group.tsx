@@ -1,6 +1,6 @@
 import { useState } from "react";
 import PrintRulesEditor from "../components/PrintRulesEditor";
-import { describeRules } from "../printers";
+import { describeRules, UPLOAD_POLICIES, type UploadPolicy } from "../printers";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { errorText, localDate, useJson } from "../api";
@@ -707,6 +707,26 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
           <option value="approval">Approval: a manager approves each joiner</option>
         </select>
         <span className="hint">Secret links to this exact group skip approval unless set otherwise.</span>
+      </label>
+      <label>
+        Uploaded sliced files
+        <select
+          value={s.uploads ?? "inherit"}
+          onChange={(e) => setS({ ...s, uploads: e.target.value === "inherit" ? undefined : (e.target.value as UploadPolicy) })}
+        >
+          <option value="inherit">
+            {inheritLabel("uploads", UPLOAD_POLICIES.find(([v]) => v === eff.uploads)?.[1] ?? eff.uploads)}
+          </option>
+          {UPLOAD_POLICIES.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <span className="hint">
+          .gcode.3mf files from Bambu Studio and the like. Their G-code is checked either way; managers of
+          this group and admins are exempt.
+        </span>
       </label>
       <label>
         Season starts (MM-DD)

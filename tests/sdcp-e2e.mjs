@@ -88,7 +88,7 @@ const jobId = r.json.id;
 r = await owner.get(`/api/jobs/${jobId}/targets`);
 const t = r.json?.targets?.find((x) => x.printer_id === id);
 check(t && t.incompatible === null && t.capabilities?.print_options?.join() === "bed_leveling,timelapse", "the Carbon takes it; levelling and timelapse are the options", json(r));
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, options: { bed_leveling: false, timelapse: true } });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true, options: { bed_leveling: false, timelapse: true } });
 check(r.status === 201, "send starts", json(r));
 const first = r.json.id;
 let p = await printOf(first, (x) => x?.status === "printing");
@@ -102,7 +102,7 @@ check(
 );
 s = await statusOf(id, (x) => x?.state === "RUNNING");
 check(s?.job_key === p.file_name.replace(/\.gcode$/, "") && s.total_layers === 20, "status names the job and its layers", JSON.stringify(s));
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 409, "a busy printer refuses another send", json(r));
 p = await printOf(first, (x) => x?.status === "finished");
 check(p?.status === "finished", "the print finishes (status 9)", JSON.stringify(p));
@@ -110,7 +110,7 @@ r = await fetch(`${BASE}/api/printers/${id}/thumbnail`, { headers: { cookie: own
 check(r.status === 200, "the printer card shows the job's picture", String(r.status));
 
 // ---- controls -----------------------------------------------------------------------------
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 const second = r.json.id;
 p = await printOf(second, (x) => x?.status === "printing");
 check(p?.status === "printing", "a second print starts", JSON.stringify(p));

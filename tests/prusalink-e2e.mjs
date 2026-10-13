@@ -91,7 +91,7 @@ const gcode = (model) =>
   ].join("\n");
 r = await owner.form("/api/uploads", { file: [new Blob([gcode("Prusa MK4S")]), "Spool Clip (v2).gcode"] });
 const jobId = r.json.id;
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 201 && /^[A-Za-z0-9._-]+$/.test(r.json.file_name), "send starts, with a plain ASCII file name", json(r));
 const first = r.json.id;
 let p = await printOf(first, (x) => x?.status === "printing");
@@ -99,7 +99,7 @@ check(p?.status === "printing", "the print goes uploading → printing", JSON.st
 check(fake.files.has(`usb/farmslicer/${p.file_name}`), "the file landed in usb/farmslicer/", JSON.stringify([...fake.files.keys()]));
 s = await statusOf(id, (x) => x?.state === "RUNNING" && x.job_key);
 check(s?.job_key === p.file_name.replace(/\.gcode$/, "") && s.percent !== null, "status names the job (by its long name)", JSON.stringify(s));
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 check(r.status === 409, "a busy printer refuses another send", json(r));
 p = await printOf(first, (x) => x?.status === "finished");
 check(p?.status === "finished", "FINISHED (with the job gone from the status) finishes the print", JSON.stringify(p));
@@ -107,7 +107,7 @@ s = await statusOf(id, (x) => x?.state === "FINISH");
 check(s?.job_key === p.file_name.replace(/\.gcode$/, ""), "the finished job is still named", JSON.stringify(s));
 
 // ---- controls -----------------------------------------------------------------------------
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 const second = r.json.id;
 p = await printOf(second, (x) => x?.status === "printing");
 check(p?.status === "printing", "a print starts from the finish screen", JSON.stringify(p));
@@ -130,7 +130,7 @@ check(r.status === 409 && /temperatures/.test(r.json.error), "pre-heating isn't 
 // ---- the printer asks a question; prints from the screen ----------------------------------
 await hook("clear");
 await hook("attention");
-r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id });
+r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });
 const third = r.json.id;
 const thirdKey = r.json.file_name.replace(/\.gcode$/, "");
 s = await statusOf(id, (x) => x?.vendor_state === "ATTENTION");

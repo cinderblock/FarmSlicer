@@ -21,7 +21,7 @@ use std::path::Path;
 use base64::Engine;
 use md5::{Digest, Md5};
 
-use super::{FilamentUse, Image, Package, PackageFormat, Plate};
+use super::{FilamentUse, Image, MAX_GCODE_BYTES, Package, PackageFormat, Plate};
 
 /// The thumbnails sit in the first lines; large PNGs run to a few hundred kB.
 const HEAD_BYTES: usize = 4 << 20;
@@ -271,10 +271,44 @@ fn describe(head: &str, tail: &str, md5: String) -> Plate {
         has_thumbnail: best(thumbnails(head)).is_some(),
         gcode_md5: md5,
         bed_type: text("curr_bed_type"),
+        check: None,
     }
 }
 
+/// What the file's config block says about its filaments, for the G-code
+/// check: material per filament, densities, diameter.
+pub struct FilamentSettings {
+    pub types: Vec<String>,
+    pub densities: Vec<f64>,
+    pub diameter: Option<f64>,
+}
+
+pub fn filament_settings(path: &Path) -> Result<FilamentSettings, String> {
+    let fail = |e: std::io::Error| format!("can't read the file: {e}");
+    let mut file = std::fs::File::open(path).map_err(fail)?;
+    let size = file.metadata().map_err(fail)?.len();
+    let mut head = Vec::new();
+    file.by_ref().take(HEAD_BYTES as u64).read_to_end(&mut head).map_err(fail)?;
+    let mut tail = Vec::new();
+    if size > HEAD_BYTES as u64 {
+        file.seek(SeekFrom::Start(size.saturating_sub(TAIL_BYTES).max(HEAD_BYTES as u64))).map_err(fail)?;
+        file.read_to_end(&mut tail).map_err(fail)?;
+    }
+    let (head, tail) = (String::from_utf8_lossy(&head), String::from_utf8_lossy(&tail));
+    let texts = [head.as_ref(), tail.as_ref()];
+    let c = comments(&texts);
+    Ok(FilamentSettings {
+        types: list(&c, "filament_type", ';').iter().map(|t| t.to_string()).collect(),
+        densities: list(&c, "filament_density", ',').iter().filter_map(|d| d.parse().ok()).collect(),
+        diameter: list(&c, "filament_diameter", ',').first().and_then(|d| d.parse().ok()),
+    })
+}
+
 pub fn inspect(path: &Path) -> Result<Package, String> {
+    let size = std::fs::metadata(path).map_err(|e| format!("can't open the file: {e}"))?.len();
+    if size > MAX_GCODE_BYTES {
+        return Err(format!("the G-code is too large ({} MB)", size >> 20));
+    }
     let (head, tail, md5) = read_ends(path)?;
     check_gcode(&head)?;
     Ok(Package { format: PackageFormat::Gcode, plates: vec![describe(&head, &tail, md5)] })

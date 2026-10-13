@@ -7,6 +7,7 @@
 
 pub mod bambu;
 pub mod gcode;
+pub mod zipcheck;
 
 use std::io::Read;
 use std::path::Path;
@@ -75,6 +76,9 @@ pub struct Plate {
     /// The build plate it was sliced for (`curr_bed_type`), when known.
     #[serde(default)]
     pub bed_type: Option<String>,
+    /// What the G-code check found (src/gcode/), once it has run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<crate::gcode::PlateCheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,6 +94,9 @@ impl Package {
         self.plates.iter().find(|p| p.index == index)
     }
 }
+
+/// The largest plate G-code we read: a day-long print is ~50 MB.
+pub const MAX_GCODE_BYTES: u64 = 2 << 30;
 
 /// A picture and its MIME type.
 pub struct Image {
