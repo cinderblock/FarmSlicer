@@ -9,20 +9,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
-use crate::bambu::{ftps, models};
+use crate::bambu::models;
 use crate::bambu::package::{Package, Plate};
-use crate::bambu::status::{PrinterStatus, Tray};
 use crate::db::{Job, Printer, PrintRecord};
+use crate::printer::status::{PrinterStatus, Tray, state};
+use crate::printer::{PackageFormat, Protocol, protocol_of};
 use crate::profiles::ProfileStore;
 use crate::server::AppState;
 
-/// `print_error` for a print stopped by a person (0300_400C).
-pub const PRINT_CANCELLED: i64 = 0x0300_400C;
-const START_ATTEMPTS: u32 = 3;
-const START_RETRY_DELAY: Duration = Duration::from_secs(2);
-const ACK_WAIT: Duration = Duration::from_secs(5);
 /// A print the printer hasn't picked up this long after the start command
 /// is given up on.
 const START_DEADLINE_SECS: i64 = 180;
@@ -69,8 +64,9 @@ fn same_family(a: &str, b: &str) -> bool {
 
 /// Why `plate` can't print on `printer`, if it can't.
 pub fn incompatibility(store: &ProfileStore, printer: &Printer, plate: &Plate) -> Option<String> {
-    if printer.protocol != "bambu" {
-        return Some(format!("{} isn't a Bambu Lab printer", printer.name));
+    match protocol_of(printer).map(|p| p.capabilities().package) {
+        Some(PackageFormat::Bambu3mf) => {}
+        None => return Some(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
     }
     let have = store
         .machine_model(&printer.machine_profile)
@@ -161,13 +157,7 @@ fn color_distance(a: &str, b: &str) -> f64 {
 }
 
 fn loaded_trays(status: &PrinterStatus) -> Vec<&Tray> {
-    status
-        .ams
-        .iter()
-        .flat_map(|u| u.trays.iter())
-        .chain(status.external.iter())
-        .filter(|t| t.material.is_some())
-        .collect()
+    status.loaded_trays()
 }
 
 /// A tray for each filament the plate uses: same material, nearest colour,
@@ -241,68 +231,6 @@ pub fn check_mapping(plate: &Plate, mapping: &[i64], status: Option<&PrinterStat
     problems
 }
 
-/// `ams_mapping` (tray id per filament, -1 for unused and external spools)
-/// and `ams_mapping2` (`{ams_id, slot_id}`, 255/255 unused) as Bambu Studio
-/// sends them, and whether any AMS tray is involved.
-fn mapping_fields(mapping: &[i64]) -> (Vec<i64>, Vec<Value>, bool) {
-    let mut v0 = Vec::new();
-    let mut v1 = Vec::new();
-    let mut use_ams = false;
-    for &slot in mapping {
-        match slot {
-            s if s < 0 => {
-                v0.push(-1);
-                v1.push(json!({"ams_id": 255, "slot_id": 255}));
-            }
-            // External spools.
-            254 | 255 => {
-                v0.push(-1);
-                v1.push(json!({"ams_id": slot, "slot_id": 0}));
-            }
-            // AMS HT units: one tray, numbered from 128.
-            s if s >= 128 => {
-                use_ams = true;
-                v0.push(s);
-                v1.push(json!({"ams_id": s, "slot_id": 0}));
-            }
-            s => {
-                use_ams = true;
-                v0.push(s);
-                v1.push(json!({"ams_id": s / 4, "slot_id": s % 4}));
-            }
-        }
-    }
-    (v0, v1, use_ams)
-}
-
-pub fn start_command(print: &PrintRecord, plate: &Plate, mapping: &[i64], options: &PrintOptions) -> Value {
-    let (v0, v1, use_ams) = mapping_fields(mapping);
-    json!({"print": {
-        "command": "project_file",
-        "param": format!("Metadata/plate_{}.gcode", plate.index),
-        "project_id": "0",
-        "profile_id": "0",
-        "task_id": "0",
-        "subtask_id": "0",
-        // Unique, so reports can be matched to this print (see `match_print`).
-        "subtask_name": task_name(print),
-        "file": print.file_name,
-        "url": format!("ftp://{}", print.file_name),
-        "md5": plate.gcode_md5,
-        "bed_type": "auto",
-        "timelapse": options.timelapse,
-        // Both spellings are seen in the wild.
-        "bed_leveling": options.bed_leveling,
-        "bed_levelling": options.bed_leveling,
-        "flow_cali": options.flow_calibration,
-        "vibration_cali": options.vibration_calibration,
-        "layer_inspect": options.layer_inspect,
-        "use_ams": use_ams,
-        "ams_mapping": v0,
-        "ams_mapping2": v1,
-    }})
-}
-
 // -- Names -----------------------------------------------------------------------
 
 /// What the printer shows: the model's name without extensions or odd
@@ -334,6 +262,14 @@ pub fn file_name(display: &str, print_id: &str) -> String {
 
 pub fn package_of(job: &Job) -> Option<Package> {
     serde_json::from_str(job.package_json.as_deref()?).ok()
+}
+
+/// How far a send has got, as the driver reports it.
+pub enum SendStep {
+    /// Upload progress in percent.
+    Uploading(i64),
+    /// Uploaded; the start command goes out.
+    Starting,
 }
 
 /// Upload and start `print` (already recorded, status `uploading`) in the
@@ -375,77 +311,34 @@ async fn send(
     let db = state.db.clone();
     let id = print.id.clone();
     let mut last = -1i64;
-    ftps::upload(
-        printer.address.trim(),
-        ftps::FTPS_PORT,
-        printer.access_code.trim(),
-        &format!("/{}", print.file_name),
-        &data,
-        |sent, total| {
-            let pct = (sent * 100 / total.max(1)) as i64;
+    let mut step = move |step: SendStep| match step {
+        SendStep::Uploading(pct) => {
             if pct / 5 != last / 5 {
                 last = pct;
                 db.update_print(&id, "uploading", Some(pct), None);
             }
-        },
-    )
-    .await
-    .map_err(|e| format!("upload failed: {e}"))?;
-
-    state.db.update_print(&print.id, "starting", Some(0), None);
-    println!("Print {}: uploaded; starting plate {} on {}", print.id, plate.index, printer.name);
-
-    let command = start_command(print, plate, mapping, options);
-    let mut last_problem = String::new();
-    for attempt in 1..=START_ATTEMPTS {
-        match state.printers.command(&printer.id, command.clone(), ACK_WAIT).await {
-            Ok(Some(response)) => {
-                let result = response["print"]["result"].as_str().unwrap_or("").to_ascii_uppercase();
-                if result == "FAIL" {
-                    let reason = response["print"]["reason"].as_str().unwrap_or("").trim().to_string();
-                    last_problem = if reason.is_empty() {
-                        "the printer refused to start the print".to_string()
-                    } else {
-                        format!("the printer refused to start the print: {reason}")
-                    };
-                } else {
-                    println!("Print {}: the printer accepted the start ({result})", print.id);
-                    return Ok(());
-                }
-            }
-            // No answer: it may have started anyway; the tracker will tell.
-            Ok(None) => {
-                last_problem = "the printer didn't answer the start command".to_string();
-                if started_on_printer(state, print) {
-                    return Ok(());
-                }
-            }
-            Err(e) => last_problem = e.to_string(),
         }
-        eprintln!("Print {}: start attempt {attempt}/{START_ATTEMPTS}: {last_problem}", print.id);
-        // A fresh upload takes the printer a moment to index.
-        if attempt < START_ATTEMPTS {
-            tokio::time::sleep(START_RETRY_DELAY).await;
+        SendStep::Starting => {
+            db.update_print(&id, "starting", Some(0), None);
         }
+    };
+    match protocol_of(&printer) {
+        Some(Protocol::Bambu) => {
+            crate::bambu::send::send(state, &printer, print, &data, plate, mapping, options, &mut step).await
+        }
+        None => Err(format!("FarmSlicer can't send prints to {} printers", printer.protocol)),
     }
-    if started_on_printer(state, print) {
-        return Ok(());
-    }
-    // A missing ack isn't proof of failure: leave the print `starting` for the
-    // tracker, which gives up after START_DEADLINE_SECS.
-    if last_problem.contains("didn't answer") {
-        return Ok(());
-    }
-    Err(last_problem)
 }
 
-fn started_on_printer(state: &AppState, print: &PrintRecord) -> bool {
+/// Has the printer picked `print` up?
+pub(crate) fn started_on_printer(state: &AppState, print: &PrintRecord) -> bool {
     print
         .printer_id
         .as_deref()
         .and_then(|id| state.printers.status(id))
         .is_some_and(|s| {
-            match_print(print, &s) != Match::Other && matches!(s.state.as_deref(), Some("PREPARE" | "RUNNING" | "PAUSE"))
+            match_print(print, &s) != Match::Other
+                && matches!(s.state.as_deref(), Some(state::PREPARE | state::RUNNING | state::PAUSE))
         })
 }
 
@@ -468,16 +361,16 @@ enum Match {
     Other,
 }
 
-/// Is the printer's current job this print? Real printers report the
-/// extracted plate as `gcode_file` (`/data/Metadata/plate_1.gcode`), so the
-/// unique job name we sent is what identifies it.
+/// Is the printer's current job this print? The file we sent, or the unique
+/// job name (Bambu printers report the extracted plate as the file,
+/// `/data/Metadata/plate_1.gcode`, so the name is what identifies it there).
 fn match_print(print: &PrintRecord, status: &PrinterStatus) -> Match {
-    if status.gcode_file.as_deref().is_some_and(|f| f.contains(&print.file_name)) {
+    if status.job_file.as_deref().is_some_and(|f| f.contains(&print.file_name)) {
         return Match::Ours;
     }
-    match status.subtask_name.as_deref() {
+    match status.job_key.as_deref() {
         Some(s) if s == task_name(print) => Match::Ours,
-        None | Some("project_file") => Match::Unnamed,
+        None => Match::Unnamed,
         Some(_) => Match::Other,
     }
 }
@@ -496,40 +389,41 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
         // print (it is the one just sent), it can't finish a print not yet
         // seen running.
         Match::Unnamed if !started => {
-            return matches!(state, "PREPARE" | "RUNNING").then(|| ("printing", status.percent, None));
+            return matches!(state, state::PREPARE | state::RUNNING).then(|| ("printing", status.percent, None));
         }
-        // Real printers switch subtask_name to the new job a moment before
-        // gcode_state leaves the previous job's FINISH/FAILED: a print not
-        // yet seen running can only start.
+        // Bambu printers switch the job name to the new job a moment before
+        // the state leaves the previous job's FINISH/FAILED: a print not yet
+        // seen running can only start.
         Match::Ours if !started => {
             return match state {
-                "PREPARE" | "RUNNING" | "SLICING" => Some(("printing", status.percent, None)),
-                "PAUSE" => Some(("paused", status.percent, None)),
+                state::PREPARE | state::RUNNING | state::SLICING => Some(("printing", status.percent, None)),
+                state::PAUSE => Some(("paused", status.percent, None)),
                 _ => None,
             };
         }
         Match::Ours | Match::Unnamed => {}
         Match::Other => {
-            if started && matches!(state, "PREPARE" | "RUNNING" | "PAUSE") {
+            if started && matches!(state, state::PREPARE | state::RUNNING | state::PAUSE) {
                 return Some(("failed", None, Some("another print replaced it on the printer".to_string())));
             }
             return None;
         }
     }
     match state {
-        "PREPARE" | "RUNNING" | "SLICING" => Some(("printing", status.percent, None)),
-        "PAUSE" => Some(("paused", status.percent, None)),
-        "FINISH" => Some(("finished", Some(100), None)),
-        "FAILED" => match status.print_error {
-            Some(PRINT_CANCELLED) => Some(("cancelled", None, None)),
-            None => Some(("failed", None, Some("the printer reported the print as failed".to_string()))),
-            Some(code) => Some((
-                "failed",
-                None,
-                Some(format!("printer error {:04X}_{:04X}", (code >> 16) & 0xFFFF, code & 0xFFFF)),
-            )),
-        },
-        "IDLE" if matches!(print.status.as_str(), "printing" | "paused") => {
+        state::PREPARE | state::RUNNING | state::SLICING => Some(("printing", status.percent, None)),
+        state::PAUSE => Some(("paused", status.percent, None)),
+        state::FINISH => Some(("finished", Some(100), None)),
+        state::CANCELLED => Some(("cancelled", None, None)),
+        state::FAILED => Some((
+            "failed",
+            None,
+            Some(match (status.print_error, &status.message) {
+                (Some(code), _) => format!("printer error {:04X}_{:04X}", (code >> 16) & 0xFFFF, code & 0xFFFF),
+                (None, Some(message)) => format!("the printer reported the print as failed: {message}"),
+                (None, None) => "the printer reported the print as failed".to_string(),
+            }),
+        )),
+        state::IDLE if matches!(print.status.as_str(), "printing" | "paused") => {
             Some(("cancelled", None, Some("the printer went idle before finishing".to_string())))
         }
         _ => None,
@@ -599,7 +493,7 @@ fn age_secs(sqlite_time: &str) -> i64 {
 mod tests {
     use super::*;
     use crate::bambu::package::FilamentUse;
-    use crate::bambu::status::AmsUnit;
+    use crate::printer::status::AmsUnit;
 
     fn tray(slot: i64, material: &str, color: &str) -> Tray {
         Tray {
@@ -663,19 +557,6 @@ mod tests {
     }
 
     #[test]
-    fn mapping_fields_match_bambu_studio() {
-        let (v0, v1, use_ams) = mapping_fields(&[2, -1, 254, 129]);
-        assert_eq!(v0, vec![2, -1, -1, 129]);
-        assert_eq!(v1[0], json!({"ams_id": 0, "slot_id": 2}));
-        assert_eq!(v1[1], json!({"ams_id": 255, "slot_id": 255}));
-        assert_eq!(v1[2], json!({"ams_id": 254, "slot_id": 0}));
-        assert_eq!(v1[3], json!({"ams_id": 129, "slot_id": 0}));
-        assert!(use_ams);
-        let (_, _, ext_only) = mapping_fields(&[255]);
-        assert!(!ext_only);
-    }
-
-    #[test]
     fn names_are_safe_and_unique() {
         assert_eq!(display_name("C:\\parts\\Bracket v2 (final).3mf"), "Bracket v2 (final)");
         assert_eq!(display_name("weird/na\"me.gcode.3mf"), "na_me");
@@ -708,14 +589,14 @@ mod tests {
         }
     }
 
-    /// A report as real printers send it: the plate as gcode_file, the job
-    /// in subtask_name.
+    /// A report as Bambu printers send it: the plate as the file, the job
+    /// as its name.
     fn report(state: &str, subtask: Option<&str>, error: Option<i64>) -> PrinterStatus {
         let mut s = PrinterStatus::offline("p", None);
         s.online = true;
         s.state = Some(state.into());
-        s.gcode_file = Some("/data/Metadata/plate_1.gcode".into());
-        s.subtask_name = subtask.map(String::from);
+        s.job_file = Some("/data/Metadata/plate_1.gcode".into());
+        s.job_key = subtask.map(String::from);
         s.percent = Some(40);
         s.print_error = error;
         s
@@ -730,12 +611,12 @@ mod tests {
         assert_eq!(transition(&starting, &report("FINISH", Some("Rail Section"), None)), None);
         // Seen on an X1C: our name with the previous job's FINISH, for a second.
         assert_eq!(transition(&starting, &report("FINISH", ours, None)), None);
-        assert_eq!(transition(&starting, &report("FAILED", ours, Some(PRINT_CANCELLED))), None);
+        assert_eq!(transition(&starting, &report("CANCELLED", ours, None)), None);
         assert_eq!(transition(&starting, &report("RUNNING", ours, None)).unwrap().0, "printing");
         let printing = record("printing");
         assert_eq!(transition(&printing, &report("PAUSE", ours, None)).unwrap().0, "paused");
         assert_eq!(transition(&printing, &report("FINISH", ours, None)).unwrap().0, "finished");
-        assert_eq!(transition(&printing, &report("FAILED", ours, Some(PRINT_CANCELLED))).unwrap().0, "cancelled");
+        assert_eq!(transition(&printing, &report("CANCELLED", ours, None)).unwrap().0, "cancelled");
         let failed = transition(&printing, &report("FAILED", ours, Some(0x0500_4038))).unwrap();
         assert_eq!((failed.0, failed.2.as_deref()), ("failed", Some("printer error 0500_4038")));
         assert_eq!(transition(&printing, &report("RUNNING", Some("Other job"), None)).unwrap().0, "failed");
@@ -745,12 +626,11 @@ mod tests {
     fn unnamed_reports_only_start_a_print() {
         let starting = record("starting");
         // A finished, unnamed previous job must not finish our new print.
-        assert_eq!(transition(&starting, &report("FINISH", Some("project_file"), None)), None);
         assert_eq!(transition(&starting, &report("FINISH", None, None)), None);
-        assert_eq!(transition(&starting, &report("PREPARE", Some("project_file"), None)).unwrap().0, "printing");
+        assert_eq!(transition(&starting, &report("PREPARE", None, None)).unwrap().0, "printing");
         // Once running, the unnamed job is ours.
         let printing = record("printing");
-        assert_eq!(transition(&printing, &report("FINISH", Some("project_file"), None)).unwrap().0, "finished");
+        assert_eq!(transition(&printing, &report("FINISH", None, None)).unwrap().0, "finished");
     }
 
     #[test]

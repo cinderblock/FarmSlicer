@@ -1,12 +1,14 @@
-//! A printer's state as reported over MQTT, and the summary the UI shows.
+//! A Bambu printer's state as reported over MQTT, and its summary as a
+//! vendor-neutral [`PrinterStatus`].
 //!
 //! X1-class printers send a full `print` report about once a second; P1 and
 //! A1 send only the fields that changed. We keep one merged report per printer
 //! and fold every delta into it, so a partial report never resets fields it
 //! didn't mention.
 
-use serde::Serialize;
 use serde_json::{Map, Value};
+
+use crate::printer::status::{AmsUnit, HmsCode, PrinterStatus, Temperature, Tray, state};
 
 /// Fold a `print` report (full or delta) into the merged report.
 ///
@@ -61,179 +63,118 @@ fn text(v: &Value) -> Option<String> {
     v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from)
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct Temperature {
-    pub current: f64,
-    pub target: f64,
+/// `print_error` for a print stopped by a person (0300_400C).
+pub const PRINT_CANCELLED: i64 = 0x0300_400C;
+
+/// The normalized state for a `gcode_state`; unknown ones give `None`.
+fn normalize_state(gcode_state: &str, print_error: Option<i64>) -> Option<&'static str> {
+    Some(match gcode_state {
+        "IDLE" => state::IDLE,
+        "PREPARE" => state::PREPARE,
+        "RUNNING" => state::RUNNING,
+        "PAUSE" => state::PAUSE,
+        "FINISH" => state::FINISH,
+        "FAILED" if print_error == Some(PRINT_CANCELLED) => state::CANCELLED,
+        "FAILED" => state::FAILED,
+        "SLICING" => state::SLICING,
+        _ => return None,
+    })
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct Tray {
-    /// The slot number print commands use: `unit * 4 + index` for AMS trays,
-    /// 254/255 for external spools.
-    pub slot: i64,
-    pub unit: Option<i64>,
-    pub index: i64,
-    /// Material ("PLA", "PETG-CF", ...); `None` for an empty slot.
-    pub material: Option<String>,
-    /// `#RRGGBB`
-    pub color: Option<String>,
-    pub name: Option<String>,
-    /// Percent left, when the AMS knows (Bambu RFID spools).
-    pub remain: Option<i64>,
-    pub nozzle_temp_min: Option<i64>,
-    pub nozzle_temp_max: Option<i64>,
-}
+/// The UI's summary of a merged report.
+pub fn summarize(
+    online: bool,
+    connection_error: Option<String>,
+    updated_at: Option<String>,
+    report: &Value,
+) -> PrinterStatus {
+    let r = report;
+    // LAN starts report "project_file" or nothing: no name to go by.
+    let job_key = text(&r["subtask_name"]).filter(|s| s != "project_file");
+    let job_name = job_key
+        .clone()
+        .or_else(|| text(&r["gcode_file"]).map(|f| strip_print_ext(&f)));
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct AmsUnit {
-    pub id: i64,
-    pub humidity: Option<i64>,
-    /// Which nozzle the unit feeds on dual-nozzle printers (H2D): 1 left,
-    /// 2 right. `None` on single-nozzle printers.
-    pub nozzle: Option<i64>,
-    pub trays: Vec<Tray>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct HmsCode {
-    pub attr: i64,
-    pub code: i64,
-}
-
-/// What the UI shows for a printer.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct PrinterStatus {
-    pub printer_id: String,
-    pub online: bool,
-    /// Why the connection is down, while it is.
-    pub connection_error: Option<String>,
-    /// Time of the last report, RFC 3339.
-    pub updated_at: Option<String>,
-    /// `gcode_state`: IDLE, PREPARE, RUNNING, PAUSE, FINISH, FAILED, ...
-    pub state: Option<String>,
-    /// `stg_cur`: the current preparation stage (auto-levelling, heating, ...).
-    pub stage: Option<i64>,
-    pub percent: Option<i64>,
-    pub remaining_minutes: Option<i64>,
-    pub layer: Option<i64>,
-    pub total_layers: Option<i64>,
-    pub job_name: Option<String>,
-    /// `subtask_name` as reported (LAN starts may report "project_file").
-    pub subtask_name: Option<String>,
-    /// Real printers report the extracted plate (`/data/Metadata/plate_1.gcode`),
-    /// not the uploaded file.
-    pub gcode_file: Option<String>,
-    /// `print_error`, when non-zero.
-    pub print_error: Option<i64>,
-    pub hms: Vec<HmsCode>,
-    pub nozzles: Vec<Temperature>,
-    pub bed: Option<Temperature>,
-    pub chamber: Option<f64>,
-    /// 1 silent, 2 standard, 3 sport, 4 ludicrous.
-    pub speed_level: Option<i64>,
-    pub wifi_signal: Option<String>,
-    pub nozzle_diameter: Option<String>,
-    pub ams: Vec<AmsUnit>,
-    pub external: Vec<Tray>,
-    /// Slot feeding the nozzle now (see [`Tray::slot`]).
-    pub active_slot: Option<i64>,
-}
-
-impl PrinterStatus {
-    pub fn offline(printer_id: &str, error: Option<String>) -> Self {
-        Self::summarize(printer_id, false, error, None, &Value::Null)
-    }
-
-    pub fn summarize(
-        printer_id: &str,
-        online: bool,
-        connection_error: Option<String>,
-        updated_at: Option<String>,
-        report: &Value,
-    ) -> Self {
-        let r = report;
-        let job_name = text(&r["subtask_name"])
-            // LAN starts report "project_file" or nothing; fall back to the file.
-            .filter(|s| s != "project_file")
-            .or_else(|| text(&r["gcode_file"]).map(|f| strip_print_ext(&f)));
-
-        let mut nozzles = Vec::new();
-        // H2D and other multi-extruder printers: device.extruder.info[].temp
-        // packs target << 16 | current.
-        if let Some(info) = r["device"]["extruder"]["info"].as_array() {
-            for e in info {
-                if let Some(packed) = int(&e["temp"]) {
-                    nozzles.push(Temperature {
-                        current: (packed & 0xFFFF) as f64,
-                        target: ((packed >> 16) & 0xFFFF) as f64,
-                    });
-                }
-            }
-        }
-        if nozzles.is_empty() {
-            if let Some(current) = num(&r["nozzle_temper"]) {
+    let mut nozzles = Vec::new();
+    // H2D and other multi-extruder printers: device.extruder.info[].temp
+    // packs target << 16 | current.
+    if let Some(info) = r["device"]["extruder"]["info"].as_array() {
+        for e in info {
+            if let Some(packed) = int(&e["temp"]) {
                 nozzles.push(Temperature {
-                    current,
-                    target: num(&r["nozzle_target_temper"]).unwrap_or(0.0),
+                    current: (packed & 0xFFFF) as f64,
+                    target: ((packed >> 16) & 0xFFFF) as f64,
                 });
             }
         }
-
-        let bed = num(&r["bed_temper"]).map(|current| Temperature {
-            current,
-            target: num(&r["bed_target_temper"]).unwrap_or(0.0),
-        });
-
-        let ams = r["ams"]["ams"]
-            .as_array()
-            .map(|units| units.iter().filter_map(ams_unit).collect())
-            .unwrap_or_default();
-
-        let mut external = Vec::new();
-        if let Some(slots) = r["vir_slot"].as_array() {
-            external.extend(slots.iter().filter_map(|t| tray(t, None)));
-        } else if r["vt_tray"].is_object() {
-            external.extend(tray(&r["vt_tray"], None));
+    }
+    if nozzles.is_empty() {
+        if let Some(current) = num(&r["nozzle_temper"]) {
+            nozzles.push(Temperature {
+                current,
+                target: num(&r["nozzle_target_temper"]).unwrap_or(0.0),
+            });
         }
+    }
 
-        let hms = r["hms"]
-            .as_array()
-            .map(|codes| {
-                codes
-                    .iter()
-                    .filter_map(|h| Some(HmsCode { attr: int(&h["attr"])?, code: int(&h["code"])? }))
-                    .collect()
-            })
-            .unwrap_or_default();
+    let bed = num(&r["bed_temper"]).map(|current| Temperature {
+        current,
+        target: num(&r["bed_target_temper"]).unwrap_or(0.0),
+    });
 
-        Self {
-            printer_id: printer_id.to_string(),
-            online,
-            connection_error,
-            updated_at,
-            state: text(&r["gcode_state"]),
-            stage: int(&r["stg_cur"]),
-            percent: int(&r["mc_percent"]),
-            remaining_minutes: int(&r["mc_remaining_time"]),
-            layer: int(&r["layer_num"]),
-            total_layers: int(&r["total_layer_num"]),
-            job_name,
-            subtask_name: text(&r["subtask_name"]),
-            gcode_file: text(&r["gcode_file"]),
-            print_error: int(&r["print_error"]).filter(|&e| e != 0),
-            hms,
-            nozzles,
-            bed,
-            chamber: num(&r["chamber_temper"]),
-            speed_level: int(&r["spd_lvl"]),
-            wifi_signal: text(&r["wifi_signal"]),
-            nozzle_diameter: text(&r["nozzle_diameter"]),
-            ams,
-            external,
-            // 255 = nothing loaded.
-            active_slot: int(&r["ams"]["tray_now"]).filter(|&s| s != 255),
-        }
+    let ams = r["ams"]["ams"]
+        .as_array()
+        .map(|units| units.iter().filter_map(ams_unit).collect())
+        .unwrap_or_default();
+
+    let mut external = Vec::new();
+    if let Some(slots) = r["vir_slot"].as_array() {
+        external.extend(slots.iter().filter_map(|t| tray(t, None)));
+    } else if r["vt_tray"].is_object() {
+        external.extend(tray(&r["vt_tray"], None));
+    }
+
+    let hms = r["hms"]
+        .as_array()
+        .map(|codes| {
+            codes
+                .iter()
+                .filter_map(|h| Some(HmsCode { attr: int(&h["attr"])?, code: int(&h["code"])? }))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let print_error = int(&r["print_error"]).filter(|&e| e != 0);
+    let gcode_state = text(&r["gcode_state"]);
+    PrinterStatus {
+        printer_id: String::new(),
+        online,
+        connection_error,
+        updated_at,
+        state: gcode_state.as_deref().and_then(|s| normalize_state(s, print_error)).map(String::from),
+        vendor_state: gcode_state,
+        stage: int(&r["stg_cur"]),
+        percent: int(&r["mc_percent"]),
+        remaining_minutes: int(&r["mc_remaining_time"]),
+        layer: int(&r["layer_num"]),
+        total_layers: int(&r["total_layer_num"]),
+        job_name,
+        job_key,
+        job_file: text(&r["gcode_file"]),
+        message: None,
+        print_error,
+        hms,
+        nozzles,
+        bed,
+        chamber: num(&r["chamber_temper"]),
+        speed_level: int(&r["spd_lvl"]),
+        speed_percent: int(&r["spd_mag"]),
+        wifi_signal: text(&r["wifi_signal"]),
+        nozzle_diameter: text(&r["nozzle_diameter"]),
+        ams,
+        external,
+        // 255 = nothing loaded.
+        active_slot: int(&r["ams"]["tray_now"]).filter(|&s| s != 255),
     }
 }
 
@@ -333,7 +274,7 @@ mod tests {
         merge(&mut report, &json!({"ams": {"ams": [
             {"id": "0", "tray": [{"id": "0", "tray_type": "PLA"}, {"id": "1"}]}
         ]}}));
-        let s = PrinterStatus::summarize("p", true, None, None, &report);
+        let s = summarize(true, None, None, &report);
         assert_eq!(s.ams.len(), 2);
         assert_eq!(s.ams[0].trays[0].material.as_deref(), Some("PLA"));
         assert_eq!(s.ams[0].trays[1].material, None);
@@ -359,7 +300,7 @@ mod tests {
                 "tray": [{"id": "2", "tray_type": "PLA", "tray_color": "0A0B0CFF", "remain": -1}]}]},
             "vt_tray": {"id": "254", "tray_type": "TPU", "tray_color": "000000FF"}
         });
-        let s = PrinterStatus::summarize("p", true, None, None, &report);
+        let s = summarize(true, None, None, &report);
         assert_eq!(s.job_name.as_deref(), Some("Bracket"));
         assert_eq!(s.print_error, None);
         assert_eq!(s.nozzles, vec![Temperature { current: 218.0, target: 220.0 }]);
@@ -369,6 +310,18 @@ mod tests {
         assert_eq!(s.ams[0].trays[0].color.as_deref(), Some("#0A0B0C"));
         assert_eq!(s.ams[0].trays[0].remain, None);
         assert_eq!(s.external[0].slot, 254);
+    }
+
+    #[test]
+    fn states_are_normalized() {
+        let s = |report| summarize(true, None, None, &report);
+        assert_eq!(s(json!({"gcode_state": "RUNNING"})).state.as_deref(), Some("RUNNING"));
+        let stopped = s(json!({"gcode_state": "FAILED", "print_error": PRINT_CANCELLED}));
+        assert_eq!(stopped.state.as_deref(), Some("CANCELLED"));
+        assert_eq!(stopped.vendor_state.as_deref(), Some("FAILED"));
+        assert_eq!(s(json!({"gcode_state": "FAILED", "print_error": 0x0500_4038})).state.as_deref(), Some("FAILED"));
+        let odd = s(json!({"gcode_state": "INIT", "subtask_name": "project_file"}));
+        assert_eq!((odd.state, odd.vendor_state.as_deref(), odd.job_key), (None, Some("INIT"), None));
     }
 
     #[test]

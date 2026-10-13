@@ -1,26 +1,31 @@
 import { useState } from "react";
 import { apiJson } from "../auth";
 import { errorText } from "../api";
-import type { PrintRecord } from "../printers";
+import type { Capabilities, PrinterStatus, PrintRecord } from "../printers";
 
-/** Pause / resume / stop for a print the viewer may control. `url` defaults
- * to the print's control endpoint; admins use the printer's for prints
- * started elsewhere. */
+/** Pause / resume / stop / speed for a print the viewer may control, as far
+ * as the printer can do them. `url` defaults to the print's control endpoint;
+ * admins use the printer's for prints started elsewhere. */
 export default function PrintControls({
   print,
   url,
-  state,
-  speed,
+  capabilities,
+  status,
   onChange,
 }: {
   print?: PrintRecord;
   url?: string;
-  /** The printer's gcode_state, when known (decides pause vs resume). */
-  state?: string | null;
-  /** The printer's speed level, when known (1 silent … 4 ludicrous). */
-  speed?: number | null;
+  /** What the printer can do; unknown = everything. */
+  capabilities?: Capabilities | null;
+  /** The printer's live status, when known (pause vs resume, current speed). */
+  status?: PrinterStatus | null;
   onChange?: () => void;
 }) {
+  const state = status?.state;
+  const speed = status?.speed_level;
+  const canPause = capabilities?.pause ?? true;
+  const canStop = capabilities?.stop ?? true;
+  const speedControl = capabilities === undefined ? "levels" : capabilities?.speed;
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const endpoint = url ?? (print ? `/api/prints/${print.id}/control` : "");
@@ -56,30 +61,35 @@ export default function PrintControls({
   if (!endpoint) return null;
   return (
     <span className="print-controls">
-      {paused ? (
-        <button className="btn-sm" disabled={!!busy} onClick={() => act("resume")}>
-          {busy === "resume" ? "Resuming…" : "Resume"}
-        </button>
-      ) : (
-        <button className="btn-sm" disabled={!!busy} onClick={() => act("pause")}>
-          {busy === "pause" ? "Pausing…" : "Pause"}
+      {canPause &&
+        (paused ? (
+          <button className="btn-sm" disabled={!!busy} onClick={() => act("resume")}>
+            {busy === "resume" ? "Resuming…" : "Resume"}
+          </button>
+        ) : (
+          <button className="btn-sm" disabled={!!busy} onClick={() => act("pause")}>
+            {busy === "pause" ? "Pausing…" : "Pause"}
+          </button>
+        ))}
+      {canStop && (
+        <button className="btn-sm btn-danger" disabled={!!busy} onClick={() => act("stop")}>
+          {busy === "stop" ? "Stopping…" : "Stop"}
         </button>
       )}
-      <button className="btn-sm btn-danger" disabled={!!busy} onClick={() => act("stop")}>
-        {busy === "stop" ? "Stopping…" : "Stop"}
-      </button>
-      <select
-        className="speed-select"
-        value={speed ?? 2}
-        disabled={!!busy}
-        onChange={(e) => setSpeed(Number(e.target.value))}
-        title="Print speed"
-      >
-        <option value={1}>Silent</option>
-        <option value={2}>Standard</option>
-        <option value={3}>Sport</option>
-        <option value={4}>Ludicrous</option>
-      </select>
+      {speedControl === "levels" && (
+        <select
+          className="speed-select"
+          value={speed ?? 2}
+          disabled={!!busy}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+          title="Print speed"
+        >
+          <option value={1}>Silent</option>
+          <option value={2}>Standard</option>
+          <option value={3}>Sport</option>
+          <option value={4}>Ludicrous</option>
+        </select>
+      )}
       {error && <span className="printer-error">{error}</span>}
     </span>
   );

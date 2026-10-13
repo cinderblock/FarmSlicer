@@ -1,5 +1,19 @@
-// Printers and their live status (src/printers_api.rs, src/bambu/status.rs).
+// Printers and their live status (src/printers_api.rs, src/printer/).
 import { useEffect, useState } from "react";
+
+/** What FarmSlicer can do with a printer (src/printer/mod.rs `Capabilities`). */
+export interface Capabilities {
+  pause: boolean;
+  stop: boolean;
+  /** "levels": Bambu's four speed levels. */
+  speed: "levels" | null;
+  heat: boolean;
+  camera: boolean;
+  filament_mapping: boolean;
+  print_options: (keyof PrintOptions)[];
+  package: "bambu3mf";
+  outside_pictures: boolean;
+}
 
 export interface Printer {
   id: string;
@@ -8,6 +22,8 @@ export interface Printer {
   machine_profile: string;
   nozzle_diameter: string;
   protocol: string;
+  /** null: a protocol FarmSlicer doesn't speak. */
+  capabilities: Capabilities | null;
   address: string;
   /** Admins only. */
   serial_number: string | null;
@@ -83,22 +99,29 @@ export interface PrinterStatus {
   online: boolean;
   connection_error: string | null;
   updated_at: string | null;
+  /** Normalized: IDLE, PREPARE, RUNNING, PAUSE, FINISH, FAILED, CANCELLED, SLICING. */
   state: string | null;
+  /** The state as the printer names it. */
+  vendor_state: string | null;
   stage: number | null;
   percent: number | null;
   remaining_minutes: number | null;
   layer: number | null;
   total_layers: number | null;
   job_name: string | null;
-  /** As reported; "project_file" or null when the printer doesn't name the job. */
-  subtask_name: string | null;
-  gcode_file: string | null;
+  /** What the printer calls the job (matches what FarmSlicer sends); null when unnamed. */
+  job_key: string | null;
+  /** The file being printed, as reported. */
+  job_file: string | null;
+  /** The printer's own error or notice text. */
+  message: string | null;
   print_error: number | null;
   hms: { attr: number; code: number }[];
   nozzles: Temperature[];
   bed: Temperature | null;
   chamber: number | null;
   speed_level: number | null;
+  speed_percent: number | null;
   wifi_signal: string | null;
   nozzle_diameter: string | null;
   ams: AmsUnit[];
@@ -127,14 +150,19 @@ const STATE_LABELS: Record<string, string> = {
   PAUSE: "Paused",
   FINISH: "Finished",
   FAILED: "Failed",
+  CANCELLED: "Cancelled",
   SLICING: "Slicing",
 };
+
+/** The printer is working on a job. */
+export const isBusy = (status: PrinterStatus | null | undefined) =>
+  !!status?.online && ["PREPARE", "RUNNING", "PAUSE", "SLICING"].includes(status.state ?? "");
 
 /** A short label and the status-dot class for a printer. */
 export function describeState(status: PrinterStatus | undefined): { label: string; tone: string } {
   if (!status) return { label: "Not connected", tone: "offline" };
   if (!status.online) return { label: "Offline", tone: "offline" };
-  if (status.print_error || status.hms.length > 0) {
+  if (status.print_error || status.hms.length > 0 || status.message) {
     return { label: STATE_LABELS[status.state ?? ""] ?? "Error", tone: "error" };
   }
   switch (status.state) {
@@ -146,7 +174,7 @@ export function describeState(status: PrinterStatus | undefined): { label: strin
     case "FAILED":
       return { label: "Failed", tone: "error" };
     case null:
-      return { label: "Connected", tone: "idle" };
+      return { label: status.vendor_state ?? "Connected", tone: "idle" };
     default:
       return { label: STATE_LABELS[status.state] ?? status.state, tone: "idle" };
   }

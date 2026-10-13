@@ -9,6 +9,7 @@ mod groups;
 mod groups_api;
 mod join_api;
 mod overlay;
+mod printer;
 mod printer_thumbs;
 mod printers_api;
 mod printing;
@@ -90,8 +91,9 @@ async fn main() {
         println!("Auth enabled: {} account(s)", db.user_count());
     }
 
-    // Connect to every Bambu printer with an address, serial and access code.
-    let printers = bambu::PrinterHub::new();
+    // Connect to every printer whose protocol FarmSlicer speaks and whose
+    // connection settings are complete.
+    let printers = printer::PrinterHub::new();
     printers.sync(&db.list_printers());
 
     let state = Arc::new(server::AppState::new(

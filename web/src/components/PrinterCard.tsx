@@ -7,6 +7,7 @@ import {
   describeState,
   formatMinutes,
   hmsCode,
+  isBusy,
   printErrorCode,
   type Printer,
   type PrinterStatus,
@@ -63,7 +64,8 @@ export default function PrinterCard({
   const [note, setNote] = useState("");
   const [heatSlot, setHeatSlot] = useState("");
   // The current or last job's picture (hidden when there is none).
-  const job = status?.subtask_name && status.subtask_name !== "project_file" ? status.subtask_name : null;
+  const job = status?.job_key ?? null;
+  const caps = printer.capabilities;
   const [missingPicture, setMissingPicture] = useState<string | null>(null);
   const picture =
     status?.online && job && job !== missingPicture && status.state !== "IDLE"
@@ -98,8 +100,8 @@ export default function PrinterCard({
     }
     setHeatSlot("");
   };
-  const configured = printer.protocol !== "bambu" || (printer.address && printer.access_code_set);
-  const busy = status?.online && ["RUNNING", "PREPARE", "PAUSE"].includes(status.state ?? "");
+  const configured = !!printer.address && printer.access_code_set;
+  const busy = isBusy(status);
 
   return (
     <div className="card printer-card">
@@ -118,13 +120,12 @@ export default function PrinterCard({
         </p>
       )}
 
-      {!status && printer.protocol === "bambu" && (
+      {!status && caps && (
         <p className="hint">
-          {configured
-            ? "Connecting…"
-            : "Set the IP address, serial number and access code to connect."}
+          {configured ? "Connecting…" : "Set the printer's address and credentials to connect."}
         </p>
       )}
+      {!caps && <p className="hint">FarmSlicer can't talk to {printer.protocol || "these"} printers yet.</p>}
       {status && !status.online && status.connection_error && (
         <p className="printer-error">{status.connection_error}</p>
       )}
@@ -142,7 +143,7 @@ export default function PrinterCard({
           )}
           {busy && (
             <div className="printer-job">
-              <div className="printer-job-name" title={status.gcode_file ?? undefined}>
+              <div className="printer-job-name" title={status.job_file ?? undefined}>
                 {print?.name ?? status.job_name ?? "Untitled"}
                 {print?.username && <span className="hint"> · {print.username}</span>}
               </div>
@@ -160,17 +161,14 @@ export default function PrinterCard({
                   .filter(Boolean)
                   .join(" · ")}
               </div>
-              {print?.can_control ? (
-                <PrintControls print={print} state={status.state} speed={status.speed_level} />
-              ) : (
-                isAdmin && (
-                  <PrintControls
-                    url={`/api/printers/${printer.id}/control`}
-                    state={status.state}
-                    speed={status.speed_level}
-                  />
-                )
-              )}
+              {caps &&
+                (print?.can_control ? (
+                  <PrintControls print={print} capabilities={caps} status={status} />
+                ) : (
+                  isAdmin && (
+                    <PrintControls url={`/api/printers/${printer.id}/control`} capabilities={caps} status={status} />
+                  )
+                ))}
             </div>
           )}
           {print && ["uploading", "starting"].includes(print.status) && (
@@ -219,6 +217,7 @@ export default function PrinterCard({
             </div>
           )}
 
+          {status.message && <p className="printer-error">{status.message}</p>}
           {status.print_error != null && (
             <p className="printer-error">Print error {printErrorCode(status.print_error)}</p>
           )}
@@ -237,6 +236,7 @@ export default function PrinterCard({
       )}
 
       {status?.online &&
+        caps?.heat &&
         !busy &&
         !print &&
         (loadedTrays(status).length > 0 || status.nozzles.some((n) => n.target > 0) || (status.bed?.target ?? 0) > 0) && (
@@ -281,7 +281,7 @@ export default function PrinterCard({
       )}
 
       <div className="printer-actions">
-        {printer.protocol === "bambu" && printer.address && printer.access_code_set && (
+        {caps?.camera && configured && (
           <button className="btn-sm" onClick={() => setCamera(true)}>
             Camera
           </button>

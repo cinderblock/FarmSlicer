@@ -3,10 +3,9 @@
 
 pub mod camera;
 pub mod ftps;
-pub mod hub;
+pub mod link;
 pub mod models;
 pub mod package;
+pub mod send;
 pub mod status;
 mod tls;
-
-pub use hub::PrinterHub;

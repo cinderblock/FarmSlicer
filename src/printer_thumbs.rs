@@ -20,6 +20,7 @@ use bytes::Bytes;
 use serde_json::json;
 
 use crate::bambu::{ftps, package};
+use crate::printer::{Protocol, protocol_of};
 use crate::printing;
 use crate::server::AppState;
 
@@ -111,11 +112,8 @@ fn none() -> Response {
 async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     let Some(printer) = state.db.get_printer(&id) else { return none() };
     let Some(status) = state.printers.status(&id) else { return none() };
-    let job_name = match status.subtask_name.as_deref() {
-        Some(s) if s != "project_file" => s.to_string(),
-        _ => return none(),
-    };
-    let plate = plate_index(status.gcode_file.as_deref());
+    let Some(job_name) = status.job_key.clone() else { return none() };
+    let plate = plate_index(status.job_file.as_deref());
 
     // One of ours? Its package has the picture.
     for print in state.db.list_prints(Some(&id), false, 20) {
@@ -131,6 +129,9 @@ async fn printer_thumbnail(State(state): State<Arc<AppState>>, Path(id): Path<St
     }
 
     // From the printer.
+    if protocol_of(&printer) != Some(Protocol::Bambu) {
+        return none();
+    }
     let key = (id.clone(), job_name.clone());
     if let Some(hit) = state.printer_thumbs.cached(&key) {
         return hit.map(png).unwrap_or_else(none);

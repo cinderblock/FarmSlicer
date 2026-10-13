@@ -6,7 +6,6 @@
 //!   (or cool it down), but never one that is printing.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -16,8 +15,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::auth::{self, CurrentUser};
-use crate::bambu::status::PrinterStatus;
 use crate::db::Printer;
+use crate::printer::status::state;
+use crate::printer::{Command, PrinterStatus};
 use crate::server::AppState;
 
 type ApiError = (StatusCode, Json<Value>);
@@ -121,18 +121,15 @@ fn idle(state: &AppState, p: &Printer) -> Result<PrinterStatus, ApiError> {
     if !status.online {
         return Err(err(StatusCode::CONFLICT, format!("{} is offline", p.name)));
     }
-    if matches!(status.state.as_deref(), Some("PREPARE" | "RUNNING" | "PAUSE" | "SLICING")) {
+    if state::is_busy(status.state.as_deref()) {
         return Err(err(StatusCode::CONFLICT, format!("{} is printing", p.name)));
     }
     Ok(status)
 }
 
-async fn gcode(state: &AppState, p: &Printer, lines: &str) -> Result<Json<Value>, ApiError> {
-    let request = json!({"print": {"command": "gcode_line", "param": lines}});
-    match state.printers.command(&p.id, request, Duration::from_secs(5)).await {
-        Ok(_) => Ok(Json(json!({"ok": true}))),
-        Err(e) => Err(err(StatusCode::CONFLICT, e.to_string())),
-    }
+async fn heat(state: &AppState, p: &Printer, nozzle: i64, bed: i64) -> Result<Json<Value>, ApiError> {
+    let result = state.printers.command(&p.id, &Command::Heat { nozzle, bed }).await;
+    crate::prints_api::command_response(result).map(|_| Json(json!({"ok": true})))
 }
 
 #[derive(Deserialize)]
@@ -163,7 +160,7 @@ async fn preheat(
         _ => default_nozzle,
     };
     println!("Printer {}: {} pre-heats for {material} (nozzle {nozzle}, bed {bed})", p.name, user.username);
-    let result = gcode(&state, &p, &format!("M104 S{nozzle}\nM140 S{bed}\n")).await?;
+    let result = heat(&state, &p, nozzle, bed).await?;
     let mut v = result.0;
     v["nozzle"] = json!(nozzle);
     v["bed"] = json!(bed);
@@ -178,7 +175,7 @@ async fn cooldown(
     let p = printer(&state, &id)?;
     idle(&state, &p)?;
     println!("Printer {}: {} cools it down", p.name, user.username);
-    gcode(&state, &p, "M104 S0\nM140 S0\n").await
+    heat(&state, &p, 0, 0).await
 }
 
 pub fn routes() -> Router<Arc<AppState>> {

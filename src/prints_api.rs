@@ -8,7 +8,6 @@
 //!   admins; anything on a printer (prints from elsewhere too): admins.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{StatusCode, header};
@@ -22,6 +21,8 @@ use crate::auth::{self, CurrentUser};
 use crate::bambu::package;
 use crate::db::{Job, PrintRecord, Printer, User};
 use crate::groups::{PrintRules, Tree, Viewer};
+use crate::printer::status::state;
+use crate::printer::{Command, CommandError, Speed};
 use crate::printing::{self, PrintOptions};
 use crate::server::{AppState, finish_job};
 use crate::{groups_api, quota};
@@ -189,13 +190,16 @@ fn busy_reason(state: &AppState, printer: &Printer) -> Option<String> {
         ));
     }
     match state.printers.status(&printer.id) {
-        None => Some(format!("{} isn't connected (address, serial or access code missing)", printer.name)),
+        None if crate::printer::protocol_of(printer).is_none() => {
+            Some(format!("FarmSlicer can't talk to {} printers", printer.protocol))
+        }
+        None => Some(format!("{} isn't connected (its connection settings are incomplete)", printer.name)),
         Some(s) if !s.online => Some(format!(
             "{} is offline{}",
             printer.name,
             s.connection_error.map(|e| format!(": {e}")).unwrap_or_default()
         )),
-        Some(s) if matches!(s.state.as_deref(), Some("PREPARE" | "RUNNING" | "PAUSE" | "SLICING")) => {
+        Some(s) if state::is_busy(s.state.as_deref()) => {
             Some(format!("{} is busy with {}", printer.name, s.job_name.unwrap_or_else(|| "a print".into())))
         }
         Some(_) => None,
@@ -565,36 +569,43 @@ async fn reject_print(
 struct ControlRequest {
     /// pause | resume | stop | speed
     action: String,
-    /// For `speed`: 1 silent, 2 standard, 3 sport, 4 ludicrous.
+    /// For `speed` on Bambu printers: 1 silent, 2 standard, 3 sport, 4 ludicrous.
     level: Option<u8>,
+    /// For `speed` on printers that take a speed factor.
+    percent: Option<u16>,
 }
 
-fn control_command(body: &ControlRequest) -> Result<Value, ApiError> {
+fn control_command(body: &ControlRequest) -> Result<Command, ApiError> {
     Ok(match body.action.as_str() {
-        "pause" | "resume" | "stop" => json!({"print": {"command": body.action}}),
-        "speed" => match body.level {
-            // The firmware wants the level as a string.
-            Some(l @ 1..=4) => json!({"print": {"command": "print_speed", "param": l.to_string()}}),
-            _ => return Err(api_err(StatusCode::BAD_REQUEST, "speed level must be 1 to 4")),
+        "pause" => Command::Pause,
+        "resume" => Command::Resume,
+        "stop" => Command::Stop,
+        "speed" => match (body.level, body.percent) {
+            (Some(l @ 1..=4), _) => Command::Speed(Speed::Level(l)),
+            (None, Some(p @ 10..=500)) => Command::Speed(Speed::Percent(p)),
+            _ => {
+                return Err(api_err(
+                    StatusCode::BAD_REQUEST,
+                    "speed needs a level (1 to 4) or a percent (10 to 500)",
+                ));
+            }
         },
         other => return Err(api_err(StatusCode::BAD_REQUEST, format!("unknown action {other:?}"))),
     })
 }
 
-async fn run_control(state: &AppState, printer_id: &str, command: Value) -> Result<Json<Value>, ApiError> {
-    match state.printers.command(printer_id, command, Duration::from_secs(5)).await {
-        Ok(Some(response)) => {
-            let body = response.as_object().and_then(|o| o.values().next()).cloned().unwrap_or(Value::Null);
-            let result = body["result"].as_str().unwrap_or("").to_ascii_uppercase();
-            if result == "FAIL" {
-                let reason = body["reason"].as_str().unwrap_or("no reason given");
-                return Err(api_err(StatusCode::BAD_GATEWAY, format!("the printer refused: {reason}")));
-            }
-            Ok(Json(json!({"ok": true, "response": body})))
-        }
+/// A printer command's outcome as an API response.
+pub(crate) fn command_response(result: Result<Option<Value>, CommandError>) -> Result<Json<Value>, ApiError> {
+    match result {
+        Ok(Some(response)) => Ok(Json(json!({"ok": true, "response": response}))),
         Ok(None) => Ok(Json(json!({"ok": true, "response": null, "note": "the printer didn't confirm"}))),
+        Err(e @ CommandError::Refused(_)) => Err(api_err(StatusCode::BAD_GATEWAY, e.to_string())),
         Err(e) => Err(api_err(StatusCode::CONFLICT, e.to_string())),
     }
+}
+
+async fn run_control(state: &AppState, printer_id: &str, command: Command) -> Result<Json<Value>, ApiError> {
+    command_response(state.printers.command(printer_id, &command).await)
 }
 
 /// `POST /api/prints/{id}/control`: pause, resume, stop or change speed.

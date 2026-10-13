@@ -14,7 +14,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::auth::{self, CurrentUser};
 use crate::auth_api;
-use crate::bambu::PrinterHub;
+use crate::printer::PrinterHub;
 use crate::db::{Db, Job, JobFilter, User};
 use crate::discovery;
 use crate::groups::{Tree, Viewer};
@@ -39,7 +39,7 @@ pub struct AppState {
     slicer: Mutex<SlicerHandle>,
     pub profile_store: ProfileStore,
     pub discovered: Arc<discovery::DiscoveryMap>,
-    /// MQTT links to the farm's Bambu printers (src/bambu/).
+    /// Live links to the farm's printers (src/printer/).
     pub printers: PrinterHub,
     /// Camera feeds, started while someone watches.
     pub cameras: crate::bambu::camera::CameraHub,

@@ -22,6 +22,7 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::auth::{self, CurrentUser};
 use crate::bambu::camera::{CameraKind, CameraSource, Frame};
 use crate::db::{Printer, User};
+use crate::printer::{Protocol, protocol_of};
 use crate::server::AppState;
 
 type ApiError = (StatusCode, Json<Value>);
@@ -38,6 +39,8 @@ fn view(p: &Printer, user: &User) -> Value {
         "machine_profile": p.machine_profile,
         "nozzle_diameter": p.nozzle_diameter,
         "protocol": p.protocol,
+        // null: a protocol FarmSlicer doesn't speak (yet).
+        "capabilities": protocol_of(p).map(|proto| proto.capabilities()),
         "address": p.address,
         "serial_number": if admin { Some(&p.serial_number) } else { None },
         "access_code_set": !p.access_code.is_empty(),
@@ -233,7 +236,10 @@ async fn camera(
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     let p = state.db.get_printer(&id).ok_or_else(not_found)?;
-    if p.protocol != "bambu" || p.address.trim().is_empty() || p.access_code.trim().is_empty() {
+    if protocol_of(&p) != Some(Protocol::Bambu) {
+        return Err((StatusCode::CONFLICT, Json(json!({"error": "FarmSlicer can't show this printer's camera"}))));
+    }
+    if p.address.trim().is_empty() || p.access_code.trim().is_empty() {
         return Err((
             StatusCode::CONFLICT,
             Json(json!({"error": "the printer has no address or access code set"})),
@@ -317,8 +323,18 @@ async fn serve_camera(state: Arc<AppState>, source: CameraSource, mut socket: We
     let _ = socket.send(Message::Close(None)).await;
 }
 
+/// `GET /api/printer-protocols`: the protocols FarmSlicer speaks and what
+/// each can do.
+async fn list_protocols() -> Json<Value> {
+    Json(json!(Protocol::ALL
+        .iter()
+        .map(|p| json!({"id": p.as_str(), "label": p.label(), "capabilities": p.capabilities()}))
+        .collect::<Vec<_>>()))
+}
+
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/api/printer-protocols", get(list_protocols))
         .route("/api/printers", get(list_printers).post(create_printer))
         .route("/api/printers/status", get(list_status))
         .route("/api/printers/events", get(status_events))
