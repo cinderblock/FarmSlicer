@@ -662,6 +662,7 @@ fn settings_json(state: &AppState) -> Value {
         "guest_session_days": guest_session_days(state),
         "print_rules": groups::PrintRules::site_default(&state.db),
         "filament_prices": crate::cost::Prices::load(&state.db),
+        "guide_notes": state.db.get_setting("guide_notes").unwrap_or_default(),
     })
 }
 
@@ -689,6 +690,9 @@ struct UpdateSettings {
     /// Currency and price per kg by material, for cost estimates.
     #[serde(default)]
     filament_prices: Option<crate::cost::Prices>,
+    /// The farm's own notes on the Guide page (plain text).
+    #[serde(default)]
+    guide_notes: Option<String>,
 }
 
 async fn update_settings(
@@ -724,11 +728,25 @@ async fn update_settings(
         r.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
         state.db.set_setting("print_rules", Some(&serde_json::to_string(r).unwrap()));
     }
+    if let Some(n) = &body.guide_notes {
+        if n.chars().count() > 20_000 {
+            return Err(err(StatusCode::BAD_REQUEST, "guide notes are limited to 20000 characters"));
+        }
+        state.db.set_setting("guide_notes", Some(n.trim()));
+    }
     if let Some(p) = &body.filament_prices {
         p.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
         state.db.set_setting("filament_prices", Some(&serde_json::to_string(p).unwrap()));
     }
     Ok(Json(settings_json(&state)))
+}
+
+/// `GET /api/guide`: what the Guide page shows besides its fixed text.
+async fn guide(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!({
+        "notes": state.db.get_setting("guide_notes").unwrap_or_default(),
+        "print_rules": groups::PrintRules::site_default(&state.db),
+    }))
 }
 
 // ---- the caller's own groups and usage ------------------------------------------------
@@ -769,5 +787,6 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/groups/{id}/links", get(list_links).post(create_link))
         .route("/api/groups/{id}/links/{link_id}", put(update_link).delete(delete_link))
         .route("/api/settings", get(get_settings).put(update_settings))
+        .route("/api/guide", get(guide))
         .route("/api/me/usage", get(my_usage))
 }

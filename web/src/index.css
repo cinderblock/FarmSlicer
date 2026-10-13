@@ -701,6 +701,52 @@ body {
   background: rgba(0, 0, 0, 0.55);
 }
 
+/* Guide */
+.guide {
+  max-width: 760px;
+  line-height: 1.55;
+}
+
+.guide section {
+  margin-bottom: 1.5rem;
+}
+
+.guide h3 {
+  margin-bottom: 0.5rem;
+}
+
+.guide h4 {
+  margin: 0.75rem 0 0.25rem;
+  color: var(--text-dim);
+}
+
+.guide ol,
+.guide ul {
+  padding-left: 1.4rem;
+}
+
+.guide li {
+  margin: 0.2rem 0;
+}
+
+.guide a {
+  color: var(--accent);
+}
+
+.guide-notes p + p {
+  margin-top: 0.6rem;
+}
+
+.settings-form textarea {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
 /* Modal dialogs */
 .modal-backdrop {
   position: fixed;

@@ -9,6 +9,7 @@ const navItems = [
   { to: "/profiles", label: "Profiles" },
   { to: "/library", label: "Library" },
   { to: "/groups", label: "Groups" },
+  { to: "/guide", label: "Guide" },
 ];
 
 const adminItems = [

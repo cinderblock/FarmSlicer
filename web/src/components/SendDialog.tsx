@@ -298,6 +298,10 @@ export default function SendDialog({
               </div>
             )}
             {error && <p className="printer-error">{error}</p>}
+            <p className="hint">
+              Is the plate clear? Handle build plates by their edges; if you touch the surface, clean it with
+              isopropyl alcohol.
+            </p>
             <div className="modal-actions">
               <button className="btn-sm" onClick={onClose}>
                 Cancel

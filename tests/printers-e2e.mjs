@@ -166,6 +166,12 @@ check(r.status === 400, "negative prices are refused", json(r));
 r = await user.call("PUT", "/api/settings", { filament_prices: { currency: "$", per_kg: {}, default_per_kg: 1 } });
 check(r.status === 403, "only admins set prices", json(r));
 
+// ---- guide ------------------------------------------------------------------------------
+r = await owner.call("PUT", "/api/settings", { guide_notes: "  Open 9-5.\n\nAsk at the desk.  " });
+check(r.status === 200 && r.json.guide_notes === "Open 9-5.\n\nAsk at the desk.", "admins write the guide notes", json(r));
+r = await user.get("/api/guide");
+check(r.status === 200 && r.json.notes.startsWith("Open 9-5.") && r.json.print_rules, "everyone reads the guide", json(r));
+
 // ---- areas, equipment reports, pre-heating --------------------------------------------
 r = await owner.patch(`/api/printers/${id}`, { area: " Bay 1 " });
 check(r.status === 200 && r.json.area === "Bay 1", "printers have an area", json(r));

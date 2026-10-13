@@ -13,6 +13,7 @@ interface SiteSettings {
   guest_session_days: number;
   print_rules: PrintRules;
   filament_prices: Prices;
+  guide_notes: string;
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -84,6 +85,19 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         <h3>Print rules</h3>
         <p className="hint">For personal jobs and for groups that set none.</p>
         <PrintRulesEditor rules={s.print_rules ?? {}} onChange={(r) => setS({ ...s, print_rules: r })} />
+
+        <h3>Guide</h3>
+        <label>
+          Notes for the Guide page
+          <textarea
+            rows={8}
+            maxLength={20000}
+            value={s.guide_notes ?? ""}
+            onChange={(e) => setS({ ...s, guide_notes: e.target.value })}
+            placeholder="Opening hours, who to ask, where the build plates live, which printers are for what…"
+          />
+          <span className="hint">Plain text; blank lines start paragraphs, links work.</span>
+        </label>
 
         <h3>Filament prices</h3>
         <p className="hint">Per kilogram, for the cost estimates on jobs and prints.</p>

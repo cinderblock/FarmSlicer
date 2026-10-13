@@ -22,7 +22,8 @@ can run in the user's browser.
   Developer Mode on. Server slices for Bambu printers come out as a
   `.gcode.3mf` with a rendered thumbnail; sliced projects from Bambu Studio /
   OrcaSlicer can be uploaded and sent too.
-- **Farm floor:** filament cost estimates (site price table); printer areas; print rules per group (max time, allowed
+- **Farm floor:** a Guide page (how to slice or export, send, and look after
+  plates, plus the farm's own notes); filament cost estimates (site price table); printer areas; print rules per group (max time, allowed
   materials; inherited, with a site default) whose violations wait for an
   admin or group manager to approve; equipment problem reports; pre-heating
   an idle printer for a loaded filament.
@@ -224,6 +225,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament, or cool it |
 | `GET /api/printers/{id}/thumbnail` | picture of the job the printer runs or ran (fetched from the printer for prints started elsewhere) |
+| `GET /api/guide` | the Guide page's farm notes (site setting `guide_notes`) and default print rules |
 | `GET /api/prices` | currency and filament price per kg; jobs, prints and targets carry `estimated_cost` |
 | `GET /api/discovery` | Bambu printers seen on the LAN |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
