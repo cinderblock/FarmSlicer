@@ -50,9 +50,16 @@ pub fn check_job(state: &AppState, job_id: &str) -> Result<Package, String> {
             if shown.is_empty() { String::new() } else { format!(": {}", shown.join("; ")) }
         );
         if job.source == "server" && c.needs_review() {
-            // Our own slicer wrote it: the data is missing something.
+            // Our own slicer wrote it: either an admin's overrides did
+            // something unusual, or the data is missing something.
+            let overridden = job.overrides_json.as_deref().is_some_and(|o| !matches!(o.trim(), "" | "{}"));
             eprintln!(
-                "job {job_id}: FarmSlicer's own slice fails the G-code check; src/gcode/data needs updating ({})",
+                "job {job_id}: FarmSlicer's own slice fails the G-code check{} ({})",
+                if overridden {
+                    "; check its overrides, else src/gcode/data needs updating"
+                } else {
+                    "; src/gcode/data needs updating"
+                },
                 shown.join("; ")
             );
         }
