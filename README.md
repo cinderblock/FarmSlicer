@@ -27,6 +27,17 @@ can run in the user's browser.
   materials; inherited, with a site default) whose violations wait for an
   admin or group manager to approve; equipment problem reports; pre-heating
   an idle printer for a loaded filament.
+- **G-code safety:** nothing reaches a printer unchecked, whoever sliced it.
+  Every plate's G-code is run through a model of the printer and compared
+  with what Bambu's own G-code does (commands, arguments and values
+  harvested from OrcaSlicer's and BambuStudio's vendor profiles; positions,
+  below-plate moves, temperatures per material, heaters left idle, dwells,
+  filament per tool, print time). Lines a printer might read differently
+  block a plate; anything unusual waits for an admin. Packages are refused
+  when their zip is ambiguous or their G-code was changed after slicing;
+  per-job overrides can't carry G-code; print rules, quotas and costs use
+  the G-code's own time and filament when a file understates them. See
+  `plans/gcode-safety.md`.
 - **Cameras:** live view on demand; X1/H2-class (RTSPS) passed through as
   H.264 for the browser to decode, A1/P1 (JPEG over TLS) as frames. No
   ffmpeg, and the access code never leaves the server process.
@@ -217,18 +228,18 @@ summary prints the `pin.json` to paste there.
 | `GET /api/printers/{id}/camera` (WebSocket) | live camera: H.264 access units for X1/H2-class printers (decoded in the browser with WebCodecs), JPEG frames for A1/P1 |
 | `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level}` on whatever the printer runs (admins) |
 | `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay`, `GET /api/groups/{id}/overlay/logo` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
-| `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job |
-| `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping |
-| `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems}`: upload and start |
+| `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` becomes a finished, sendable job; its G-code is checked at once (each plate's `check` in `package_json`). 400 for ambiguous archives or G-code changed after slicing; 403 where uploads are denied |
+| `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability and a suggested AMS mapping, plus the plate's `gcode_check`, `blocked` and `needs_review` findings |
+| `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems, acknowledge_review}`: upload and start. 409 when the plate's G-code is blocked; findings that need review make a member's print wait for an admin, and an admin's send needs `acknowledge_review` |
 | `GET /api/prints?printer=&active=1&pending=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed (sender, group managers, admins) |
-| `POST /api/prints/{id}/approve`, `POST /api/prints/{id}/reject` | decide a print that broke the print rules (admins, the group's managers; the requester may withdraw) |
+| `POST /api/prints/{id}/approve`, `POST /api/prints/{id}/reject` | decide a print that broke the print rules (admins, the group's managers) or whose G-code needs review (`safety_review`: admins only); the requester may withdraw |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament, or cool it |
 | `GET /api/printers/{id}/thumbnail` | picture of the job the printer runs or ran (fetched from the printer for prints started elsewhere) |
-| `GET /api/guide` | the Guide page's farm notes (site setting `guide_notes`) and default print rules |
+| `GET /api/guide` | the Guide page's farm notes (site setting `guide_notes`), default print rules, G-code limits and upload policy |
 | `GET /api/prices` | currency and filament price per kg; jobs, prints and targets carry `estimated_cost` |
 | `GET /api/discovery` | Bambu printers seen on the LAN |
-| `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides |
+| `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides (members: only the Slice page's settings; nobody: `post_process`) |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
 | `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser (the response's `keep_model` says whether to upload the model with the result). Optional `group_id`; 429 when a quota is used up |
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
@@ -243,7 +254,7 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/groups/{id}/links`, `PUT/DELETE /api/groups/{id}/links/{link}` | join links |
 | `POST /api/join/resolve`, `/api/join/finish`, `/api/join/register/{start,finish}`, `/api/join/guest` | the join flow |
 | `POST /api/auth/guest/signin` | guest sign-in with a one-time code |
-| `GET /api/me/usage`, `GET/PUT /api/settings` | own quota usage; site-wide settings (admins) |
+| `GET /api/me/usage`, `GET/PUT /api/settings` | own quota usage; site-wide settings (admins), including `uploads` (allow / review / deny) and `gcode_limits` |
 
 ## Repository layout
 
@@ -253,6 +264,8 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 groups.rs + groups_api.rs (groups, visibility, settings),
                 join_api.rs (join links, guests), quota.rs,
                 profiles.rs (OrcaSlicer profile inheritance), progress.rs,
+                config_policy.rs (what overrides may set), safety.rs +
+                gcode/ (the G-code check and its generated data),
                 slicer.rs (cxx bridge declaration + stub), discovery.rs (SSDP)
 cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
                 engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp
