@@ -34,3 +34,12 @@ discoverable credentials regardless, so most users won't notice. Reproduce:
 Playwright + CDP `WebAuthn.addVirtualAuthenticator` (ctap2, internal,
 hasResidentKey), register through setup, invite or join, log out, use the
 username-less button. Affects setup, invites and the join flow alike.
+
+## Custom profiles have no owner: any full account can edit or delete any of them
+
+`PUT`/`DELETE /api/custom-profiles/{id}` (`src/server.rs`
+`update_custom_profile`, `delete_custom_profile`) only call
+`auth::require_full`; the `custom_profiles` table has no creator column. Any
+full (non-guest) user can rename, rewrite or delete profiles someone else
+made, including the farm's tuned ones. Why it matters: the maintainer keeps
+the farm's tuned profiles there (plans/printer-control.md).
