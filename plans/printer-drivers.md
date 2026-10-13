@@ -189,7 +189,8 @@ Everything printer-facing is wired straight to `src/bambu/` today
       checks) + 66 unit tests; libslic3r release build; fake Bambu printer
       (send, controls, preheat) and both Bambu camera kinds; real Klipper;
       real OctoPrint 1.11.8 and 2.0.0rc6.
-- [ ] **8. Merge into master** ← current (merge committed, push next).
+- [x] **8. Merged into master** (`4bd698f`, `effc203`), pushed 2026-10-13;
+      CI green on `effc203` (check, wasm, image). Not deployed (ops repo).
       origin/master had moved on (15c09ff..12db0a1: another thread's
       G-code safety, `plans/gcode-safety.md`), so no fast-forward: a merge
       commit, no rewrite. 8 conflicts. Integration decisions:
@@ -213,8 +214,8 @@ Everything printer-facing is wired straight to `src/bambu/` today
       - Verified: 99 unit tests, all 8 e2e suites (372 checks, exit 0),
         web build, libslic3r release build; real slices: X1 Carbon clean,
         Voron 2.4 / MK4S / Centauri Carbon review, none blocked.
-      - Then: push `HEAD:master` (fast-forward of origin), fast-forward
-        the main checkout after checking its status.
+      - Pushed `HEAD:master` as a fast-forward (and the branch); the
+        main checkout fast-forwarded (it was clean).
 
 ## Findings / gotchas
 
