@@ -197,6 +197,24 @@ pub fn suggest_mapping(plate: &Plate, status: Option<&PrinterStatus>) -> Vec<i64
     mapping
 }
 
+/// Build plates as libslic3r names them (`curr_bed_type`).
+pub const BED_TYPES: &[&str] = &[
+    "Textured PEI Plate",
+    "Cool Plate",
+    "Engineering Plate",
+    "High Temp Plate",
+    "Textured Cool Plate",
+    "Supertack Plate",
+];
+
+/// The plate was sliced for another build plate than the printer has.
+pub fn plate_problem(plate: &Plate, printer: &Printer) -> Option<String> {
+    let want = plate.bed_type.as_deref()?;
+    let have = printer.plate_type.trim();
+    (!have.is_empty() && !want.eq_ignore_ascii_case(have))
+        .then(|| format!("sliced for the {want}; {} has the {have}", printer.name))
+}
+
 /// Problems with a mapping against what's loaded. Empty = fine.
 pub fn check_mapping(plate: &Plate, mapping: &[i64], status: Option<&PrinterStatus>) -> Vec<String> {
     let mut problems = Vec::new();
@@ -615,6 +633,7 @@ mod tests {
                 .collect(),
             has_thumbnail: false,
             gcode_md5: "X".into(),
+            bed_type: None,
         }
     }
 

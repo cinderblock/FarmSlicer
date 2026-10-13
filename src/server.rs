@@ -524,6 +524,8 @@ async fn create_job(
     let mut source = "server".to_string();
     let mut group_id: Option<String> = None;
     let mut model_bytes: i64 = 0;
+    // The build plate (`curr_bed_type`); the profile default otherwise.
+    let mut bed_type = String::new();
 
     while let Some(field) = multipart
         .next_field()
@@ -583,6 +585,9 @@ async fn create_job(
             }
             "overrides" => {
                 overrides_str = field.text().await.unwrap_or_default();
+            }
+            "bed_type" => {
+                bed_type = field.text().await.unwrap_or_default().trim().to_string();
             }
             "source" => {
                 source = field.text().await.unwrap_or_default();
@@ -661,6 +666,19 @@ async fn create_job(
                     }
                     config_str = serde_json::to_string(&Value::Object(config)).unwrap();
                 }
+            }
+        }
+
+        if !bed_type.is_empty() {
+            if !crate::printing::BED_TYPES.contains(&bed_type.as_str()) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("unknown build plate {bed_type:?}")})),
+                ));
+            }
+            if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
+                config.insert("curr_bed_type".into(), json!(bed_type));
+                config_str = serde_json::to_string(&Value::Object(config)).unwrap();
             }
         }
 

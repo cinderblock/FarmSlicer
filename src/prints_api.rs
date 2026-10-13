@@ -235,7 +235,10 @@ async fn job_targets(
                 "incompatible": printing::incompatibility(&state.profile_store, p, plate),
                 "busy": busy_reason(&state, p),
                 "ams_mapping": mapping,
-                "problems": printing::check_mapping(plate, &mapping, status.as_ref()),
+                "problems": printing::plate_problem(plate, p)
+                    .into_iter()
+                    .chain(printing::check_mapping(plate, &mapping, status.as_ref()))
+                    .collect::<Vec<_>>(),
                 "status": status,
             })
         })
@@ -309,7 +312,10 @@ async fn send_job(
         if let Some(why) = busy_reason(&state, &printer) {
             return Err(api_err(StatusCode::CONFLICT, why));
         }
-        let problems = printing::check_mapping(&plate, &mapping, status.as_ref());
+        let problems: Vec<String> = printing::plate_problem(&plate, &printer)
+            .into_iter()
+            .chain(printing::check_mapping(&plate, &mapping, status.as_ref()))
+            .collect();
         if !problems.is_empty() && !body.ignore_mapping_problems {
             return Err((
                 StatusCode::CONFLICT,
@@ -499,7 +505,10 @@ async fn approve_print(
     }
     let mapping: Vec<i64> = serde_json::from_str(print.ams_mapping.as_deref().unwrap_or("[]")).unwrap_or_default();
     let options: PrintOptions = serde_json::from_str(print.options.as_deref().unwrap_or("{}")).unwrap_or_default();
-    let problems = printing::check_mapping(&plate, &mapping, state.printers.status(&printer.id).as_ref());
+    let problems: Vec<String> = printing::plate_problem(&plate, &printer)
+        .into_iter()
+        .chain(printing::check_mapping(&plate, &mapping, state.printers.status(&printer.id).as_ref()))
+        .collect();
     if !problems.is_empty() && !body.ignore_mapping_problems {
         return Err((
             StatusCode::CONFLICT,

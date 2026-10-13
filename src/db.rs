@@ -21,6 +21,8 @@ pub struct Printer {
     pub current_job: Option<String>,
     /// Where the printer stands ("Bay 1"); the Printers page groups by it.
     pub area: String,
+    /// The build plate installed (`curr_bed_type` names); "" = unknown.
+    pub plate_type: String,
 }
 
 /// A problem someone reported with a printer.
@@ -258,7 +260,7 @@ impl Db {
         ).expect("failed to create tables");
 
         // Migrations — add columns that may not exist in older databases
-        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code", "area"] {
+        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code", "area", "plate_type"] {
             if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {
                 conn.execute_batch(
                     &format!("ALTER TABLE printers ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
@@ -868,7 +870,7 @@ impl Db {
     pub fn list_printers(&self) -> Vec<Printer> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job, area FROM printers ORDER BY name")
+            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job, area, plate_type FROM printers ORDER BY name")
             .unwrap();
         stmt.query_map([], |row| {
             Ok(Printer {
@@ -883,6 +885,7 @@ impl Db {
                 status: row.get(8)?,
                 current_job: row.get(9)?,
                 area: row.get(10)?,
+                plate_type: row.get(11)?,
             })
         })
         .unwrap()
@@ -900,12 +903,13 @@ impl Db {
         serial_number: &str,
         access_code: &str,
         area: &str,
+        plate_type: &str,
     ) -> Printer {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area],
+            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type],
         )
         .unwrap();
         Printer {
@@ -920,6 +924,7 @@ impl Db {
             status: "offline".to_string(),
             current_job: None,
             area: area.to_string(),
+            plate_type: plate_type.to_string(),
         }
     }
 
@@ -940,6 +945,7 @@ impl Db {
         serial_number: Option<&str>,
         access_code: Option<&str>,
         area: Option<&str>,
+        plate_type: Option<&str>,
     ) -> Option<Printer> {
         {
             let conn = self.conn.lock().unwrap();
@@ -953,9 +959,10 @@ impl Db {
                         address = COALESCE(?6, address),
                         serial_number = COALESCE(?7, serial_number),
                         access_code = COALESCE(?8, access_code),
-                        area = COALESCE(?9, area)
+                        area = COALESCE(?9, area),
+                        plate_type = COALESCE(?10, plate_type)
                      WHERE id = ?1",
-                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area],
+                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type],
                 )
                 .unwrap();
             if n == 0 {

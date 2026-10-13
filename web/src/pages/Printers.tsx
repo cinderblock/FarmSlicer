@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
 import { localDateTime, useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
-import { useActivePrints, usePrinterStatuses, type Printer } from "../printers";
+import { BED_TYPES, useActivePrints, usePrinterStatuses, type Printer } from "../printers";
 
 interface MachineModel {
   name: string;
@@ -43,6 +43,7 @@ interface Draft {
   accessCode: string;
   accessCodeSet: boolean;
   area: string;
+  plateType: string;
 }
 
 const EMPTY: Draft = {
@@ -57,6 +58,7 @@ const EMPTY: Draft = {
   accessCode: "",
   accessCodeSet: false,
   area: "",
+  plateType: "Textured PEI Plate",
 };
 
 function defaultNozzle(m: MachineModel | undefined): string {
@@ -140,6 +142,7 @@ export default function PrintersPage() {
       accessCode: "",
       accessCodeSet: p.access_code_set,
       area: p.area,
+      plateType: p.plate_type,
     });
   };
 
@@ -153,6 +156,7 @@ export default function PrintersPage() {
       address: draft.address,
       serial_number: draft.serial,
       area: draft.area,
+      plate_type: draft.plateType,
     };
     // Write-only: an empty field on edit keeps the stored code.
     if (draft.accessCode || !draft.id) body.access_code = draft.accessCode;
@@ -306,6 +310,19 @@ export default function PrintersPage() {
                 <option value="octoprint">OctoPrint</option>
                 <option value="klipper">Klipper / Moonraker</option>
               </select>
+            </label>
+
+            <label>
+              Build plate
+              <select value={draft.plateType} onChange={(e) => set({ plateType: e.target.value })}>
+                <option value="">Not set</option>
+                {BED_TYPES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <span className="hint">What's on the printer now; slicing defaults to it, sending checks it.</span>
             </label>
 
             <label>

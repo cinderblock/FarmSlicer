@@ -137,6 +137,7 @@ mod tests {
             ],
             has_thumbnail: false,
             gcode_md5: String::new(),
+            bed_type: None,
         };
         assert_eq!(p.plate(&plate), 3.47); // 1.999 + 1.4699
     }

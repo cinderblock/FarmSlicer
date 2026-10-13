@@ -173,6 +173,10 @@ r = await user.get("/api/guide");
 check(r.status === 200 && r.json.notes.startsWith("Open 9-5.") && r.json.print_rules, "everyone reads the guide", json(r));
 
 // ---- areas, equipment reports, pre-heating --------------------------------------------
+r = await owner.patch(`/api/printers/${id}`, { plate_type: "Glass" });
+check(r.status === 400, "unknown build plates are refused", json(r));
+r = await owner.patch(`/api/printers/${id}`, { plate_type: "Textured PEI Plate" });
+check(r.status === 200 && r.json.plate_type === "Textured PEI Plate", "printers record their build plate", json(r));
 r = await owner.patch(`/api/printers/${id}`, { area: " Bay 1 " });
 check(r.status === 200 && r.json.area === "Bay 1", "printers have an area", json(r));
 r = await user.post(`/api/printers/${id}/reports`, { description: "  " });

@@ -11,6 +11,7 @@ import {
 } from "../engine/client";
 import type { EngineManifest, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
+import { BED_TYPES } from "../printers";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
 type ComputeMode = "auto" | "server" | "browser";
@@ -67,6 +68,7 @@ interface Printer {
   name: string;
   machine_profile: string;
   nozzle_diameter: string;
+  plate_type: string;
 }
 
 interface MachineModel {
@@ -170,6 +172,7 @@ export default function SlicePage() {
   const [machineModels, setMachineModels] = useState<MachineModel[]>([]);
   const [modelChoice, setModelChoice] = useState("");
   const [nozzleChoice, setNozzleChoice] = useState("");
+  const [plateChoice, setPlateChoice] = useState("");
   const [process, setProcess] = useState("");
   const [filament, setFilament] = useState("");
   const [materialFilter, setMaterialFilter] = useState("");
@@ -308,6 +311,14 @@ export default function SlicePage() {
     : nozzleOptions.includes(nozzleChoice)
       ? nozzleChoice
       : defaultNozzle(model);
+
+  // Build plate: the chosen printer's, else what most of the farm's printers
+  // of this model carry, else textured PEI (what Bambu printers ship with).
+  const plateCounts = new Map<string, number>();
+  for (const p of printers)
+    if (p.machine_profile === model && p.plate_type) plateCounts.set(p.plate_type, (plateCounts.get(p.plate_type) ?? 0) + 1);
+  const defaultPlate = [...plateCounts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Textured PEI Plate";
+  const plate = selectedPrinter?.plate_type || plateChoice || defaultPlate;
 
   // The machine profile to slice with
   const resolvedMachine = selectedPrinter
@@ -479,13 +490,14 @@ export default function SlicePage() {
     if (resolvedMachine) formData.append("machine", resolvedMachine);
     if (process) formData.append("process", process);
     if (filament) formData.append("filament", filament);
+    if (plate) formData.append("bed_type", plate);
     if (color) formData.append("color", color);
     if (Object.keys(overrides).length > 0) {
       formData.append("overrides", JSON.stringify(overrides));
     }
     if (groupId) formData.append("group_id", groupId);
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, color, overrides, groupId]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, overrides, groupId]);
 
   const sliceOnServer = useCallback(async () => {
     if (!modelFile) return;
@@ -681,8 +693,22 @@ export default function SlicePage() {
               </select>
             </label>
           </div>
+          <label>
+            Build plate
+            <select
+              value={plate}
+              disabled={!!selectedPrinter?.plate_type}
+              onChange={(e) => setPlateChoice(e.target.value)}
+            >
+              {BED_TYPES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
           {selectedPrinter && (
-            <p className="hint">Model and nozzle come from the selected printer.</p>
+            <p className="hint">Model, nozzle and plate come from the selected printer.</p>
           )}
 
           <label>

@@ -11,6 +11,7 @@ import {
   type Printer,
   type PrinterStatus,
   loadedTrays,
+  plateLabel,
   type PrintRecord,
   type Tray,
 } from "../printers";
@@ -113,6 +114,7 @@ export default function PrinterCard({
         <p className="hint">
           {printer.machine_profile}
           {printer.nozzle_diameter && ` · ${printer.nozzle_diameter} mm nozzle`}
+          {printer.plate_type && ` · ${plateLabel(printer.plate_type)}`}
         </p>
       )}
 

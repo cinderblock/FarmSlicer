@@ -50,6 +50,9 @@ pub struct Plate {
     pub has_thumbnail: bool,
     /// Upper-case hex MD5 of the plate's G-code.
     pub gcode_md5: String,
+    /// The build plate it was sliced for (`curr_bed_type`), when known.
+    #[serde(default)]
+    pub bed_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -97,6 +100,12 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
         Err(_) => BTreeMap::new(),
     };
 
+    // The build plate: project_settings.config (JSON) holds the whole config.
+    let bed_type = read_entry_from(&mut zip, "Metadata/project_settings.config")
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("curr_bed_type")?.as_str().map(String::from))
+        .filter(|s| !s.is_empty());
+
     let mut plates = Vec::new();
     for index in gcode_plates {
         let md5 = match read_entry_from(&mut zip, &format!("{}.md5", gcode_entry(index))) {
@@ -121,6 +130,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
             filaments: meta.filaments,
             has_thumbnail: names.iter().any(|n| n == &thumbnail_entry(index)),
             gcode_md5: md5,
+            bed_type: bed_type.clone(),
         });
     }
     Ok(Package { plates })
@@ -296,6 +306,7 @@ mod tests {
             ("Metadata/plate_2.gcode.md5", b"abcdef0123456789abcdef0123456789\n"),
             ("Metadata/plate_2.png", b"\x89PNG"),
             ("Metadata/plate_1.png", b"\x89PNG"),
+            ("Metadata/project_settings.config", br#"{"curr_bed_type": "Textured PEI Plate"}"#),
         ]);
         let p = inspect(&pkg.0).unwrap();
         assert_eq!(p.plates.len(), 1, "plate 1 has no G-code");
@@ -309,6 +320,7 @@ mod tests {
         assert_eq!(plate.filaments[1].id, 3);
         assert_eq!(plate.filaments[1].material, "PETG");
         assert_eq!(thumbnail(&pkg.0, 2).as_deref(), Some(&b"\x89PNG"[..]));
+        assert_eq!(plate.bed_type.as_deref(), Some("Textured PEI Plate"));
     }
 
     #[test]

@@ -43,6 +43,7 @@ fn view(p: &Printer, user: &User) -> Value {
         "access_code_set": !p.access_code.is_empty(),
         "current_job": p.current_job,
         "area": p.area,
+        "plate_type": p.plate_type,
     })
 }
 
@@ -69,6 +70,18 @@ struct CreatePrinter {
     serial_number: Option<String>,
     access_code: Option<String>,
     area: Option<String>,
+    plate_type: Option<String>,
+}
+
+fn check_plate(plate: Option<&str>) -> Result<(), ApiError> {
+    match plate.map(str::trim) {
+        None | Some("") => Ok(()),
+        Some(p) if crate::printing::BED_TYPES.contains(&p) => Ok(()),
+        Some(p) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("unknown plate type {p:?}; one of {}", crate::printing::BED_TYPES.join(", "))})),
+        )),
+    }
 }
 
 async fn create_printer(
@@ -81,6 +94,7 @@ async fn create_printer(
     if name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "name is required"}))));
     }
+    check_plate(body.plate_type.as_deref())?;
     let printer = state.db.create_printer(
         name,
         body.machine_profile.as_deref().unwrap_or(""),
@@ -90,6 +104,7 @@ async fn create_printer(
         body.serial_number.as_deref().unwrap_or("").trim(),
         body.access_code.as_deref().unwrap_or("").trim(),
         body.area.as_deref().unwrap_or("").trim(),
+        body.plate_type.as_deref().unwrap_or("").trim(),
     );
     resync(&state);
     Ok((StatusCode::CREATED, Json(view(&printer, &user))))
@@ -106,6 +121,7 @@ struct UpdatePrinter {
     serial_number: Option<String>,
     access_code: Option<String>,
     area: Option<String>,
+    plate_type: Option<String>,
 }
 
 async fn update_printer(
@@ -118,6 +134,7 @@ async fn update_printer(
     if body.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
         return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "name can't be empty"}))));
     }
+    check_plate(body.plate_type.as_deref())?;
     let trimmed = |v: &Option<String>| v.as_deref().map(str::trim).map(String::from);
     let printer = state
         .db
@@ -131,6 +148,7 @@ async fn update_printer(
             trimmed(&body.serial_number).as_deref(),
             trimmed(&body.access_code).as_deref(),
             trimmed(&body.area).as_deref(),
+            trimmed(&body.plate_type).as_deref(),
         )
         .ok_or_else(not_found)?;
     resync(&state);

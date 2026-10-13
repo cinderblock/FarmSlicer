@@ -14,7 +14,21 @@ export interface Printer {
   access_code_set: boolean;
   current_job: string | null;
   area: string;
+  /** Installed build plate (libslic3r `curr_bed_type` name); "" = unknown. */
+  plate_type: string;
 }
+
+/** Build plates: libslic3r name → what people call it. */
+export const BED_TYPES: [string, string][] = [
+  ["Textured PEI Plate", "Textured PEI"],
+  ["Cool Plate", "Smooth Cool Plate"],
+  ["Engineering Plate", "Engineering Plate"],
+  ["High Temp Plate", "Smooth High Temp Plate"],
+  ["Textured Cool Plate", "Textured Cool Plate"],
+  ["Supertack Plate", "Cool Plate SuperTack"],
+];
+
+export const plateLabel = (v: string) => BED_TYPES.find(([k]) => k === v)?.[1] ?? v;
 
 /** Filament prices (site setting; src/cost.rs). */
 export interface Prices {
