@@ -142,13 +142,25 @@ Everything printer-facing is wired straight to `src/bambu/` today
             send while paused, resume, speed, cancel, camera (8 frames in
             6 s), heater/speed commands; a Klipper shutdown fails the print
             with Klipper's reason.
-      - [ ] UI: connection fields per protocol, speed as percent, pre-heat
-            by material, send dialog without AMS mapping (step 7, done
-            alongside so each driver is usable).
-      - [ ] Discovery (`_moonraker._tcp` mDNS when zeroconf is on; probe).
-- [ ] **4. OctoPrint driver** + fake (OctoPrint's Virtual Printer).
-- [ ] **5. PrusaLink driver** + fake.
+      - [x] UI (`a1c08b6`): connection fields per protocol (from
+            `/api/printer-protocols`), `configured` flag, speed as percent,
+            pre-heat by material, send dialog without AMS mapping, options
+            per capability. Checked in Chrome against the dev setup
+            (`pd-ui.sh`): form, cameras (Klipper sim's mjpg-streamer plays),
+            send dialog, live card, speed change.
+      - [ ] Discovery: moved to step 6b (mDNS serves Moonraker, OctoPrint
+            and PrusaLink alike).
+- [x] **4. OctoPrint driver** (`910b819`): `src/octoprint/` (push socket +
+      REST, outcome from events, select+print, integer feedrate, pictures
+      from 2.0 thumbnails / Slicer Thumbnails plugin, webcam settings).
+      Node fake + `tests/octoprint-e2e.mjs`; Dockerfile for real OctoPrint
+      (`tests/fake-octoprint/`). Conformance: passes against real
+      OctoPrint 1.11.8 and 2.0.0rc6 (`pd-octoprint-test.sh`).
+- [ ] **5. PrusaLink driver** + fake ← current
 - [ ] **6. Elegoo SDCP driver** + fake.
+- [ ] **6b. Discovery for every make**: mDNS (`_moonraker._tcp`,
+      `_octoprint._tcp`, `_prusalink._tcp`) and SDCP's UDP broadcast,
+      cards per vendor on the Printers page.
 - [ ] **7. UI**: protocol-specific connection fields, capability-gated
       controls, discovery cards per vendor; docs (README, CLAUDE.md).
 
@@ -227,6 +239,19 @@ Everything printer-facing is wired straight to `src/bambu/` today
   - Webcams are added with `POST /server/webcams/item` (not `post_item`).
   - `virtual_sdcard.progress` is byte-based: with large thumbnail headers
     a print starts at ~12-27% until the first `M73`.
+
+- **OctoPrint, real (1.11.8, 2.0.0rc6)**:
+  - The Docker image needs `gcc libc6-dev` for 1.11.8 (netifaces has no
+    wheel for Python 3.12) and a non-root user (OctoPrint refuses root).
+  - 2.0 decodes the G-code's embedded thumbnail on upload and **refuses
+    the upload** ("cannot identify image file") when it isn't a valid
+    image. libslic3r's thumbnails are valid; hand-made test G-code must
+    carry a real PNG.
+  - 2.0 takes progress from `M73` and can end at 99 % (status shows 100
+    when finished).
+  - The fake's `current` message must keep `state` an object (the job
+    body's `state` is a string): an ordering bug in the fake made every
+    flag vanish.
 
 ## Progress log
 
