@@ -231,7 +231,9 @@ written by `src/incidents.rs`, plus a server log line each:
 - [x] Incident log pushed (`831a7ad`/`2b3e5b0`); CI green:
       `ghcr.io/cinderblock/farmslicer:2b3e5b0` =
       `sha256:02988acdb433febe18043be6ee71ea4c3bc6cac096375b7d01c3695369c9b8b1`
-- [ ] Deploy `2b3e5b0` (every-make check + incident log; needs the user's yes)
+- [x] Deployed `2b3e5b0` (every-make check + incident log; user, 2026-10-13):
+      ops pin pushed, deploy run 38495865975 green, sentinel healthy on
+      `sha256:02988acd…b8b1`, the site answers.
 - [x] Incident log: `src/incidents.rs`, `gcode_incidents` table, API, Users
       page; e2e covers a check incident, a browser one, filtering, counts and
       a real print failure on the fake Klipper printer (108 unit tests, 8 e2e
@@ -244,7 +246,7 @@ written by `src/incidents.rs`, plus a server log line each:
 1. ~~Push?~~ Done.
 2. ~~Deploy?~~ Done.
 3. ~~Defaults~~ Kept as they are (user, 2026-10-13).
-4. Push and deploy the every-make check (`3f8545b`)? Recommendation: yes.
+4. ~~Push and deploy the every-make check?~~ Done (deployed with the incident log).
 
 ## Things not to do
 
