@@ -1,13 +1,14 @@
 // FarmSlicer WebAssembly engine: a small C ABI around the shared slicing
 // pipeline (cxx/slice_core.cpp), driven from web/src/engine/worker.ts.
 //
-//   fs_version()      → JSON {engine, orca, threads}
+//   fs_version()      → JSON {engine, orca, threads, placement}
 //   fs_slice(...)     → slice synchronously (single-threaded build, or the
 //                       pthreads build when the caller wants to block)
 //   fs_slice_start()  → pthreads build only: slice on a dedicated pthread,
 //                       completion signalled through `state` (see below)
-//   fs_set_options()  → what the next slice produces besides G-code: a Bambu
-//                       sliced project (.gcode.3mf) and the thumbnail overlay
+//   fs_set_options()  → how the next slice runs besides the config: where the
+//                       model goes on the bed, a Bambu sliced project
+//                       (.gcode.3mf), the thumbnail overlay
 //   fs_cancel()       → abort the running slice at its next checkpoint
 //   fs_free(p)        → free a buffer returned through an out-parameter
 //
@@ -299,10 +300,13 @@ EMSCRIPTEN_KEEPALIVE const char* fs_version()
 {
     static const std::string v = std::string("{\"engine\":\"farmslicer\",\"orca\":\"") + FS_ORCA_VERSION +
 #ifdef FS_ENGINE_THREADS
-        "\",\"threads\":true}";
+        "\",\"threads\":true"
 #else
-        "\",\"threads\":false}";
+        "\",\"threads\":false"
 #endif
+        // fs_set_options takes a placement (hosts refuse to slice a placed
+        // model with an engine that would ignore it).
+        ",\"placement\":true}";
     return v.c_str();
 }
 
@@ -331,8 +335,9 @@ EMSCRIPTEN_KEEPALIVE int fs_slice(const char* model_name, const uint8_t* model, 
 
 // Options for the next fs_slice / fs_slice_start, as JSON:
 // {package: bool, printer_model_id, model_name, label, logo_width,
-// logo_height}, plus the logo as RGBA (rows top-down; may be null). Returns
-// 0, or 1 when the JSON doesn't parse or the logo size doesn't match.
+// logo_height, placement: {rotation: [9], offset: [2]} | null}, plus the
+// logo as RGBA (rows top-down; may be null). Returns 0, or 1 when the JSON
+// doesn't parse, the placement is malformed or the logo size doesn't match.
 EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const uint8_t* logo, int logo_len)
 {
     farmslicer::core::Options o;
@@ -344,6 +349,14 @@ EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const ui
         o.overlay.label = j.value("label", std::string());
         o.overlay.logo_width = j.value("logo_width", 0u);
         o.overlay.logo_height = j.value("logo_height", 0u);
+        if (const auto p = j.find("placement"); p != j.end() && !p->is_null()) {
+            const auto& rotation = p->at("rotation");
+            const auto& offset = p->at("offset");
+            if (rotation.size() != 9 || offset.size() != 2) return 1;
+            for (int i = 0; i < 9; ++i) o.placement.rotation[i] = rotation.at(i).get<double>();
+            for (int i = 0; i < 2; ++i) o.placement.offset[i] = offset.at(i).get<double>();
+            o.placement.set = true;
+        }
     } catch (...) {
         return 1;
     }

@@ -11,6 +11,7 @@
 
 #include <libslic3r/libslic3r.h>
 #include <libslic3r/Utils.hpp>
+#include <libslic3r/BuildVolume.hpp>
 #include <libslic3r/Model.hpp>
 #include <libslic3r/Print.hpp>
 #include <libslic3r/Layer.hpp>
@@ -122,28 +123,61 @@ void load_config(Slic3r::DynamicPrintConfig& config, const std::string& json,
     config.normalize_fdm();
 }
 
-// Centre the whole model on the bed (keeping relative placement for multi-
-// object files) and drop it onto Z=0, like the desktop plater does on import.
-void place_on_bed(Slic3r::Model& model, const Slic3r::DynamicPrintConfig& config)
+// Put the model where the user placed it: rotate it as a whole (keeping
+// relative placement for multi-object files), centre its bounding box on
+// the bed centre plus the placement's offset (just the bed centre without
+// one, like the desktop plater on import) and drop it onto Z=0. Then refuse
+// a model that doesn't fit: libslic3r would slice it, and the G-code would
+// drive the head beyond the bed.
+void place_on_bed(Slic3r::Model& model, const Slic3r::DynamicPrintConfig& config, const Placement& placement)
 {
     using namespace Slic3r;
     for (ModelObject* obj : model.objects)
         if (obj->instances.empty()) obj->add_instance();
 
-    Vec2d bed_center(0.0, 0.0);
-    if (const auto* area = config.option<ConfigOptionPoints>("printable_area")) {
-        BoundingBoxf bed;
-        for (const Vec2d& p : area->values) bed.merge(p);
-        if (bed.defined) bed_center = bed.center();
+    if (placement.set) {
+        Transform3d rotation = Transform3d::Identity();
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) rotation.linear()(r, c) = placement.rotation[r * 3 + c];
+        for (ModelObject* obj : model.objects) {
+            for (ModelInstance* inst : obj->instances)
+                inst->set_transformation(Geometry::Transformation(rotation * inst->get_matrix()));
+            obj->invalidate_bounding_box();
+        }
     }
 
+    std::vector<Vec2d> bed_shape;
+    if (const auto* area = config.option<ConfigOptionPoints>("printable_area")) bed_shape = area->values;
+    Vec2d bed_center(0.0, 0.0);
+    {
+        BoundingBoxf bed;
+        for (const Vec2d& p : bed_shape) bed.merge(p);
+        if (bed.defined) bed_center = bed.center();
+    }
+    const Vec2d target = bed_center + (placement.set ? Vec2d(placement.offset[0], placement.offset[1]) : Vec2d::Zero());
+
     const BoundingBoxf3 bbox = model.bounding_box_exact();
-    const Vec3d shift(bed_center.x() - bbox.center().x(), bed_center.y() - bbox.center().y(), 0.0);
+    const Vec3d shift(target.x() - bbox.center().x(), target.y() - bbox.center().y(), 0.0);
     for (ModelObject* obj : model.objects) {
         for (ModelInstance* inst : obj->instances)
             inst->set_offset(inst->get_offset() + shift);
         obj->ensure_on_bed();
     }
+
+    if (bed_shape.size() < 3) return;
+    const auto* height = config.option<ConfigOptionFloat>("printable_height");
+    const BuildVolume volume(bed_shape, height ? height->value : 0.0, {}, {});
+    model.update_print_volume_state(volume);
+    for (const ModelObject* obj : model.objects)
+        for (const ModelInstance* inst : obj->instances) {
+            if (inst->print_volume_state == ModelInstancePVS_Inside) continue;
+            const std::string what = model.objects.size() > 1 ? "\"" + obj->name + "\"" : std::string("the model");
+            throw std::runtime_error(inst->print_volume_state == ModelInstancePVS_Fully_Outside
+                                         ? what + " is off the bed: move it onto the build plate"
+                                         : what + " doesn't fit in the printable volume: move, rotate or "
+                                                  "shrink it so it stays inside the build plate and under the "
+                                                  "maximum height");
+        }
 }
 
 double filament_density(const Slic3r::DynamicPrintConfig& cfg, size_t e)
@@ -196,7 +230,7 @@ Outcome slice_file(const std::string& model_path,
         load_config(config, config_json, out.warnings);
 
         const int filament_count = int(std::max<size_t>(1, vector_size(config, "filament_diameter")));
-        place_on_bed(model, config);
+        place_on_bed(model, config, options.placement);
 
         Print print;
         print.set_plate_origin(Vec3d::Zero());

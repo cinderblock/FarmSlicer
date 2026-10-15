@@ -79,6 +79,9 @@ pub struct Job {
     /// What the package holds (src/package/ `Package`, JSON); its
     /// presence means the job can be sent to a printer.
     pub package_json: Option<String>,
+    /// Where the model was put on the bed (src/placement.rs, JSON); None =
+    /// centred as loaded.
+    pub placement_json: Option<String>,
 }
 
 /// A job sent to a printer.
@@ -463,7 +466,7 @@ impl Db {
         if conn.prepare("SELECT stored_bytes FROM jobs LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE jobs ADD COLUMN stored_bytes INTEGER NOT NULL DEFAULT 0;").ok();
         }
-        for col in &["package_path", "package_json"] {
+        for col in &["package_path", "package_json", "placement_json"] {
             if conn.prepare(&format!("SELECT {col} FROM jobs LIMIT 0")).is_err() {
                 conn.execute_batch(&format!("ALTER TABLE jobs ADD COLUMN {col} TEXT;")).ok();
             }
@@ -1077,7 +1080,7 @@ impl Db {
                 j.progress_message, j.warnings, j.source,
                 j.created_at, j.updated_at,
                 j.user_id, u.username, j.group_id, g.name, j.stored_bytes,
-                j.package_path, j.package_json
+                j.package_path, j.package_json, j.placement_json
          FROM jobs j
          LEFT JOIN printers p ON j.printer_id = p.id
          LEFT JOIN users u ON j.user_id = u.id
@@ -1111,6 +1114,7 @@ impl Db {
             stored_bytes: row.get(23)?,
             package_path: row.get(24)?,
             package_json: row.get(25)?,
+            placement_json: row.get(26)?,
         })
     }
 
@@ -1213,14 +1217,15 @@ impl Db {
         user_id: Option<&str>,
         group_id: Option<&str>,
         model_bytes: i64,
+        placement_json: Option<&str>,
     ) -> Job {
         let id = uuid::Uuid::new_v4().to_string();
         {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id, group_id, stored_bytes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id, group_id, model_bytes],
+                "INSERT INTO jobs (id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id, group_id, stored_bytes, placement_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![id, model_name, model_path, printer_id, routing, config_json, overrides_json, source, user_id, group_id, model_bytes, placement_json],
             )
             .unwrap();
         }

@@ -19,6 +19,17 @@ struct Callbacks {
     std::function<bool()> cancelled;
 };
 
+/// Where the user put the model on the bed (the web viewer's placement).
+struct Placement {
+    /// False = centre the model on the bed in its file orientation.
+    bool set = false;
+    /// Rotation applied to the model as loaded: a 3x3 matrix, row-major.
+    double rotation[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    /// Where the rotated model's bounding-box centre goes, relative to the
+    /// bed centre (mm, XY). It always rests on the bed (Z = 0).
+    double offset[2] = {0, 0};
+};
+
 struct Options {
     /// Also write a Bambu-style sliced project (`.gcode.3mf`: the plate's
     /// G-code, its thumbnail and slice_info.config) here. Empty = don't.
@@ -32,6 +43,8 @@ struct Options {
     /// Label/logo drawn on every thumbnail. An empty font path means
     /// fonts/Sarabun-SemiBold.ttf in the resources directory.
     ThumbnailOverlay overlay;
+    /// Orientation and position on the bed.
+    Placement placement;
 };
 
 struct Outcome {

@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn what_counts_as_custom() {
         let t = temp_db();
-        let job = |source: &str, overrides: Option<&str>| t.1.create_job("part", "", None, "auto", None, overrides, source, None, None, 0);
+        let job = |source: &str, overrides: Option<&str>| t.1.create_job("part", "", None, "auto", None, overrides, source, None, None, 0, None);
         assert_eq!(custom_reason(&job("upload", None), None), Some("uploaded"));
         assert_eq!(custom_reason(&job("server", Some(r#"{"layer_height":"0.2"}"#)), None), None);
         assert_eq!(custom_reason(&job("server", Some(r#"{"machine_start_gcode":"G28"}"#)), None), Some("custom settings"));

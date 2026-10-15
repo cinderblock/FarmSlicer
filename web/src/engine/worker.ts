@@ -43,6 +43,8 @@ const post = (msg: WorkerResponse, transfer?: Transferable[]) =>
 
 let engine: EngineModule | null = null;
 let threaded = false;
+/** The engine applies SliceOptions.placement (older engines ignore it). */
+let placesModels = false;
 let currentId = 0;
 
 function writeString(m: EngineModule, s: string): { ptr: number; len: number } {
@@ -77,6 +79,7 @@ async function init(variant: "st" | "mt", baseUrl: string, threads?: number) {
   engine = await mod.default(opts);
   const version = JSON.parse(engine.UTF8ToString(engine._fs_version()));
   threaded = Boolean(version.threads) && typeof engine._fs_slice_start === "function";
+  placesModels = Boolean(version.placement);
   const threadCount = threaded && engine._fs_thread_count ? engine._fs_thread_count() : 1;
   post({ type: "ready", version, threadCount });
 }
@@ -133,7 +136,16 @@ async function slice(id: number, modelName: string, model: ArrayBuffer, config: 
   const m = engine;
   currentId = id;
   const started = performance.now();
-  if (options) setOptions(m, options);
+  // A placed model must not be sliced by an engine that would ignore the
+  // placement: the G-code would come out centred, in the file's orientation.
+  if (options?.placement && !placesModels) {
+    post({ type: "error", id, error: "this browser engine predates part placement; reload the page, or slice on the server" });
+    return;
+  }
+  if (options && !setOptions(m, options) && options.placement) {
+    post({ type: "error", id, error: "the browser engine refused the part's placement" });
+    return;
+  }
 
   const modelBytes = new Uint8Array(model);
   const modelPtr = m._malloc(Math.max(1, modelBytes.length));

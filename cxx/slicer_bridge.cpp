@@ -4,6 +4,7 @@
 #include "farmslicer/cxx/slicer_bridge.h"
 #include "farmslicer/cxx/slice_core.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 
@@ -44,6 +45,11 @@ SliceResult Slicer::slice(
     opts.overlay.logo_height = options.logo_height;
     opts.overlay.font_path = std::string(options.font_path);
     opts.model_name = std::string(options.model_name);
+    if (options.placement_rotation.size() == 9 && options.placement_offset.size() == 2) {
+        opts.placement.set = true;
+        std::copy(options.placement_rotation.begin(), options.placement_rotation.end(), opts.placement.rotation);
+        std::copy(options.placement_offset.begin(), options.placement_offset.end(), opts.placement.offset);
+    }
 
     const core::Outcome out = core::slice_file(
         to_std(model_path), to_std(config_json), to_std(output_path), cb, opts);

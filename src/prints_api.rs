@@ -115,7 +115,7 @@ async fn upload_package(
 
     let job = state
         .db
-        .create_job(&name, "", None, "auto", None, None, "upload", Some(&user.id), group_id.as_deref(), 0);
+        .create_job(&name, "", None, "auto", None, None, "upload", Some(&user.id), group_id.as_deref(), 0, None);
     let path = dir.join(format!("{}{}", job.id, pkg.format.extension()));
     std::fs::rename(&staging, &path).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = path.to_string_lossy().to_string();

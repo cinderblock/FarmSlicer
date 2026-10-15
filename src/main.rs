@@ -16,6 +16,7 @@ mod moonraker;
 mod octoprint;
 mod overlay;
 mod package;
+mod placement;
 mod printer;
 mod printer_thumbs;
 mod printers_api;

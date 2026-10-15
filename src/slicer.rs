@@ -27,6 +27,11 @@ mod ffi {
         font_path: String,
         /// Name for a single-object model (instead of the stored file's).
         model_name: String,
+        /// Where the user put the model (`crate::placement::Placement`): a
+        /// row-major 3x3 rotation and the XY offset of its bounding-box
+        /// centre from the bed centre. Empty = centred, as loaded.
+        placement_rotation: Vec<f64>,
+        placement_offset: Vec<f64>,
     }
 
     /// Outcome of one `Slicer::slice` call.
@@ -97,6 +102,8 @@ mod stub {
         pub logo_height: u32,
         pub font_path: String,
         pub model_name: String,
+        pub placement_rotation: Vec<f64>,
+        pub placement_offset: Vec<f64>,
     }
 
     pub struct SliceResult {

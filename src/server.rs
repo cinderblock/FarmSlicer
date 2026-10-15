@@ -21,6 +21,7 @@ use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
 use crate::overlay;
+use crate::placement::Placement;
 use crate::printer::PrinterHub;
 use crate::printers_api;
 use crate::prints_api;
@@ -525,6 +526,8 @@ async fn create_job(
     let mut model_bytes: i64 = 0;
     // The build plate (`curr_bed_type`); the profile default otherwise.
     let mut bed_type = String::new();
+    // Where the user put the model (src/placement.rs); centred otherwise.
+    let mut placement_str = String::new();
 
     while let Some(field) = multipart
         .next_field()
@@ -588,6 +591,9 @@ async fn create_job(
             "bed_type" => {
                 bed_type = field.text().await.unwrap_or_default().trim().to_string();
             }
+            "placement" => {
+                placement_str = field.text().await.unwrap_or_default().trim().to_string();
+            }
             "source" => {
                 source = field.text().await.unwrap_or_default();
             }
@@ -613,12 +619,21 @@ async fn create_job(
             .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e)),
     };
     // Overrides may only touch what the caller is allowed to (no G-code).
-    let overrides = admission.and_then(|()| {
-        config_policy::parse(&overrides_str)
-            .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
-            .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
-    });
-    let overrides = match overrides {
+    let checked = admission
+        .and_then(|()| {
+            config_policy::parse(&overrides_str)
+                .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
+                .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+        })
+        .and_then(|overrides| {
+            let placement = if placement_str.is_empty() {
+                None
+            } else {
+                Some(Placement::parse(&placement_str).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?)
+            };
+            Ok((overrides, placement))
+        });
+    let (overrides, placement) = match checked {
         Ok(o) => o,
         Err(e) => {
             if !model_path.is_empty() {
@@ -710,6 +725,7 @@ async fn create_job(
         Some(&user.id),
         group_id.as_deref(),
         model_bytes,
+        placement.as_ref().map(Placement::to_json).as_deref(),
     );
 
     if source == "browser" {
@@ -818,6 +834,7 @@ fn browser_slice_options(state: &AppState, job: &Job, config_json: &str) -> Valu
         "model_name": job.model_name,
         "label": overlay.label,
         "logo_url": overlay.logo.as_ref().and(job.group_id.as_ref()).map(|g| format!("/api/groups/{g}/overlay/logo")),
+        "placement": job_placement(job),
     })
 }
 
@@ -839,8 +856,17 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
             options.logo_width = w;
             options.logo_height = h;
         }
+        if let Some(p) = job_placement(&job) {
+            options.placement_rotation = p.rotation.to_vec();
+            options.placement_offset = p.offset.to_vec();
+        }
     }
     options
+}
+
+/// The job's placement; stored ones were checked when the job was created.
+fn job_placement(job: &Job) -> Option<Placement> {
+    job.placement_json.as_deref().and_then(|j| serde_json::from_str(j).ok())
 }
 
 /// Read a freshly written package, attach it to the job (sendable now) and

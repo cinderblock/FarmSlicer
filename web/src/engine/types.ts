@@ -31,6 +31,17 @@ export interface SliceReport {
   package?: string | null;
 }
 
+/**
+ * Where the model goes on the bed (src/placement.rs): `rotation` is a
+ * row-major 3x3 matrix applied to the model as loaded, `offset` the XY of the
+ * rotated model's bounding-box centre relative to the bed centre (mm). The
+ * model always rests on the bed.
+ */
+export interface Placement {
+  rotation: number[];
+  offset: [number, number];
+}
+
 /** What a slice produces besides G-code (the server decides; see POST /api/jobs). */
 export interface SliceOptions {
   /** Write a Bambu sliced project (.gcode.3mf). */
@@ -41,6 +52,8 @@ export interface SliceOptions {
   label: string;
   /** Thumbnail logo as RGBA rows, top-down. */
   logo?: { rgba: ArrayBuffer; width: number; height: number };
+  /** Where the job put the model; null/absent = centred as loaded. */
+  placement?: Placement | null;
 }
 
 export interface SliceOutput {
@@ -61,7 +74,7 @@ export type WorkerRequest =
   | { type: "cancel" };
 
 export type WorkerResponse =
-  | { type: "ready"; version: { engine: string; orca: string; threads: boolean }; threadCount: number }
+  | { type: "ready"; version: { engine: string; orca: string; threads: boolean; placement?: boolean }; threadCount: number }
   | { type: "init-error"; error: string }
   | { type: "progress"; id: number; percent: number; message: string }
   | { type: "done"; id: number; gcode: ArrayBuffer; package: ArrayBuffer | null; report: SliceReport; elapsedMs: number }
