@@ -81,6 +81,10 @@ What you saw wasn't the slicing orientation either.
     compiled with em++ using the st build's own command lines. The full
     wasm engine link is left to CI.
 11. [x] README/CLAUDE.md updates.
+12. [x] Pushed (FarmSlicer `3e156f3`; CI check, wasm and image green) and
+    deployed: ops `a5a5b29` pins `sha256:bf2a1c72…`. The Server Deploys run
+    succeeded, and on 2026-10-15 sentinel ran that digest (healthy) and
+    served the new viewer. Both browser engines report `"placement":true`.
 
 ## Findings / gotchas
 
