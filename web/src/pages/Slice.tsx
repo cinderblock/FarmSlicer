@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router";
-import ModelViewer from "../components/ModelViewer";
+import ModelViewer, { type BedShape, type Fit } from "../components/ModelViewer";
 import OverridesPanel from "../components/OverridesPanel";
 import {
   BrowserEngine,
@@ -9,7 +9,7 @@ import {
   loadManifest,
   pickVariant,
 } from "../engine/client";
-import type { EngineManifest, SliceOptions } from "../engine/types";
+import type { EngineManifest, Placement, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
 import { BED_TYPES } from "../printers";
 
@@ -55,6 +55,18 @@ async function loadLogo(url: string): Promise<SliceOptions["logo"]> {
   } catch {
     return undefined;
   }
+}
+
+/** The bed from a resolved profile: `printable_area` ("0x0", ...) and `printable_height`. */
+function bedFromConfig(config: Record<string, unknown> | null): BedShape | null {
+  if (!config) return null;
+  const raw = config.printable_area;
+  const points = (Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [])
+    .map((p) => String(p).split("x").map(Number))
+    .filter((p): p is [number, number] => p.length === 2 && p.every(Number.isFinite));
+  if (points.length < 3) return null;
+  const height = Number(Array.isArray(config.printable_height) ? config.printable_height[0] : config.printable_height);
+  return { area: points, height: Number.isFinite(height) && height > 0 ? height : 0 };
 }
 
 function formatDuration(sec: number): string {
@@ -163,6 +175,11 @@ function filamentDisplayName(name: string): string {
 export default function SlicePage() {
   const navigate = useNavigate();
   const [modelFile, setModelFile] = useState<File | null>(null);
+  // Where the part sits on the plate (the viewer's), and whether it fits.
+  const [placement, setPlacement] = useState<{ placement: Placement | null; fit: Fit }>({
+    placement: null,
+    fit: "inside",
+  });
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [printersLoaded, setPrintersLoaded] = useState(false);
@@ -496,8 +513,9 @@ export default function SlicePage() {
       formData.append("overrides", JSON.stringify(overrides));
     }
     if (groupId) formData.append("group_id", groupId);
+    if (placement.placement) formData.append("placement", JSON.stringify(placement.placement));
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, plate, color, overrides, groupId]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, overrides, groupId, placement]);
 
   const sliceOnServer = useCallback(async () => {
     if (!modelFile) return;
@@ -616,6 +634,13 @@ export default function SlicePage() {
     }
   }, [modelFile, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
 
+  const bed = useMemo(() => bedFromConfig(resolvedConfig), [resolvedConfig]);
+  const handlePlacementChange = useCallback(
+    (p: Placement | null, fit: Fit) => setPlacement({ placement: p, fit }),
+    [],
+  );
+  const offBed = !!modelFile && placement.fit !== "inside";
+
   const handleCancelBrowserSlice = useCallback(() => {
     engineRef.current?.cancel();
   }, []);
@@ -625,7 +650,11 @@ export default function SlicePage() {
       <h2>Slice</h2>
       <div className="slice-layout">
         <div className="viewer-panel">
-          <ModelViewer onModelLoaded={setModelFile} />
+          <ModelViewer
+            bed={bed}
+            onModelLoaded={setModelFile}
+            onPlacementChange={handlePlacementChange}
+          />
         </div>
         <div className="settings-panel">
           <h3>Settings</h3>
@@ -917,11 +946,16 @@ export default function SlicePage() {
 
           <button
             className="btn-primary"
-            disabled={!modelFile || slicing}
+            disabled={!modelFile || slicing || offBed}
             onClick={handleSlice}
           >
             {slicing ? (progress ? "Slicing in browser…" : "Submitting…") : "Slice"}
           </button>
+          {offBed && (
+            <p className="hint" style={{ marginTop: "0.5rem", color: "var(--error)" }}>
+              Move the part inside the build plate to slice it.
+            </p>
+          )}
 
           {result && (
             <p
