@@ -126,16 +126,18 @@ passkey only (asked 2026-10-15).
       `x-farmslicer-lan: 1` count as from the internet"; through Caddy from
       the LAN `/api/auth/status` says `remote: false`; straight to :9337
       without the header `remote: true`, no join groups, `/recover` 403.
-- [ ] Maintainer approves their own account (Users page → Remote, on the
-      LAN; it can't be done from outside)
-- [ ] ops C: Caddy opens the internet path (awaiting approval), then verify
-      from outside
+- [x] ops C: Caddy opens the internet path (ops `3a740df`, deployed
+      2026-10-15 21:30 UTC). Verified from jackson (outside): status
+      `remote: true` with no join groups, a client-sent
+      `X-FarmSlicer-LAN: 1` is stripped (still remote), `/` 200,
+      `/api/printers` 401, recover/join/setup 403, login start 200. LAN
+      unchanged (join groups listed).
+- [ ] An approved account signs in from outside (the maintainer's brother
+      is the first: Users → Add user with Remote ticked → invite link)
 
 ## Open questions for the user
 
-1. Approve ops step C (diff in the thread): external `handle` proxies
-   instead of answering 403, plus comment refreshes in the Caddy site and
-   the compose header.
+(none)
 
 ## Things not to do
 
