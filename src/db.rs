@@ -205,6 +205,9 @@ pub struct User {
     /// Per-user quota rules (JSON array, see src/quota.rs); None = the site
     /// default for the account kind.
     pub quotas: Option<String>,
+    /// Approved for access from outside the local network (passkey
+    /// sessions only; see `auth::authenticate`).
+    pub remote_access: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -398,6 +401,14 @@ impl Db {
         if conn.prepare("SELECT quotas FROM users LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE users ADD COLUMN quotas TEXT;").ok();
         }
+        if conn.prepare("SELECT remote_access FROM users LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE users ADD COLUMN remote_access INTEGER NOT NULL DEFAULT 0;").ok();
+        }
+        // How a session was made: 'passkey' | 'recovery' | 'code' (guest).
+        // Older sessions have none and don't count from the internet.
+        if conn.prepare("SELECT method FROM sessions LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE sessions ADD COLUMN method TEXT;").ok();
+        }
 
         // Groups (see src/groups.rs): a tree; members, join links, and
         // site-wide runtime settings. Settings and quotas are JSON.
@@ -537,6 +548,7 @@ impl Db {
             last_login: row.get(4)?,
             kind: row.get(5)?,
             quotas: row.get(6)?,
+            remote_access: row.get(7)?,
         })
     }
 
@@ -577,7 +589,7 @@ impl Db {
     pub fn list_users(&self) -> Vec<User> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, username, role, created_at, last_login, kind, quotas FROM users ORDER BY created_at")
+            .prepare("SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users ORDER BY created_at")
             .unwrap();
         stmt.query_map([], Self::user_from_row)
             .unwrap()
@@ -588,7 +600,7 @@ impl Db {
     pub fn get_user(&self, id: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, kind, quotas FROM users WHERE id = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users WHERE id = ?1",
             params![id],
             Self::user_from_row,
         )
@@ -598,7 +610,7 @@ impl Db {
     pub fn get_user_by_username(&self, username: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, kind, quotas FROM users WHERE username = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users WHERE username = ?1",
             params![username.trim()],
             Self::user_from_row,
         )
@@ -621,7 +633,7 @@ impl Db {
             }
         })?;
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, kind, quotas FROM users WHERE id = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users WHERE id = ?1",
             params![id],
             Self::user_from_row,
         )
@@ -739,7 +751,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT i.user_id, i.created_by, i.created_at, i.expires_at, i.used_at,
-                    u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas
+                    u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access
              FROM invites i JOIN users u ON u.id = i.user_id
              WHERE i.token_hash = ?1 AND i.used_at IS NULL AND i.expires_at > datetime('now')",
             params![token_hash],
@@ -760,6 +772,7 @@ impl Db {
                         last_login: row.get(9)?,
                         kind: row.get(10)?,
                         quotas: row.get(11)?,
+                        remote_access: row.get(12)?,
                     },
                 ))
             },
@@ -828,12 +841,13 @@ impl Db {
 
     // -- Sessions --
 
-    pub fn create_session(&self, token_hash: &str, user_id: &str, ttl_days: i64) {
+    /// `method`: how the session was made ('passkey' | 'recovery' | 'code').
+    pub fn create_session(&self, token_hash: &str, user_id: &str, ttl_days: i64, method: &str) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO sessions (token_hash, user_id, expires_at)
-             VALUES (?1, ?2, datetime('now', ?3 || ' days'))",
-            params![token_hash, user_id, format!("+{ttl_days}")],
+            "INSERT INTO sessions (token_hash, user_id, expires_at, method)
+             VALUES (?1, ?2, datetime('now', ?3 || ' days'), ?4)",
+            params![token_hash, user_id, format!("+{ttl_days}"), method],
         )
         .unwrap();
         conn.execute(
@@ -846,14 +860,17 @@ impl Db {
             .ok();
     }
 
-    pub fn session_user(&self, token_hash: &str) -> Option<User> {
+    /// The session's user and how the session was made (None for sessions
+    /// from before that was recorded).
+    pub fn session_user(&self, token_hash: &str) -> Option<(User, Option<String>)> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas
+            "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access,
+                    s.method
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > datetime('now')",
             params![token_hash],
-            Self::user_from_row,
+            |row| Ok((Self::user_from_row(row)?, row.get(8)?)),
         )
         .ok()
     }
@@ -908,7 +925,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let user = conn
             .query_row(
-                "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas
+                "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access
                  FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?1",
                 params![key_hash],
                 Self::user_from_row,
@@ -2218,6 +2235,13 @@ impl Db {
     pub fn set_user_quotas(&self, id: &str, quotas: Option<&str>) -> bool {
         let conn = self.conn.lock().unwrap();
         conn.execute("UPDATE users SET quotas = ?2 WHERE id = ?1", params![id, quotas])
+            .unwrap_or(0)
+            > 0
+    }
+
+    pub fn set_user_remote_access(&self, id: &str, allowed: bool) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE users SET remote_access = ?2 WHERE id = ?1", params![id, allowed])
             .unwrap_or(0)
             > 0
     }

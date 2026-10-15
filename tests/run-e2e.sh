@@ -29,7 +29,9 @@ fi
 fail=0
 for t in "${tests[@]}"; do
   run="$(mktemp -d)"
-  (cd "$run" && HOST=127.0.0.1 PORT="$PORT" FARMSLICER_ORIGINS="http://localhost:$PORT" exec "$BIN") \
+  # A test can ask for extra server environment with `// e2e-env: K=V ...`.
+  read -r -a extra_env <<<"$(sed -n 's|^// e2e-env: ||p' "$t")"
+  (cd "$run" && exec env HOST=127.0.0.1 PORT="$PORT" FARMSLICER_ORIGINS="http://localhost:$PORT" "${extra_env[@]}" "$BIN") \
     >"$run/server.log" 2>&1 &
   pid=$!
   for _ in $(seq 1 100); do

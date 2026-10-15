@@ -1207,11 +1207,13 @@ async fn download_gcode(
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
-    // Public routes — no auth required
+    // Public routes — no auth required. From the internet only passkey
+    // sign-in and invite links answer (auth::remote_gate).
     let public = Router::new()
         .route("/api/health", get(health))
         .merge(auth_api::public_routes())
         .merge(join_api::public_routes())
+        .route_layer(middleware::from_fn(auth::remote_gate))
         .with_state(state.clone());
 
     // Protected routes — a session cookie or an API key (see src/auth.rs).

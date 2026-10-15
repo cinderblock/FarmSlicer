@@ -9,6 +9,8 @@ export interface User {
   role: "owner" | "admin" | "user";
   /** "guest": no passkey; signs in with one-time sign-in codes. */
   kind: "full" | "guest";
+  /** Approved for access from outside the local network (passkey only). */
+  remote_access: boolean;
   created_at: string;
   last_login: string | null;
 }
@@ -20,6 +22,11 @@ export interface AuthStatus {
   user: User | null;
   /** Groups offered on the sign-in page. */
   join_groups: { id: string; name: string; description: string }[];
+  /** This request came from the internet: only passkey sign-in (approved
+   *  accounts) and their invite links work. */
+  remote: boolean;
+  /** Signed in, but the session can't be used from here: why. */
+  remote_refused: string | null;
 }
 
 interface AuthContextValue {

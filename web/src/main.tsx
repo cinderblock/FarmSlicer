@@ -60,7 +60,8 @@ function Gate() {
 
   if (offline) return <Splash text="Cannot reach the server. Retrying…" />;
   if (!status) return <Splash text="Loading…" />;
-  if (status.setup_required) return <SetupPage />;
+  if (status.setup_required)
+    return status.remote ? <Splash text="FarmSlicer isn't set up yet. Set it up from the local network." /> : <SetupPage />;
   if (!status.authenticated) return <LoginPage />;
 
   return (

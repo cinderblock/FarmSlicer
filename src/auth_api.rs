@@ -4,7 +4,7 @@
 
 use axum::{
     extract::{Path, Request, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Extension, Json, Router,
@@ -30,6 +30,7 @@ fn user_json(user: &User) -> Value {
         "username": user.username,
         "role": user.role,
         "kind": user.kind,
+        "remote_access": user.remote_access,
         "created_at": user.created_at,
         "last_login": user.last_login,
     })
@@ -57,11 +58,12 @@ fn load_passkeys(state: &AppState, user_id: &str) -> Vec<(PasskeyRecord, Passkey
         .collect()
 }
 
-pub(crate) fn start_session(state: &AppState, user: &User, extra: Value, days: i64) -> Response {
+/// `method`: how the user proved who they are (`auth::VIA_*`).
+pub(crate) fn start_session(state: &AppState, user: &User, extra: Value, days: i64, method: &str) -> Response {
     let token = auth::random_token();
     state
         .db
-        .create_session(&auth::sha256_hex(&token), &user.id, days);
+        .create_session(&auth::sha256_hex(&token), &user.id, days, method);
     let mut body = json!({"ok": true, "user": user_json(user)});
     if let (Some(obj), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
         for (k, v) in extra {
@@ -152,13 +154,22 @@ pub(crate) fn key_name(body: &Option<String>) -> String {
 
 async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
     let setup_required = auth::setup_required(&state.db);
-    let user = auth::resolve_user(&state, &req);
-    let tree = crate::groups::Tree::load(&state.db);
-    let join_groups: Vec<Value> = tree
-        .listed()
-        .iter()
-        .map(|g| json!({"id": g.id, "name": g.name, "description": g.description}))
-        .collect();
+    let remote = auth::is_remote(req.headers());
+    let (user, remote_refused) = match auth::authenticate(&state, &req) {
+        Ok(user) => (Some(user), None),
+        Err(auth::Refusal::Remote(msg)) => (None, Some(msg)),
+        Err(auth::Refusal::Unauthenticated) => (None, None),
+    };
+    // The join flow is local-only, so the internet isn't shown the groups.
+    let join_groups: Vec<Value> = if remote {
+        Vec::new()
+    } else {
+        crate::groups::Tree::load(&state.db)
+            .listed()
+            .iter()
+            .map(|g| json!({"id": g.id, "name": g.name, "description": g.description}))
+            .collect()
+    };
     Json(json!({
         "setup_required": setup_required,
         "auth_disabled": auth::auth_disabled(),
@@ -166,6 +177,11 @@ async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<V
         "user": user.as_ref().map(user_json),
         "rp_id": state.rp.rp_id,
         "join_groups": join_groups,
+        // From the internet: only passkey sign-in (approved accounts) and
+        // their invite links work.
+        "remote": remote,
+        // Signed in, but that session can't be used from here (why).
+        "remote_refused": remote_refused,
     }))
 }
 
@@ -223,7 +239,13 @@ async fn setup_finish(
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
     println!("first-run setup: owner account '{}' created with a passkey", user.username);
-    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code}), auth::SESSION_DAYS))
+    Ok(start_session(
+        &state,
+        &user,
+        json!({"recovery_code": recovery_code}),
+        auth::SESSION_DAYS,
+        auth::VIA_PASSKEY,
+    ))
 }
 
 // ---- public: login -------------------------------------------------------------------
@@ -275,6 +297,7 @@ struct LoginFinish {
 
 async fn login_finish(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<LoginFinish>,
 ) -> Result<Response, ApiError> {
     let bad = || err(StatusCode::UNAUTHORIZED, "passkey sign-in failed");
@@ -324,7 +347,15 @@ async fn login_finish(
             }
         }
     }
-    Ok(start_session(&state, &user, json!({}), auth::SESSION_DAYS))
+    if auth::is_remote(&headers) {
+        let from = auth::client_addr(&headers);
+        if let Err(msg) = auth::remote_allowed(&user, Some(auth::VIA_PASSKEY)) {
+            println!("remote sign-in refused: '{}' (not approved) from {from}", user.username);
+            return Err(err(StatusCode::FORBIDDEN, msg));
+        }
+        println!("remote sign-in: '{}' from {from}", user.username);
+    }
+    Ok(start_session(&state, &user, json!({}), auth::SESSION_DAYS, auth::VIA_PASSKEY))
 }
 
 async fn logout(State(state): State<Arc<AppState>>, req: Request) -> impl IntoResponse {
@@ -340,13 +371,26 @@ async fn logout(State(state): State<Arc<AppState>>, req: Request) -> impl IntoRe
 
 // ---- public: invites (enrol a passkey for an account an admin created) ---------------
 
+const INVITE_INVALID: &str = "this invite link is invalid, used or expired";
+
+/// The invite's user, if the link works from where the request came from:
+/// from the internet only for accounts approved for remote access (anyone
+/// else's link reads as invalid there).
+fn usable_invite(state: &AppState, headers: &HeaderMap, token_hash: &str) -> Result<(crate::db::Invite, User), ApiError> {
+    let invalid = || err(StatusCode::NOT_FOUND, INVITE_INVALID);
+    let (invite, user) = state.db.get_invite(token_hash).ok_or_else(invalid)?;
+    if auth::is_remote(headers) && !user.remote_access {
+        return Err(invalid());
+    }
+    Ok((invite, user))
+}
+
 async fn invite_info(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(token): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let Some((invite, user)) = state.db.get_invite(&auth::sha256_hex(&token)) else {
-        return Err(err(StatusCode::NOT_FOUND, "this invite link is invalid, used or expired"));
-    };
+    let (invite, user) = usable_invite(&state, &headers, &auth::sha256_hex(&token))?;
     Ok(Json(json!({
         "username": user.username,
         "role": user.role,
@@ -357,12 +401,11 @@ async fn invite_info(
 
 async fn invite_start(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(token): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let token_hash = auth::sha256_hex(&token);
-    let Some((_, user)) = state.db.get_invite(&token_hash) else {
-        return Err(err(StatusCode::NOT_FOUND, "this invite link is invalid, used or expired"));
-    };
+    let (_, user) = usable_invite(&state, &headers, &token_hash)?;
     begin_registration(
         &state,
         &user.id,
@@ -373,6 +416,7 @@ async fn invite_start(
 
 async fn invite_finish(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(token): Path<String>,
     Json(body): Json<FinishRegistration>,
 ) -> Result<Response, ApiError> {
@@ -380,9 +424,10 @@ async fn invite_finish(
     let RegisterPurpose::Invite { user_id, token_hash } = purpose else {
         return Err(err(StatusCode::BAD_REQUEST, "not an invite registration"));
     };
-    if token_hash != auth::sha256_hex(&token) || state.db.get_invite(&token_hash).is_none() {
-        return Err(err(StatusCode::NOT_FOUND, "this invite link is invalid, used or expired"));
+    if token_hash != auth::sha256_hex(&token) {
+        return Err(err(StatusCode::NOT_FOUND, INVITE_INVALID));
     }
+    usable_invite(&state, &headers, &token_hash)?;
     let (cred_id, passkey_json) = finish_registration(&state, &reg_state, &body.credential)?;
     state
         .db
@@ -393,8 +438,22 @@ async fn invite_finish(
     state.db.set_user_kind(&user_id, "full");
     let user = state.db.get_user(&user_id).ok_or_else(|| err(StatusCode::NOT_FOUND, "user vanished"))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
-    println!("invite accepted: '{}' enrolled a passkey", user.username);
-    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code}), auth::SESSION_DAYS))
+    if auth::is_remote(&headers) {
+        println!(
+            "invite accepted: '{}' enrolled a passkey from {} (remote)",
+            user.username,
+            auth::client_addr(&headers)
+        );
+    } else {
+        println!("invite accepted: '{}' enrolled a passkey", user.username);
+    }
+    Ok(start_session(
+        &state,
+        &user,
+        json!({"recovery_code": recovery_code}),
+        auth::SESSION_DAYS,
+        auth::VIA_PASSKEY,
+    ))
 }
 
 // ---- public: recovery (lost every passkey) -------------------------------------------
@@ -445,7 +504,13 @@ async fn recover_finish(
     let user = state.db.get_user(&user_id).ok_or_else(|| err(StatusCode::NOT_FOUND, "user vanished"))?;
     let recovery_code = issue_recovery_code(&state, &user.id);
     println!("recovery: '{}' re-enrolled a passkey", user.username);
-    Ok(start_session(&state, &user, json!({"recovery_code": recovery_code}), auth::SESSION_DAYS))
+    Ok(start_session(
+        &state,
+        &user,
+        json!({"recovery_code": recovery_code}),
+        auth::SESSION_DAYS,
+        auth::VIA_RECOVERY,
+    ))
 }
 
 // ---- signed-in user: own account ------------------------------------------------------
@@ -667,6 +732,9 @@ struct CreateUser {
     username: String,
     #[serde(default)]
     role: Option<String>,
+    /// Approved for access from the internet (its invite link works there).
+    #[serde(default)]
+    remote_access: bool,
 }
 
 fn issue_invite(state: &AppState, user_id: &str, created_by: &str) -> (String, String) {
@@ -697,6 +765,11 @@ async fn create_user(
         .db
         .create_user(&Uuid::new_v4().to_string(), &body.username, role, "full")
         .map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+    if body.remote_access {
+        state.db.set_user_remote_access(&user.id, true);
+        println!("'{}' approved '{}' for remote access", actor.username, user.username);
+    }
+    let user = state.db.get_user(&user.id).unwrap_or(user);
     let (invite_url, expires_at) = issue_invite(&state, &user.id, &actor.id);
     let tree = crate::groups::Tree::load(&state.db);
     Ok((
@@ -730,6 +803,9 @@ struct UpdateUser {
     /// Present → per-user quota rules (`null` = back to the site default).
     #[serde(default, deserialize_with = "deserialize_some")]
     quotas: Option<Option<Vec<crate::quota::Rule>>>,
+    /// Approve or revoke access from the internet.
+    #[serde(default)]
+    remote_access: Option<bool>,
 }
 
 /// Distinguish an absent field (None) from an explicit null (Some(None)).
@@ -769,6 +845,16 @@ async fn update_user(
         }
         let json = quotas.as_ref().map(|r| serde_json::to_string(r).unwrap());
         state.db.set_user_quotas(&id, json.as_deref());
+    }
+    if let Some(allowed) = body.remote_access {
+        if target.role == "owner" && actor.id != target.id {
+            return Err(err(StatusCode::FORBIDDEN, "only the owner can change the owner's remote access"));
+        }
+        if allowed != target.remote_access {
+            state.db.set_user_remote_access(&id, allowed);
+            let verb = if allowed { "approved" } else { "revoked" };
+            println!("'{}' {verb} remote access for '{}'", actor.username, target.username);
+        }
     }
     let tree = crate::groups::Tree::load(&state.db);
     Ok(Json(admin_user_json(&state, &tree, &state.db.get_user(&id).unwrap_or(target))))

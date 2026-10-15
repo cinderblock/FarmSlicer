@@ -31,8 +31,14 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<"user" | "admin">("user");
+  const [remote, setRemote] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [inviteLink, setInviteLink] = useState<{ username: string; url: string; expires: string } | null>(null);
+  const [inviteLink, setInviteLink] = useState<{
+    username: string;
+    url: string;
+    expires: string;
+    remote: boolean;
+  } | null>(null);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,11 +48,17 @@ export default function UsersPage() {
       const res = await apiJson<{ user: AdminUser; invite_url: string; expires_at: string }>(
         "/api/users",
         "POST",
-        { username, role },
+        { username, role, remote_access: remote },
       );
-      setInviteLink({ username: res.user.username, url: res.invite_url, expires: res.expires_at });
+      setInviteLink({
+        username: res.user.username,
+        url: res.invite_url,
+        expires: res.expires_at,
+        remote: res.user.remote_access,
+      });
       setUsername("");
       setRole("user");
+      setRemote(false);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -62,7 +74,7 @@ export default function UsersPage() {
         `/api/users/${u.id}/invite`,
         "POST",
       );
-      setInviteLink({ username: u.username, url: res.invite_url, expires: res.expires_at });
+      setInviteLink({ username: u.username, url: res.invite_url, expires: res.expires_at, remote: u.remote_access });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -73,6 +85,16 @@ export default function UsersPage() {
     setError("");
     try {
       await apiJson(`/api/users/${u.id}`, "PUT", { role: newRole });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const setRemoteAccess = async (u: AdminUser, allowed: boolean) => {
+    setError("");
+    try {
+      await apiJson(`/api/users/${u.id}`, "PUT", { remote_access: allowed });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -112,12 +134,17 @@ export default function UsersPage() {
         profiles or API keys. People can also join on their own through{" "}
         <Link to="/groups">group join links</Link>.
       </p>
+      <p className="hint">
+        Remote: the account may be used from outside the local network, signing in with a passkey
+        only (no recovery codes, guest codes or API keys from there). Its invite link works from
+        the internet too. Join links, recovery and setup stay local-only.
+      </p>
 
       {inviteLink && (
         <div className="card api-key-reveal">
           <p>
             <strong>Invite link for {inviteLink.username}</strong> (valid until {inviteLink.expires} UTC,
-            single use):
+            single use{inviteLink.remote ? ", works from the internet" : ", local network only"}):
           </p>
           <code className="api-key-value">{inviteLink.url}</code>
           <p>
@@ -140,6 +167,7 @@ export default function UsersPage() {
             <th>Username</th>
             <th>Role</th>
             <th>Passkeys</th>
+            <th>Remote</th>
             <th>Groups</th>
             <th>Limits</th>
             <th>Last login</th>
@@ -175,6 +203,21 @@ export default function UsersPage() {
                       {" "}
                       {u.invite_expires_at ? `· invite pending until ${u.invite_expires_at}` : "· no invite"}
                     </span>
+                  )}
+                </td>
+                <td>
+                  {u.kind === "guest" ? (
+                    <span className="hint">no passkey</span>
+                  ) : (
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={u.remote_access}
+                        disabled={locked}
+                        onChange={(e) => setRemoteAccess(u, e.target.checked)}
+                      />{" "}
+                      {u.remote_access ? "allowed" : "local only"}
+                    </label>
                   )}
                 </td>
                 <td>
@@ -265,6 +308,10 @@ export default function UsersPage() {
             <option value="user">user</option>
             <option value="admin">admin</option>
           </select>
+        </label>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={remote} onChange={(e) => setRemote(e.target.checked)} />
+          Remote access (the invite link and passkey sign-in work from the internet)
         </label>
         <button className="btn-primary" type="submit" disabled={busy}>
           {busy ? "Creating…" : "Create account and invite link"}

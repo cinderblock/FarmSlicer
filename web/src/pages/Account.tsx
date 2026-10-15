@@ -114,6 +114,13 @@ export default function AccountPage() {
       <p>
         Signed in as <strong>{user?.username}</strong> ({isGuest ? "guest" : user?.role}).
       </p>
+      {!isGuest && (
+        <p className="hint">
+          {user?.remote_access
+            ? "Approved for remote access: you can sign in with a passkey from outside the local network."
+            : "Local network only. An admin can approve this account for remote access (passkey sign-in from the internet)."}
+        </p>
+      )}
       {isGuest && (
         <p className="hint">
           This is a <strong>guest account</strong>: no passkey, so it can't create API keys or change printers and
@@ -164,6 +171,7 @@ export default function AccountPage() {
       <p className="hint">
         Each device or password manager you sign in from gets its own passkey. Keep at least
         one, or a saved recovery code, or an admin will have to send you a new invite link.
+        Your only passkey can't be removed until you add another.
       </p>
       <table className="data-table">
         <thead>
@@ -188,7 +196,6 @@ export default function AccountPage() {
                   className="btn-sm btn-danger"
                   onClick={() => removePasskey(k)}
                   disabled={passkeys.length <= 1}
-                  title={passkeys.length <= 1 ? "Add another passkey before removing this one" : undefined}
                 >
                   Remove
                 </button>

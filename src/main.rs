@@ -100,6 +100,7 @@ async fn main() {
     } else {
         println!("Auth enabled: {} account(s)", db.user_count());
     }
+    println!("{}", auth::describe_network());
 
     // Connect to every printer whose protocol FarmSlicer speaks and whose
     // connection settings are complete.

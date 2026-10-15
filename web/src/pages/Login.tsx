@@ -5,7 +5,9 @@ import RecoveryCode from "../components/RecoveryCode";
 import { browserSupportsWebAuthn, signInWithPasskey } from "../passkeys";
 
 export default function LoginPage() {
-  const { refresh, status } = useAuth();
+  const { refresh, status, logout } = useAuth();
+  // From the internet only passkey sign-in works (approved accounts).
+  const remote = status?.remote ?? false;
   const [username, setUsername] = useState("");
   const [showUsername, setShowUsername] = useState(false);
   const [error, setError] = useState("");
@@ -69,6 +71,20 @@ export default function LoginPage() {
         {!browserSupportsWebAuthn() && (
           <p className="login-error">This browser does not support passkeys.</p>
         )}
+        {remote && (
+          <p className="hint">
+            You're outside the local network. Only accounts approved for remote access can sign in
+            from here, with their passkey.
+          </p>
+        )}
+        {status?.remote_refused && (
+          <p className="login-error">
+            Signed in, but {status.remote_refused}.{" "}
+            <button className="link-button" onClick={() => logout()}>
+              Sign out
+            </button>
+          </p>
+        )}
         <button
           className="btn-primary"
           onClick={() => signIn()}
@@ -107,7 +123,7 @@ export default function LoginPage() {
           </p>
         )}
 
-        {showGuest ? (
+        {remote ? null : showGuest ? (
           <form onSubmit={guestSignIn}>
             <label>
               Guest username
@@ -131,7 +147,14 @@ export default function LoginPage() {
 
         {error && <p className="login-error">{error}</p>}
         <p className="hint">
-          Lost every passkey? <Link to="/recover">Recover with your recovery code</Link>.
+          Lost every passkey?{" "}
+          {remote ? (
+            "Recover with your recovery code on the local network, or ask an admin for a new invite link."
+          ) : (
+            <>
+              <Link to="/recover">Recover with your recovery code</Link>.
+            </>
+          )}
         </p>
         {(status?.join_groups ?? []).length > 0 && (
           <div className="login-join">

@@ -398,6 +398,7 @@ async fn join_register_finish(
         &user,
         json!({"recovery_code": recovery_code, "joined": joined}),
         auth::SESSION_DAYS,
+        auth::VIA_PASSKEY,
     ))
 }
 
@@ -439,6 +440,7 @@ async fn join_guest(
         &user,
         json!({"signin_code": code, "joined": joined}),
         groups_api::guest_session_days(&state),
+        auth::VIA_CODE,
     ))
 }
 
@@ -471,6 +473,7 @@ async fn guest_signin(
         &user,
         json!({"signin_code": next}),
         groups_api::guest_session_days(&state),
+        auth::VIA_CODE,
     ))
 }
 

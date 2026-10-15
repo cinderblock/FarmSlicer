@@ -145,12 +145,14 @@ export class SoftAuthenticator {
 
 // ---- tiny HTTP client with a cookie jar -------------------------------------------
 export class Client {
-  constructor() {
+  /** headers: sent with every request (e.g. the reverse proxy's LAN header). */
+  constructor(headers = {}) {
     this.cookie = null;
     this.bearer = null;
+    this.headers = headers;
   }
   async call(method, path, body) {
-    const headers = {};
+    const headers = { ...this.headers };
     const form = body instanceof FormData;
     if (body !== undefined && !form) headers["content-type"] = "application/json";
     if (this.cookie) headers.cookie = this.cookie;
