@@ -10,6 +10,12 @@ can run in the user's browser.
 - **Frontend:** React + TypeScript + Three.js (Vite), served by the backend.
 - **Profiles:** OrcaSlicer's vendor profiles (machine / process / filament) with
   inheritance resolved server-side; per-job overrides and saved custom profiles.
+- **Placing the part:** the Slice page's 3D view shows the selected printer's
+  bed in the slicer's coordinates. Move the part with arrows or by dragging
+  it, rotate it with rings (15° snaps; Shift for free movement), or lay a face
+  on the plate. Position and rotation can also be typed. Both engines slice
+  the part where it sits. A part that leaves the printable volume turns red
+  and can't be sliced. The slicer refuses one too.
 - **Compute:** each slice runs either on the server or in the browser
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
   isolated). Browser slicing uploads only the resulting G-code, unless the
@@ -323,7 +329,7 @@ summary prints the `pin.json` to paste there.
 | `GET /api/discovery` | printers seen on the LAN, each with the protocol and address to add it with |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides (members: only the Slice page's settings; nobody: `post_process`) |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
-| `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser (the response's `keep_model` says whether to upload the model with the result). Optional `group_id`; 429 when a quota is used up |
+| `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser (the response's `keep_model` says whether to upload the model with the result). Optional `group_id`; optional `placement` (`{"rotation": [3x3 row-major], "offset": [dx, dy]}`: the rotation applied to the model as loaded, and its bounding-box centre relative to the bed centre in mm; without it the part is centred as loaded); 429 when a quota is used up |
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
 | `GET /api/jobs/{id}/model` | the job's source model, when kept |
 | `POST /api/jobs/{id}/progress` | browser engine progress tick |
@@ -347,7 +353,8 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 groups.rs + groups_api.rs (groups, visibility, settings),
                 join_api.rs (join links, guests), quota.rs,
                 profiles.rs (OrcaSlicer profile inheritance), progress.rs,
-                config_policy.rs (what overrides may set), safety.rs +
+                config_policy.rs (what overrides may set),
+                placement.rs (where the part sits on the bed), safety.rs +
                 gcode/ (the G-code check and its generated data),
                 slicer.rs (cxx bridge declaration + stub),
                 printer/ (protocols, capabilities, status, the link hub),
@@ -358,7 +365,8 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
 cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
                 engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp
 wasm/           Emscripten superbuild + C bridge for the browser engine
-web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker
+web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker;
+                web/src/components/viewer/ = the Slice page's 3D view (bed, part, gizmos)
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build
 tests/          API end-to-end tests (run-e2e.sh), their shared helpers, and a

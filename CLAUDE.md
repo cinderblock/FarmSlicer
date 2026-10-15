@@ -177,8 +177,22 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (rules, periods, three-layer check). Plan: `plans/groups-quotas-registration.md`
 - `cxx/slice_core.{hpp,cpp}` — **the** slicing pipeline (Model::read_from_file →
   config from JSON via temp file on top of `FullPrintConfig::defaults()` →
-  place on bed → Print::apply/validate/process/export_gcode → stats). Shared by
+  place on bed (the job's `Placement`, then a `BuildVolume` check that
+  refuses parts outside the printable volume) →
+  Print::apply/validate/process/export_gcode → stats). Shared by
   the cxx bridge and the wasm bridge; no Rust or Emscripten includes allowed.
+- `src/placement.rs` — the job's `placement`: a row-major rotation applied to
+  the model as loaded, plus the XY offset of its bounding-box centre from the
+  bed centre. Checked on `POST /api/jobs`, stored as `jobs.placement_json`,
+  and handed to both engines (`SliceOptions.placement_*`,
+  `fs_set_options`). `fs_version` reports `placement: true`, and the worker
+  refuses a placed slice on an engine without it
+- `web/src/components/viewer/` — the Slice page's 3D view, Z-up in slicer
+  coordinates with the origin at the bed centre: `part.ts` (loading, convex
+  hull (capped input, see the file), placement, fit against the bed),
+  `Bed.tsx`, `drag.ts` (pointer rays, snapping, dragging the part),
+  `Gizmo.tsx` (move arrows, rotate rings, lay on face). No camera damping
+  on purpose (CAD-style direct control)
 - `cxx/thumbnail.{hpp,cpp}` — software rasteriser for plate thumbnails (no
   GL anywhere) and the label/logo overlay (stb_truetype from libslic3r's
   Emboss.cpp; logo arrives as RGBA). slice_core passes it to
