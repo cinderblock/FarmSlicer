@@ -119,15 +119,23 @@ passkey only (asked 2026-10-15).
       buildhost (`~/farmslicer-remote-access`)
 - [x] Docs (README "Remote access", CLAUDE.md)
 - [x] Commit
-- [ ] Push (maintainer's call)
-- [ ] ops A: Caddy LAN header (awaiting approval)
-- [ ] ops B: compose env + pin + deploy (awaiting approval)
-- [ ] ops C: Caddy opens the internet path (awaiting approval)
+- [x] Pushed (2026-10-15); image `sha256:763fe0a2…` from `9060c11`
+- [x] ops A: Caddy LAN header (ops `ce981c8`, deployed; LAN still 200)
+- [x] ops B: compose env + pin (ops `54ae3f5`, deployed 2026-10-15 21:17
+      UTC). Verified on sentinel: log line "remote access: requests without
+      `x-farmslicer-lan: 1` count as from the internet"; through Caddy from
+      the LAN `/api/auth/status` says `remote: false`; straight to :9337
+      without the header `remote: true`, no join groups, `/recover` 403.
+- [ ] Maintainer approves their own account (Users page → Remote, on the
+      LAN; it can't be done from outside)
+- [ ] ops C: Caddy opens the internet path (awaiting approval), then verify
+      from outside
 
 ## Open questions for the user
 
-1. Push FarmSlicer master so CI builds the image? (Recommended: yes.)
-2. Approve ops steps A, B, C (one at a time; diffs in the thread).
+1. Approve ops step C (diff in the thread): external `handle` proxies
+   instead of answering 403, plus comment refreshes in the Caddy site and
+   the compose header.
 
 ## Things not to do
 
