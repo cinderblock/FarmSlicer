@@ -107,7 +107,8 @@ docker run -d --name farmslicer -p 9337:9337 \
 | `HOST` | `0.0.0.0` | Listen address (`127.0.0.1` for a local-only test server) |
 | `ORCA_RESOURCES_DIR` | `extern/OrcaSlicer/resources` | OrcaSlicer `resources/` tree (profiles, nozzle/flush tables) |
 | `FARMSLICER_ORIGINS` | `http://localhost:9337,http://localhost:5173` | Comma-separated origins the UI is served from. The first one is canonical: its host is the WebAuthn relying-party ID (never change it once users have enrolled) and it is used in invite links. Must be HTTPS except for `localhost`. |
-| `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner |
+| `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner (local requests only once `FARMSLICER_LAN_HEADER` is set) |
+| `FARMSLICER_LAN_HEADER` | unset | Turns on remote access (see "Remote access"): the header your reverse proxy sets to `1` on local-network requests. Requests without it count as from the internet. Unset: every request counts as local |
 | `RUST_LOG` | — | Log level |
 
 Data (SQLite db, uploaded models, G-code) lives in `/app/data`.
@@ -141,6 +142,47 @@ Account page (shown once), sent as `Authorization: Bearer fsk_…`. A key has th
 permissions of the account that created it; revoke it there.
 `tests/passkey-e2e.mjs` drives all of the above against a running server with
 a software authenticator.
+
+### Remote access
+
+FarmSlicer is meant to sit on the local network. To let chosen people in
+from the internet, put it behind a reverse proxy that knows which clients are
+local, and have the proxy say so in a header that FarmSlicer is told about
+with `FARMSLICER_LAN_HEADER`. A request counts as local only when that header
+is exactly `1`; anything else, including a missing header, counts as from the
+internet. Caddy, for example:
+
+```caddy
+farm.example.com {
+    @local client_ip private_ranges
+    handle @local {
+        request_header X-FarmSlicer-LAN 1
+        reverse_proxy farmslicer:9337
+    }
+    handle {
+        request_header -X-FarmSlicer-LAN
+        reverse_proxy farmslicer:9337
+    }
+}
+```
+
+The proxy must remove the header from internet requests, or a visitor could
+send it themselves.
+
+- **Who**: accounts an admin approved (the **Remote** checkbox on the Users
+  page, or when creating the account). Nobody is approved by default, the
+  owner included; only the owner can change the owner's approval. Guests
+  can't be (they have no passkey).
+- **How**: passkey sign-in only. An approved account's invite link works
+  from the internet, so a new person can get a single link and enrol there.
+  From the internet, a session counts only if it was made by a passkey
+  ceremony (not a recovery code or guest code), and API keys are refused.
+- **What stays local**: first-run setup, recovery codes, the group join flow
+  and guest sign-in codes. Revoking approval takes effect on the next
+  request.
+
+Remote sign-ins are logged with the proxy's `X-Forwarded-For`.
+`tests/remote-access-e2e.mjs` covers the rules.
 
 ### Groups, quotas and joining
 

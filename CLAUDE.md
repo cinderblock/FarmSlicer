@@ -39,8 +39,10 @@ Native builds mirror the Dockerfile's steps:
 - **Tests**: `tests/run-e2e.sh` builds the stub server and runs every
   `tests/*-e2e.mjs` against a fresh instance (HOST=127.0.0.1, port 9339);
   `tests/lib.mjs` has the software passkey authenticator + cookie client.
-  From Windows, run it on buildhost: tar `Cargo.* build.rs .cargo src tests`
-  to a home dir there and run with `CARGO_TARGET_DIR` set. CI runs it too.
+  From Windows, run it on buildhost: tar `Cargo.* build.rs .cargo src tests
+  web/src/data` (src includes a JSON from there) to a home dir there and run
+  with `CARGO_TARGET_DIR` set. CI runs it too. A test can ask for extra
+  server environment with a `// e2e-env: K=V` line.
 - Windows: Visual Studio Build Tools, Strawberry Perl (MSYS perl can't build
   OpenSSL), CMake before Strawberry's `c/bin` in PATH. `build.rs` expects the
   MSVC layout (`Release/` subdirs, `.lib`), and OCCT/GMP/MPFR DLLs must be
@@ -235,6 +237,14 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   software-authenticator end-to-end test (webauthn-rs builds OpenSSL from
   source via the `openssl` crate's `vendored` feature, which on Windows needs
   Strawberry Perl; typecheck on Linux if that bites).
+- Remote access (`plans/remote-access.md`): `FARMSLICER_LAN_HEADER` names
+  the header the reverse proxy sets to `1` on LAN requests; anything else is
+  "remote" (fail closed). `auth::remote_gate` limits the public routes to
+  health, status, passkey login/logout and invites; `auth::authenticate`
+  accepts from the internet only `sessions.method = 'passkey'` sessions of
+  full accounts with `users.remote_access`, never API keys. Every
+  `start_session` call names its method (`auth::VIA_*`). The proxy (ops
+  Caddy) must be updated only after an app that knows the header is live.
 - Groups (`src/groups.rs`): a tree; direct memberships (`member`/`manager`,
   `active`/`pending`); settings JSON inherited down the tree (`listed` and
   `subgroups` are per group). `jobs.group_id` charges and shares a job; job
