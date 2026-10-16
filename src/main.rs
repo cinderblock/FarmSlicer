@@ -7,6 +7,8 @@ mod config_policy;
 mod db;
 mod discovery;
 mod farm_api;
+mod feedback;
+mod feedback_api;
 mod gcode;
 mod groups;
 mod groups_api;

@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
 
+mod feedback;
+pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -532,6 +535,49 @@ impl Db {
             CREATE INDEX IF NOT EXISTS gcode_incidents_user ON gcode_incidents(user_id, created_at);",
         )
         .expect("failed to create gcode_incidents");
+        // Feedback: manual reports and automatic error reports, one table
+        // (src/feedback.rs). Automatic ones are deduplicated by
+        // `fingerprint`; each keeps a row per (user, version) that hit it.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS feedback (
+                id TEXT PRIMARY KEY,
+                automatic INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL, -- printer | slicer | app | bug | idea | other
+                source TEXT NOT NULL, -- manual | window | promise | console | react | api | resource | server
+                message TEXT NOT NULL,
+                stack TEXT, -- automatic: the latest one
+                fingerprint TEXT UNIQUE, -- automatic only
+                user_id TEXT, -- no FK, like jobs.user_id; automatic: who hit it first
+                printer_id TEXT REFERENCES printers(id) ON DELETE SET NULL,
+                job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+                page_url TEXT,
+                user_agent TEXT,
+                version TEXT,
+                context TEXT, -- JSON
+                count INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')), -- automatic: first seen
+                last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+                status TEXT NOT NULL DEFAULT 'new', -- new | acknowledged | resolved | wont_fix
+                admin_note TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS feedback_list ON feedback(automatic, last_seen);
+            CREATE INDEX IF NOT EXISTS feedback_user ON feedback(user_id);
+            CREATE TABLE IF NOT EXISTS feedback_occurrences (
+                feedback_id TEXT NOT NULL REFERENCES feedback(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL DEFAULT '', -- '' = no user (server)
+                version TEXT NOT NULL DEFAULT '',
+                count INTEGER NOT NULL DEFAULT 0,
+                first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+                last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+                page_url TEXT,
+                user_agent TEXT,
+                message TEXT, -- the latest raw message
+                PRIMARY KEY (feedback_id, user_id, version)
+            );
+            CREATE INDEX IF NOT EXISTS feedback_occurrences_user ON feedback_occurrences(user_id);",
+        )
+        .expect("failed to create feedback tables");
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
              CREATE INDEX IF NOT EXISTS jobs_user ON jobs(user_id);"
