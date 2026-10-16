@@ -148,6 +148,26 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   held) that fails its check (`safety::check_job`), fails a print or makes
   the printer raise an error (`printing.rs`: send, `apply`, the sweep);
   deduplicated by key; `GET /api/gcode-incidents`, Users page
+- `src/feedback.rs` — feedback policy: kinds, statuses, size caps,
+  per-account token buckets (a static, not in `AppState`), the fingerprint
+  (source + normalised message + normalised first stack frame; unit-tested),
+  and `slice_failed` (the one-line hook in `run_slice` and `fail_job`).
+  `src/feedback_api.rs` — `/api/feedback*` (manual reports, error batches,
+  list/counts/detail, admin triage). `src/db/feedback.rs` — storage, a
+  submodule of db.rs: one `feedback` table for manual and automatic
+  reports (automatic: one row per fingerprint with a count) plus
+  `feedback_occurrences` (a row per account and app version, 25 kept).
+  Non-admins see their own reports and only their own occurrences of
+  errors. Plan: `plans/feedback.md`
+- `web/src/errorReporting.ts` — automatic error reports (window errors,
+  rejections, `console.error`, error boundaries, `/api` 5xx and network
+  failures), batched and deduplicated, queued in localStorage until signed
+  in (`setSignedIn` from main.tsx); the console wrappers always call the
+  original first (never filter console output). Also the ring buffer of
+  recent console messages that manual feedback attaches.
+  `components/ErrorBoundary.tsx`, `components/FeedbackDialog.tsx` (the
+  sidebar's "Send feedback"), `pages/Feedback.tsx` (admin triage / "My
+  feedback"), `feedback.ts` (types, labels)
 - `src/config_policy.rs` — overrides/custom profiles: members get the
   settings-schema keys only (no G-code keys), nobody gets `post_process`
 - `src/package/zipcheck.rs` — refuses ambiguous zips (duplicate names,
@@ -293,6 +313,11 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   Elegoo Centauri Carbon (SDCP) against the Node fakes only: no hardware,
   no emulator. Tracked per model in `issues/untested-printers.md` (update
   it when a printer is tried). The Centauri Carbon 2 (MQTT) isn't supported.
+- `console.error`/`console.warn` are wrapped (web/src/errorReporting.ts),
+  so DevTools links those messages to the wrapper; expand the message's
+  stack for the real caller. Every report from a no-libslic3r build's
+  server slice is a "server slice failed" error report (the stub fails
+  them all).
 - Profiles' `compatible_printers_condition` isn't evaluated (OrcaSlicer runs
   it through its PlaceholderParser); filaments and processes with only a
   condition are offered to every printer of the vendor.

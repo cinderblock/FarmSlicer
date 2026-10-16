@@ -1,5 +1,10 @@
-import { NavLink, Outlet } from "react-router";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router";
 import { useAuth } from "../auth";
+import { useJson } from "../api";
+import { FEEDBACK_CHANGED, newCount, prefillFor, type Counts, type FeedbackPrefill } from "../feedback";
+import ErrorBoundary from "./ErrorBoundary";
+import FeedbackDialog from "./FeedbackDialog";
 
 const navItems = [
   { to: "/", label: "Printers" },
@@ -14,12 +19,30 @@ const navItems = [
 
 const adminItems = [
   { to: "/users", label: "Users" },
+  { to: "/feedback", label: "Feedback" },
   { to: "/settings", label: "Settings" },
 ];
 
+/** How often admins' sidebar checks for new feedback. */
+const FEEDBACK_POLL_MS = 60_000;
+
 export default function Layout() {
   const { user, isAdmin, status, logout } = useAuth();
+  const location = useLocation();
   const items = isAdmin ? [...navItems, ...adminItems] : navItems;
+  const [feedback, setFeedback] = useState<FeedbackPrefill | null>(null);
+  const [poll, setPoll] = useState(0);
+  useEffect(() => {
+    if (!isAdmin) return;
+    const reload = () => setPoll((p) => p + 1);
+    const id = setInterval(reload, FEEDBACK_POLL_MS);
+    window.addEventListener(FEEDBACK_CHANGED, reload);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener(FEEDBACK_CHANGED, reload);
+    };
+  }, [isAdmin]);
+  const fresh = newCount(useJson<Counts>(isAdmin ? "/api/feedback/counts" : null, poll).data);
 
   return (
     <div className="app">
@@ -38,11 +61,30 @@ export default function Layout() {
                 }
               >
                 {item.label}
+                {item.to === "/feedback" && fresh > 0 && (
+                  <span className="feedback-count" title={`${fresh} new`}>
+                    {fresh}
+                  </span>
+                )}
               </NavLink>
             </li>
           ))}
         </ul>
         <div className="sidebar-user">
+          <div className="sidebar-feedback">
+            <button
+              className="btn-sm"
+              onClick={() => setFeedback(prefillFor(location.pathname, location.search))}
+              title="Report a problem or suggest something"
+            >
+              Send feedback
+            </button>
+            {!isAdmin && (
+              <NavLink to="/feedback" className="link-button">
+                My feedback
+              </NavLink>
+            )}
+          </div>
           {status?.auth_disabled ? (
             <span className="hint" title="FARMSLICER_NO_AUTH is set on the server">
               auth disabled
@@ -61,8 +103,11 @@ export default function Layout() {
         </div>
       </nav>
       <main className="content">
-        <Outlet />
+        <ErrorBoundary resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
+      {feedback && <FeedbackDialog prefill={feedback} onClose={() => setFeedback(null)} />}
     </div>
   );
 }

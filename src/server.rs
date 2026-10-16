@@ -1207,6 +1207,7 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
     } else {
         state.db.fail_job(job_id, &result.error);
         println!("job {job_id}: failed: {}", result.error);
+        crate::feedback::slice_failed(&state.db, job_id, &result.error, "server");
     }
 }
 
@@ -1400,6 +1401,7 @@ async fn fail_job(
         Some(job) if job.status == "slicing" => {
             state.db.fail_job(&id, &body.error);
             println!("job {id}: browser slice failed: {}", body.error);
+            crate::feedback::slice_failed(&state.db, &id, &body.error, "browser");
             StatusCode::OK
         }
         Some(_) => StatusCode::CONFLICT,
@@ -1482,6 +1484,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())
         .merge(crate::printer_thumbs::routes())
+        .merge(crate::feedback_api::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),
