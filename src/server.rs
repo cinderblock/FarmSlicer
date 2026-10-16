@@ -977,10 +977,17 @@ pub(crate) fn finish_job(
     let file_size = std::fs::metadata(gcode_path)
         .map(|m| m.len() as i64)
         .unwrap_or(0);
+    // Settings libslic3r doesn't know (vendor profiles carry a few dozen)
+    // are worth a line in the log, not a warning on every job.
+    let (technical, warnings): (Vec<&String>, Vec<&String>) =
+        warnings.iter().partition(|w| w.starts_with("ignored ") && w.contains("config keys unknown to libslic3r"));
+    for w in technical {
+        println!("job {job_id}: {w}");
+    }
     let warnings_json = if warnings.is_empty() {
         None
     } else {
-        Some(serde_json::to_string(warnings).unwrap())
+        Some(serde_json::to_string(&warnings).unwrap())
     };
     state.db.complete_job(
         job_id,

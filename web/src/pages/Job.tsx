@@ -9,6 +9,7 @@ import GcodeCheckDetails, { GcodeChip } from "../components/GcodeCheck";
 import GcodePreview from "../components/preview/GcodePreview";
 import type { BedShape } from "../components/ModelViewer";
 import { formatCost, packageVerdict, type Plate, type Prices } from "../printers";
+import { parseWarnings, sortWarnings } from "../slicerWarnings";
 
 interface Job {
   id: string;
@@ -42,19 +43,6 @@ const SOURCES: Record<Job["source"], string> = {
   upload: "Uploaded",
 };
 
-/** libslic3r's warning that part of the model would print in the air. */
-const SUPPORT_WARNING = /floating|cantilever|enable support|support generation/i;
-/** Settings libslic3r doesn't know: harmless, for the curious. */
-const TECHNICAL_WARNING = /^ignored \d+ config keys/i;
-
-function parseList(raw: string | null): string[] {
-  try {
-    const v = JSON.parse(raw ?? "null");
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
-  }
-}
 
 function parseObject(raw: string | null): Record<string, unknown> | null {
   try {
@@ -127,10 +115,7 @@ export default function JobPage() {
     );
   }
 
-  const warnings = parseList(job.warnings);
-  const support = warnings.filter((w) => SUPPORT_WARNING.test(w));
-  const technical = warnings.filter((w) => TECHNICAL_WARNING.test(w));
-  const other = warnings.filter((w) => !support.includes(w) && !technical.includes(w));
+  const { support, technical, other } = sortWarnings(parseWarnings(job.warnings));
   const overrides = parseObject(job.overrides_json);
   const profiles = (
     job.inputs

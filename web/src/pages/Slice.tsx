@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import ModelViewer, { type BedShape, type PlateState, type SupportCheck } from "../components/ModelViewer";
 import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
+import SliceResult from "../components/SliceResult";
 import OverridesPanel from "../components/OverridesPanel";
 import {
   BrowserEngine,
@@ -221,7 +222,6 @@ function filamentDisplayName(name: string): string {
 }
 
 export default function SlicePage() {
-  const navigate = useNavigate();
   // What's on the plate (the viewer's): model files, parts, whether they fit.
   const [layout, setLayout] = useState<PlateState | null>(null);
   const modelFiles = useMemo(() => layout?.files ?? [], [layout]);
@@ -246,6 +246,10 @@ export default function SlicePage() {
   const [supports, setSupports] = useState<SupportSettings>({ enabled: true, type: null, buildPlateOnly: null });
   const [materialsChoice, setMaterialsChoice] = useState<{ part: string; value: SupportMaterials } | null>(null);
   const [supportCheck, setSupportCheck] = useState<SupportCheck | null>(null);
+  // After slicing the page stays: the plate (Prepare) or the last slice
+  // (Preview: the layers, warnings, sending it).
+  const [sliced, setSliced] = useState<{ jobId: string; gcode?: Uint8Array } | null>(null);
+  const [view, setView] = useState<"prepare" | "preview">("prepare");
   const statuses = useJson<PrinterStatus[]>("/api/printers/status").data;
   // What the page chose by itself (for the defaults-changed report).
   const proposedPicks = useRef<{ process?: string; filament?: string }>({});
@@ -697,9 +701,10 @@ export default function SlicePage() {
     const res = await fetch("/api/jobs", { method: "POST", body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-    setResult({ ok: true, message: "Slicing started on the server" });
-    setTimeout(() => navigate("/jobs"), 1500);
-  }, [modelFiles, buildJobForm, navigate]);
+    setResult({ ok: true, message: "Slicing on the server" });
+    setSliced({ jobId: data.id });
+    setView("preview");
+  }, [modelFiles, buildJobForm]);
 
   const sliceInBrowser = useCallback(async () => {
     if (modelFiles.length === 0) return;
@@ -769,7 +774,8 @@ export default function SlicePage() {
         ok: true,
         message: `Sliced in this browser in ${secs}s: ${out.report.stats.layers} layers, est. ${formatDuration(out.report.stats.printTimeSec)}, ${out.report.stats.filamentG.toFixed(1)} g`,
       });
-      setTimeout(() => navigate("/jobs"), 2500);
+      setSliced({ jobId: job.id, gcode: out.gcode });
+      setView("preview");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "cancelled") {
@@ -785,7 +791,7 @@ export default function SlicePage() {
     } finally {
       setBrowserJobId(null);
     }
-  }, [modelFiles, buildJobForm, navigate, keepLocal]);
+  }, [modelFiles, buildJobForm, keepLocal]);
 
   const handleSlice = useCallback(async () => {
     if (modelFiles.length === 0) return;
@@ -829,14 +835,37 @@ export default function SlicePage() {
       <h2>Slice</h2>
       <div className="slice-layout">
         <div className="viewer-panel">
-          <ModelViewer
-            bed={bed}
-            onPlateChange={setLayout}
-            initial={initialPlate}
-            supportThreshold={supportThreshold}
-            supportsOn={supports.enabled}
-            onSupportCheck={setSupportCheck}
-          />
+          <div className="view-tabs" role="tablist">
+            <button role="tab" aria-selected={view === "prepare"} className={view === "prepare" ? "active" : ""} onClick={() => setView("prepare")}>
+              Prepare
+            </button>
+            <button
+              role="tab"
+              aria-selected={view === "preview"}
+              className={view === "preview" ? "active" : ""}
+              disabled={!sliced}
+              title={sliced ? "The last slice: its layers, warnings, sending it" : "Slice something first"}
+              onClick={() => setView("preview")}
+            >
+              Preview
+            </button>
+          </div>
+          {/* The plate stays mounted under the preview: its parts survive. */}
+          <div className="view-pane" hidden={view !== "prepare"}>
+            <ModelViewer
+              bed={bed}
+              onPlateChange={setLayout}
+              initial={initialPlate}
+              supportThreshold={supportThreshold}
+              supportsOn={supports.enabled}
+              onSupportCheck={setSupportCheck}
+            />
+          </div>
+          {sliced && view === "preview" && (
+            <div className="view-pane">
+              <SliceResult key={sliced.jobId} jobId={sliced.jobId} gcode={sliced.gcode} bed={bed} onBack={() => setView("prepare")} />
+            </div>
+          )}
         </div>
         <div className="settings-panel">
           <h3>Settings</h3>

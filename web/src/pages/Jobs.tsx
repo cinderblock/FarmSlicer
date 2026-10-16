@@ -5,6 +5,7 @@ import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
 import { GcodeChip } from "../components/GcodeCheck";
 import { formatCost, packageVerdict, type Prices } from "../printers";
+import { parseWarnings, sortWarnings } from "../slicerWarnings";
 
 interface Job {
   id: string;
@@ -53,16 +54,6 @@ const SOURCE_LABELS: Record<Job["source"], [string, string]> = {
   ],
   upload: ["Uploaded", "Sliced elsewhere and uploaded (a .gcode.3mf for Bambu printers, G-code for others)."],
 };
-
-function parseWarnings(raw: string | null): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
 
 function formatTime(sec: number): string {
   const h = Math.floor(sec / 3600);
@@ -257,7 +248,9 @@ export default function JobsPage() {
           </thead>
           <tbody>
             {jobs.map((job) => {
-              const warnings = parseWarnings(job.warnings);
+              // Harmless notes (older jobs) aren't worth a warning count.
+              const { support, other } = sortWarnings(parseWarnings(job.warnings));
+              const warnings = [...support, ...other];
               return (
                 <tr key={job.id} className={selected.has(job.id) ? "selected" : undefined}>
                   <td>
