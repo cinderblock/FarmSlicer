@@ -106,7 +106,8 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
 (feedback) are independent of the rest.
 
 1. [x] Item 3: settings scroll / narrow layout (`928afc0`).
-2. [ ] **Job inputs foundation (items 5, 7)**: `job_models` table (several
+2. [x] **Job inputs foundation (items 5, 7)** (`8fd9b23`; the defaults-changed
+   report itself is still to do, step 5b): `job_models` table (several
    model files per job, `ON DELETE CASCADE`), `jobs.inputs_json` (machine,
    process, filaments, bed type, printer, routing, support choices),
    `jobs.plate_json` (objects: model index + placement, several per model),
@@ -114,22 +115,26 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
    Always upload models unless the user picks "keep on this device"
    (IndexedDB, **local** tag). Remove `keep_models`. Old jobs keep working.
    Admin report: how often each default is changed, and to what.
-3. [ ] **Delete jobs (item 5)**: `DELETE /api/jobs/{id}` (creator, group
+3. [x] **Delete jobs (item 5)** (`8fd9b23` API, `5731fd0` Jobs page): `DELETE /api/jobs/{id}` (creator, group
    manager, admin): cancel if running, refuse while a print needs the
    package, delete slices rows + files. Bulk delete on the Jobs page.
-4. [ ] **Re-slice (item 5)**: `/slice?from=<job>` loads the job's models,
+4. [x] **Re-slice (item 5)** (`3b323a1`): `/slice?from=<job>` loads the job's models,
    plate and inputs into the Slice page; slicing makes a new job.
-5. [ ] **Supports section (items 1, 6, 8)**: a dedicated Supports block on
-   the Slice page (not buried in Quick Settings): on by default, type,
-   base/interface filament; the viewer highlights overhangs (threshold from
-   the config) and floating islands; slicer support warnings shown
-   prominently after slicing.
+5. [ ] **Supports section (items 1, 6, 8)** ← current: a dedicated Supports
+   block on the Slice page (not buried in Quick Settings): on by default,
+   type, base/interface filament; the viewer highlights overhangs (threshold
+   from the config) and floating islands; slicer support warnings shown
+   prominently after slicing (and the "ignored N config keys" noise kept out
+   of the user's way).
+5b. [ ] **Defaults-changed report**: the Slice page sends `proposed` (its
+   defaults: profiles, support choices, overrides); an admin report shows per
+   setting how often users change it and to what.
 6. [ ] **Multi-filament configs (item 6)**: `resolve_config` takes a filament
    list and builds per-filament vectors like `PresetBundle::full_config`
    (including H2D extruder variants, `filament_self_index`, `filament_map`);
    `support_filament` / `support_interface_filament`; AMS mapping matches
    support filaments ("PLA-S") and, on H2D, the nozzle each AMS feeds.
-7. [ ] **Several parts per plate (item 7)**: viewer with N parts (select,
+7. [x] **Several parts per plate (item 7)** (`328a0cf`): viewer with N parts (select,
    add file, duplicate, fill plate, delete, arrange, overlap check);
    slice_core takes model inputs with per-instance placements; cxx and wasm
    bridges; server multipart with several models.
@@ -155,11 +160,54 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
 - Before the fix, `.overrides-panel` measured 2 px tall when expanded
   (content 773 px); after, 775 px, and the settings column scrolls (1794 px in
   832 px).
+- e2e servers run from a temp dir without vendor profiles: tests can't name
+  real machine/process/filament profiles (resolution fails with "profile ...
+  not found"). Send machine + process without a filament to record inputs
+  without resolving.
+- The Bash tool's wrapper mangles heredocs with an odd number of
+  apostrophes ("unexpected EOF while looking for matching `''"). Edit scripts
+  go in files (Write tool) and run with python3.
+- Real-slicer test image: `farmslicer:ux` on buildhost, built by
+  `~/fs-ux-image.sh` from the cached `farmslicer:libslic3r` stage
+  (Dockerfile.ux = the repo Dockerfile with that stage swapped in; context
+  `~/farmslicer-ux-docker`, resources copied from `~/orca-242`). A Rust-only
+  rebuild takes a few minutes. Run as `fs-ux-test` on 127.0.0.1:9350 with
+  `FARMSLICER_NO_AUTH=1`; tunnel local 9337 to it and run `vite` locally
+  (port 5181 this session: another project took 5174).
+- WebAssembly engine: `~/farmslicer-wasm` has incremental st/mt build dirs;
+  sync `cxx/` and `wasm/` there and run `~/farmslicer-wasm-build.sh st`
+  (minutes). `node wasm/test/smoke.mjs --engine out --variant st --plate
+  --config /tmp/x1c.json` (config from `wasm/test/resolve-profile.mjs`); an
+  empty config fails validation ("Relative extruder addressing requires
+  ... G92 E0").
+- Multi-part slice check (X1C, bed centre 128,128): parts printed at
+  (68, 86), (188, 86) and (128, 176) for offsets (-60,-40), (60,-40) and
+  (0,50): 2 mm Y = the X1C's `extruder_offset`, as before. Heights 40, 20
+  (stood up) and 15 mm. Three labelled objects in the G-code.
+- libslic3r groups an object's instances into PrintObjects by their matrix
+  minus XY translation (PrintApply `print_objects_from_model_object`), so
+  copies turned differently are still correct; identical copies slice once.
+- The default filament pick (first name containing "Basic") lands on
+  "BETA PLA Basic", another vendor's, on Bambu printers. To fix with the
+  support-material defaults (same "which filament" logic).
+- Headless browser checks: Playwright in `~/fs-pw` (scripts `jobs.mjs`,
+  `viewer.mjs`, `reslice.mjs`). The T3 preview tools went away mid-session
+  ("No preview automation host").
 
 ## Progress log
 
 - [x] Explored jobs/storage, profiles/filaments/AMS, slicer core/viewer.
 - [x] Item 3 fixed and checked in the browser (wide and 900x700).
+- [x] Job history: models kept, inputs/plate recorded, delete (API + Jobs
+  page, bulk), local tag; e2e `tests/job-history-e2e.mjs`.
+- [x] Multi-part plates end to end: viewer, server, native slicer (real X1C
+  slice), wasm engine (st smoke test with a plate), CI smoke step.
+- [x] Re-slice from the Jobs page, checked headless against the real slicer.
+- [x] Feedback merged from its branch (`7e4768c`); full e2e green after the
+  merge (12 suites, 124 unit tests).
+- [ ] Layer viewer: branch in progress (background agent).
+- [ ] Supports section, multi-filament, defaults-changed report.
+- [ ] Docs (README/CLAUDE.md) for job history, plates, re-slice.
 
 ## Open questions for the user
 
