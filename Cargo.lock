@@ -660,6 +660,7 @@ dependencies = [
  "chrono",
  "cxx",
  "cxx-build",
+ "flate2",
  "futures-util",
  "hex",
  "image",

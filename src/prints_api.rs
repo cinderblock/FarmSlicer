@@ -37,7 +37,8 @@ fn api_err(code: StatusCode, msg: impl Into<String>) -> ApiError {
     (code, Json(json!({"error": msg.into()})))
 }
 
-fn visible_job(state: &AppState, user: &User, id: &str) -> Result<(Job, Tree, Viewer), ApiError> {
+/// A job the caller may see, or 404.
+pub(crate) fn visible_job(state: &AppState, user: &User, id: &str) -> Result<(Job, Tree, Viewer), ApiError> {
     let (tree, viewer) = groups_api::context(state, user);
     match state.db.get_job(id) {
         Some(job) if viewer.can_see_job(&tree, &job) => Ok((job, tree, viewer)),
