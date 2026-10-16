@@ -28,7 +28,12 @@ interface Job {
   /** The printable package's contents (JSON); set = can be sent to a printer. */
   package_json: string | null;
   estimated_cost: number | null;
+  /** Source models, and how many of them stayed in the slicing browser. */
+  model_count: number;
+  local_models: number;
 }
+
+const finished = (job: Job) => job.status !== "queued" && job.status !== "slicing";
 
 function hasThumbnail(job: Job): boolean {
   try {
@@ -42,7 +47,7 @@ const SOURCE_LABELS: Record<Job["source"], [string, string]> = {
   server: ["Server", "Sliced by libslic3r on the server."],
   browser: [
     "Browser",
-    "Sliced by the WebAssembly engine in the user's browser; the model stays there unless the job's group keeps models.",
+    "Sliced by the WebAssembly engine in the user's browser.",
   ],
   upload: ["Uploaded", "Sliced elsewhere and uploaded (a .gcode.3mf for Bambu printers, G-code for others)."],
 };
@@ -65,13 +70,15 @@ function formatTime(sec: number): string {
 }
 
 export default function JobsPage() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [rev, setRev] = useState(0);
   const [error, setError] = useState("");
   const [sending, setSending] = useState<Job | null>(null);
   const [uploadGroup, setUploadGroup] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
   const jobs = useJson<Job[]>("/api/jobs", rev).data ?? [];
   const chargeable = useJson<{ chargeable: { id: string; path: string }[] }>("/api/me").data?.chargeable ?? [];
@@ -107,6 +114,44 @@ export default function JobsPage() {
     await fetch(`/api/jobs/${id}/cancel`, { method: "POST" });
     setRev((r) => r + 1);
   };
+
+  /** Delete jobs (after asking); reports the ones the server refused. */
+  const deleteJobs = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const what = ids.length === 1 ? (jobs.find((j) => j.id === ids[0])?.model_name ?? "this job") : `${ids.length} jobs`;
+    if (!window.confirm(`Delete ${what}? The G-code and the stored models go too; prints keep their history.`)) return;
+    setError("");
+    setDeleting(true);
+    try {
+      const res = await apiJson<{ deleted: string[]; refused: { id: string; error: string }[] }>(
+        "/api/jobs/delete",
+        "POST",
+        { ids },
+      );
+      setSelected((sel) => new Set([...sel].filter((id) => !res.deleted.includes(id))));
+      if (res.refused.length > 0) {
+        const name = (id: string) => jobs.find((j) => j.id === id)?.model_name ?? id;
+        setError(`Not deleted: ${res.refused.map((r) => `${name(r.id)} (${r.error})`).join("; ")}`);
+      }
+      setRev((r) => r + 1);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const toggle = (id: string, on: boolean) =>
+    setSelected((sel) => {
+      const next = new Set(sel);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  // What the user may usually delete (managers of a group may delete more;
+  // the server decides).
+  const deletable = jobs.filter((j) => finished(j) && (isAdmin || j.user_id === user?.id));
+  const selectedJobs = jobs.filter((j) => selected.has(j.id));
 
   const moveJob = async (id: string, groupId: string) => {
     setError("");
@@ -153,6 +198,30 @@ export default function JobsPage() {
           onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
         />
       </div>
+      {deletable.length > 0 && (
+        <div className="page-actions job-selection">
+          <span className="hint">Select:</span>
+          <button className="btn-sm" onClick={() => setSelected(new Set(deletable.map((j) => j.id)))}>
+            All
+          </button>
+          <button
+            className="btn-sm"
+            onClick={() => setSelected(new Set(deletable.filter((j) => j.status === "failed" || j.status === "cancelled").map((j) => j.id)))}
+          >
+            Failed and cancelled
+          </button>
+          <button className="btn-sm" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
+            None
+          </button>
+          <button
+            className="btn-sm btn-danger"
+            disabled={selectedJobs.length === 0 || deleting}
+            onClick={() => deleteJobs(selectedJobs.map((j) => j.id))}
+          >
+            {deleting ? "Deleting…" : `Delete selected (${selectedJobs.length})`}
+          </button>
+        </div>
+      )}
       {error && <p className="login-error">{error}</p>}
       {sending && (
         <SendDialog
@@ -171,6 +240,7 @@ export default function JobsPage() {
         <table className="data-table">
           <thead>
             <tr>
+              <th aria-label="Select" />
               <th>Model</th>
               <th>By</th>
               <th>Group</th>
@@ -187,7 +257,17 @@ export default function JobsPage() {
             {jobs.map((job) => {
               const warnings = parseWarnings(job.warnings);
               return (
-                <tr key={job.id}>
+                <tr key={job.id} className={selected.has(job.id) ? "selected" : undefined}>
+                  <td>
+                    {finished(job) && (
+                      <input
+                        type="checkbox"
+                        checked={selected.has(job.id)}
+                        onChange={(e) => toggle(job.id, e.target.checked)}
+                        aria-label={`Select ${job.model_name}`}
+                      />
+                    )}
+                  </td>
                   <td>
                     <div className="job-name">
                       {hasThumbnail(job) && (
@@ -238,6 +318,14 @@ export default function JobsPage() {
                     <span className={`source-badge source-${job.source}`}>
                       {SOURCE_LABELS[job.source]?.[0] ?? job.source}
                     </span>
+                    {job.local_models > 0 && (
+                      <span
+                        className="source-badge source-local"
+                        title="The model stayed in the browser that sliced it: only that browser can slice this job again."
+                      >
+                        local
+                      </span>
+                    )}
                     {job.package_json && (
                       <div>
                         <GcodeChip {...packageVerdict(job.package_json)} />
@@ -261,6 +349,11 @@ export default function JobsPage() {
                         onClick={() => handleCancel(job.id)}
                       >
                         Cancel
+                      </button>
+                    )}
+                    {finished(job) && (isAdmin || job.user_id === user?.id) && (
+                      <button className="btn-sm btn-danger" disabled={deleting} onClick={() => deleteJobs([job.id])}>
+                        Delete
                       </button>
                     )}
                     {job.error && (

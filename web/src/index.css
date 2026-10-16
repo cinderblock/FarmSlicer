@@ -1677,6 +1677,25 @@ body {
   border-color: var(--accent, #4a9eff);
 }
 
+/* The job's model stayed in the browser that sliced it. */
+.source-local {
+  margin-left: 0.3rem;
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+/* Jobs page: select jobs, delete the selection. */
+.job-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.data-table tr.selected td {
+  background: var(--bg-card-hover);
+}
+
 /* Accounts */
 .sidebar-user {
   margin-top: auto;
