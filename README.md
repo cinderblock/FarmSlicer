@@ -63,6 +63,17 @@ can run in the user's browser.
   logo.
 - **People:** passkey accounts, nested groups with shared libraries and
   seasons, quotas, self-service joining through links, guest accounts.
+- **Feedback:** a "Send feedback" button on every page (about a printer,
+  slicing, the app, a bug, an idea; optionally a printer or job, and
+  diagnostics: recent console messages, page, app version, window size).
+  Errors are reported automatically: uncaught errors, unhandled
+  rejections, `console.error` (the console itself is never filtered), page
+  crashes (with the component stack), failed API requests (5xx and network
+  failures) and failed slices on either engine. Repeats of the same error
+  are one entry with a count, the accounts and app versions that hit it.
+  Errors from before sign-in wait in the browser. Admins triage everything
+  on the Feedback page (status, a note the reporter sees); everyone else
+  sees their own reports there.
 
 License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
 
@@ -343,6 +354,10 @@ summary prints the `pin.json` to paste there.
 | `POST /api/join/resolve`, `/api/join/finish`, `/api/join/register/{start,finish}`, `/api/join/guest` | the join flow |
 | `POST /api/auth/guest/signin` | guest sign-in with a one-time code |
 | `GET /api/gcode-incidents?user=&limit=` | custom G-code that failed its check or a print, newest first, with whose it was and who sent it (admins); `GET /api/users` carries each user's `gcode_incidents` count |
+| `POST /api/feedback` | a report: `{kind: printer\|slicer\|app\|bug\|idea\|other, message, printer_id?, job_id?, page_url?, version?, context?}` (message ≤ 5000 characters; 10 per account, then one a minute) |
+| `POST /api/feedback/errors` | automatic error reports from the browser: `{reports: [{source: window\|promise\|console\|react\|api\|resource, message, stack?, url?, version?, count?, kind?, context?}]}`, at most 20 per request; fields are truncated, and each account may send 60, then one every 10 s (429 with `retry_after_secs`). Deduplicated by fingerprint (source + message + first stack frame, ids, numbers, line numbers and asset hashes left out) |
+| `GET /api/feedback?automatic=1\|0&kind=&status=&mine=1&limit=`, `GET /api/feedback/counts`, `GET /api/feedback/{id}` | admins: every report and error (with who hit it, in which version); others: their own reports and their own occurrences of errors they hit. `status=open` = new or acknowledged |
+| `PUT /api/feedback/{id}` (`{status: new\|acknowledged\|resolved\|wont_fix, admin_note}`), `DELETE /api/feedback/{id}` | triage (admins). A resolved error that happens again is new again |
 | `GET /api/me/usage`, `GET/PUT /api/settings` | own quota usage; site-wide settings (admins), including `uploads` (allow / review / deny) and `gcode_limits` |
 
 ## Repository layout
@@ -361,12 +376,14 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 bambu/, moonraker/, octoprint/, prusalink/, sdcp/ (drivers),
                 printing.rs + prints_api.rs (sending, tracking),
                 package/ (.gcode.3mf and G-code readers), camera/,
-                discovery/ (SSDP, mDNS, SDCP)
+                discovery/ (SSDP, mDNS, SDCP), feedback.rs +
+                feedback_api.rs + db/feedback.rs (reports, error reports)
 cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
                 engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp
 wasm/           Emscripten superbuild + C bridge for the browser engine
 web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker;
-                web/src/components/viewer/ = the Slice page's 3D view (bed, part, gizmos)
+                web/src/components/viewer/ = the Slice page's 3D view (bed, part, gizmos);
+                web/src/errorReporting.ts = automatic error reports, console ring buffer
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build
 tests/          API end-to-end tests (run-e2e.sh), their shared helpers, and a

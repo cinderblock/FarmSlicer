@@ -138,7 +138,8 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
    widths/heights from `;WIDTH:`/`;HEIGHT:`); three.js preview with a layer
    slider, feature colours/legend, travel toggle. Shown in a job page
    (`/jobs/:id`) and on the Slice page after slicing.
-9. [ ] **Feedback (item 4)**: `feedback` table + API; a Feedback button on
+9. [x] **Feedback (item 4)** (built on its own branch; see
+   `plans/feedback.md`): `feedback` table + API; a Feedback button on
    every page (category, message, optional context); automatic reports of
    `window.onerror`, unhandled rejections, `console.error` (wrapped, never
    suppressed), React render errors and failed API calls, deduplicated by
