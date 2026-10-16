@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
@@ -275,7 +275,9 @@ export default function JobsPage() {
                       {hasThumbnail(job) && (
                         <img className="job-thumb" src={`/api/jobs/${job.id}/thumbnail`} alt="" loading="lazy" />
                       )}
-                      {job.model_name}
+                      <Link to={`/jobs/${job.id}`} title="Preview, details and warnings">
+                        {job.model_name}
+                      </Link>
                     </div>
                   </td>
                   <td>{job.username ?? "—"}</td>
