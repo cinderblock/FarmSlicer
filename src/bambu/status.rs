@@ -122,9 +122,10 @@ pub fn summarize(
         target: num(&r["bed_target_temper"]).unwrap_or(0.0),
     });
 
+    let dual = nozzles.len() > 1;
     let ams = r["ams"]["ams"]
         .as_array()
-        .map(|units| units.iter().filter_map(ams_unit).collect())
+        .map(|units| units.iter().filter_map(|u| ams_unit(u, dual)).collect())
         .unwrap_or_default();
 
     let mut external = Vec::new();
@@ -188,7 +189,20 @@ fn strip_print_ext(file: &str) -> String {
     base.to_string()
 }
 
-fn ams_unit(u: &Value) -> Option<AmsUnit> {
+/// The nozzle an AMS unit feeds, from its `info` flags (hex; bits 8-11 are
+/// the extruder, as Bambu's own device code reads them: 0 the main extruder,
+/// the H2D's right nozzle; 1 the deputy, its left; 0xE not set up yet), in
+/// the slicer's numbering: 1 left, 2 right.
+fn ams_nozzle(info: &str) -> Option<i64> {
+    let flags = u64::from_str_radix(info.trim(), 16).ok()?;
+    match (flags >> 8) & 0xF {
+        0 => Some(2),
+        1 => Some(1),
+        _ => None,
+    }
+}
+
+fn ams_unit(u: &Value, dual: bool) -> Option<AmsUnit> {
     let id = int(&u["id"])?;
     let trays = u["tray"]
         .as_array()
@@ -197,12 +211,7 @@ fn ams_unit(u: &Value) -> Option<AmsUnit> {
     Some(AmsUnit {
         id,
         humidity: int(&u["humidity"]),
-        nozzle: u["info"]
-            .as_str()
-            .and_then(|i| i.chars().next())
-            .and_then(|c| c.to_digit(10))
-            .map(i64::from)
-            .filter(|&n| n > 0),
+        nozzle: if dual { u["info"].as_str().and_then(ams_nozzle) } else { None },
         trays,
     })
 }
@@ -282,6 +291,26 @@ mod tests {
     }
 
     #[test]
+    fn ams_units_feed_a_nozzle_on_dual_nozzle_printers() {
+        // Bits 8-11 of the hex `info`: 0 the main extruder (right), 1 the
+        // deputy (left), 0xE not set up.
+        assert_eq!(ams_nozzle("0003"), Some(2));
+        assert_eq!(ams_nozzle("1003"), Some(2));
+        assert_eq!(ams_nozzle("0103"), Some(1));
+        assert_eq!(ams_nozzle("0E03"), None);
+        assert_eq!(ams_nozzle("junk"), None);
+        let report = json!({
+            "device": {"extruder": {"info": [{"temp": 0}, {"temp": 0}]}},
+            "ams": {"ams": [{"id": "0", "info": "0103", "tray": []}, {"id": "1", "info": "0003", "tray": []}]}
+        });
+        let s = summarize(true, None, None, &report);
+        assert_eq!(s.ams.iter().map(|u| u.nozzle).collect::<Vec<_>>(), vec![Some(1), Some(2)]);
+        // One nozzle: the field means nothing.
+        let single = json!({"nozzle_temper": 20, "ams": {"ams": [{"id": "0", "info": "0103", "tray": []}]}});
+        assert_eq!(summarize(true, None, None, &single).ams[0].nozzle, None);
+    }
+
+    #[test]
     fn hms_list_is_replaced() {
         let mut report = json!({"hms": [{"attr": 1, "code": 2}]});
         merge(&mut report, &json!({"hms": []}));
@@ -305,7 +334,8 @@ mod tests {
         assert_eq!(s.print_error, None);
         assert_eq!(s.nozzles, vec![Temperature { current: 218.0, target: 220.0 }]);
         assert_eq!(s.active_slot, None);
-        assert_eq!(s.ams[0].nozzle, Some(2));
+        // One extruder: which nozzle an AMS feeds means nothing.
+        assert_eq!(s.ams[0].nozzle, None);
         assert_eq!(s.ams[0].trays[0].slot, 2);
         assert_eq!(s.ams[0].trays[0].color.as_deref(), Some("#0A0B0C"));
         assert_eq!(s.ams[0].trays[0].remain, None);

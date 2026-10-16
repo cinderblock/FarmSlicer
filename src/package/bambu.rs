@@ -157,6 +157,9 @@ struct PlateMeta {
     prediction: Option<f64>,
     weight: Option<f64>,
     filaments: Vec<FilamentUse>,
+    /// Per project filament (id - 1): the nozzle it prints from (1 left,
+    /// 2 right on the H2D; all 1 on single-nozzle printers).
+    filament_maps: Vec<i64>,
 }
 
 fn attrs(e: &BytesStart<'_>) -> BTreeMap<String, String> {
@@ -188,7 +191,13 @@ fn parse_slice_info(xml: &str) -> BTreeMap<u32, PlateMeta> {
                 current = Some((None, PlateMeta::default()));
             }
             Ok(Event::End(e)) if e.name().as_ref() == "plate" => {
-                if let Some((Some(index), meta)) = current.take() {
+                if let Some((Some(index), mut meta)) = current.take() {
+                    // Only dual-nozzle printers say anything with it.
+                    if meta.filament_maps.iter().any(|&n| n != 1) {
+                        for f in &mut meta.filaments {
+                            f.nozzle = meta.filament_maps.get(f.id as usize - 1).copied();
+                        }
+                    }
                     plates.insert(index, meta);
                 }
             }
@@ -204,6 +213,9 @@ fn parse_slice_info(xml: &str) -> BTreeMap<u32, PlateMeta> {
                             Some("nozzle_diameters") => meta.nozzle_diameters = Some(value).filter(|v| !v.is_empty()),
                             Some("prediction") => meta.prediction = value.trim().parse().ok(),
                             Some("weight") => meta.weight = value.trim().parse().ok(),
+                            Some("filament_maps") => {
+                                meta.filament_maps = value.split_whitespace().filter_map(|n| n.parse().ok()).collect()
+                            }
                             _ => {}
                         }
                     }
@@ -216,6 +228,7 @@ fn parse_slice_info(xml: &str) -> BTreeMap<u32, PlateMeta> {
                                 filament_id: a.get("tray_info_idx").cloned().unwrap_or_default(),
                                 used_g: a.get("used_g").and_then(|v| v.parse().ok()).unwrap_or(0.0),
                                 used_m: a.get("used_m").and_then(|v| v.parse().ok()).unwrap_or(0.0),
+                                nozzle: None,
                             });
                         }
                     }
@@ -232,6 +245,24 @@ fn parse_slice_info(xml: &str) -> BTreeMap<u32, PlateMeta> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filament_maps_give_each_filament_its_nozzle() {
+        let xml = r##"<config><plate>
+            <metadata key="index" value="1"/>
+            <metadata key="filament_maps" value="2 1 1"/>
+            <filament id="1" type="PLA" color="#FF0000" used_g="5"/>
+            <filament id="2" type="PLA-S" color="#FFFFFF" used_g="1"/>
+        </plate><plate>
+            <metadata key="index" value="2"/>
+            <metadata key="filament_maps" value="1 1"/>
+            <filament id="1" type="PLA" color="#FF0000" used_g="5"/>
+        </plate></config>"##;
+        let plates = parse_slice_info(xml);
+        assert_eq!(plates[&1].filaments.iter().map(|f| f.nozzle).collect::<Vec<_>>(), vec![Some(2), Some(1)]);
+        // All on nozzle 1: a single-nozzle printer; nothing to say.
+        assert_eq!(plates[&2].filaments[0].nozzle, None);
+    }
     use std::io::Write;
 
     const SLICE_INFO: &str = r##"<?xml version="1.0" encoding="UTF-8"?>

@@ -232,6 +232,8 @@ export interface FilamentUse {
   filament_id: string;
   used_g: number;
   used_m: number;
+  /** Dual-nozzle printers: the nozzle the slicer gave it, 1 left, 2 right. */
+  nozzle?: number | null;
 }
 
 /** One thing the G-code check found (src/gcode/check.rs). */
@@ -409,6 +411,14 @@ export function loadedTrays(status: PrinterStatus | null | undefined): Tray[] {
   if (!status) return [];
   return [...status.ams.flatMap((u) => u.trays), ...status.external].filter((t) => t.material);
 }
+
+/** The nozzle a tray feeds on a dual-nozzle printer (its AMS unit's): 1 left, 2 right. */
+export function trayNozzle(status: PrinterStatus | null | undefined, t: Tray): number | null {
+  if (t.unit == null || !status) return null;
+  return status.ams.find((u) => u.id === t.unit)?.nozzle ?? null;
+}
+
+export const nozzleName = (n: number) => (n === 1 ? "left" : "right");
 
 export function slotLabel(t: Tray): string {
   if (t.slot === 254 || t.slot === 255) return "External";

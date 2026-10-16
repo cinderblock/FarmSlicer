@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bambu::models;
 use crate::db::{Job, Printer, PrintRecord};
-use crate::package::{Package, PackageFormat, Plate};
+use crate::package::{FilamentUse, Package, PackageFormat, Plate};
 use crate::printer::status::{PrinterStatus, Tray, state};
 use crate::printer::{Protocol, protocol_of};
 use crate::profiles::ProfileStore;
@@ -197,6 +197,24 @@ fn loaded_trays(status: &PrinterStatus) -> Vec<&Tray> {
     status.loaded_trays()
 }
 
+/// The nozzle a tray feeds, where the printer has two (its AMS unit's).
+fn tray_nozzle(status: &PrinterStatus, tray: &Tray) -> Option<i64> {
+    let unit = tray.unit?;
+    status.ams.iter().find(|u| u.id == unit).and_then(|u| u.nozzle)
+}
+
+/// Can `tray` feed filament `f`'s nozzle? Unknown either way counts as yes.
+fn same_nozzle(status: &PrinterStatus, f: &FilamentUse, tray: &Tray) -> bool {
+    match (f.nozzle, tray_nozzle(status, tray)) {
+        (Some(want), Some(have)) => want == have,
+        _ => true,
+    }
+}
+
+fn nozzle_name(n: i64) -> &'static str {
+    if n == 1 { "left" } else { "right" }
+}
+
 /// Does sending to `printer` map the plate's filaments to its trays (Bambu's
 /// AMS)? Elsewhere the G-code names its tools and people load the spools.
 pub fn maps_filaments(printer: &Printer) -> bool {
@@ -232,9 +250,11 @@ pub fn suggest_mapping(plate: &Plate, status: Option<&PrinterStatus>) -> Vec<i64
     let trays = loaded_trays(status);
     let mut used: Vec<i64> = Vec::new();
     for f in &plate.filaments {
-        let candidates = trays
-            .iter()
-            .filter(|t| t.material.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(&f.material)));
+        // Same material, and on dual-nozzle printers an AMS that feeds the
+        // nozzle the slicer gave the filament.
+        let candidates = trays.iter().filter(|t| {
+            t.material.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(&f.material)) && same_nozzle(status, f, t)
+        });
         let best = candidates
             .map(|t| {
                 let reuse_penalty = if used.contains(&t.slot) { 1e6 } else { 0.0 };
@@ -287,6 +307,12 @@ pub fn check_mapping(plate: &Plate, mapping: &[i64], status: Option<&PrinterStat
                     t.material.as_deref().unwrap_or("?")
                 ))
             }
+            Some(t) if status.is_some_and(|s| !same_nozzle(s, f, t)) => problems.push(format!(
+                "filament {} prints from the {} nozzle but slot {slot} feeds the {} one",
+                f.id,
+                nozzle_name(f.nozzle.unwrap_or(1)),
+                nozzle_name(status.and_then(|s| tray_nozzle(s, t)).unwrap_or(2))
+            )),
             Some(_) => {}
         }
     }
@@ -618,6 +644,7 @@ mod tests {
                     filament_id: String::new(),
                     used_g: 1.0,
                     used_m: 1.0,
+                    nozzle: None,
                 })
                 .collect(),
             has_thumbnail: false,
@@ -641,6 +668,28 @@ mod tests {
         let problems = check_mapping(&p, &m, Some(&s));
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(problems[0].contains("ABS"));
+    }
+
+    #[test]
+    fn dual_nozzle_mapping_keeps_each_filament_on_its_nozzle() {
+        // An H2D: AMS 0 feeds the left nozzle, AMS 1 the right one.
+        let mut s = status_with(vec![tray(0, "PLA", "#FF0000"), tray(1, "PLA-S", "#FFFFFF")]);
+        s.ams[0].nozzle = Some(1);
+        s.ams.push(AmsUnit { id: 1, humidity: None, nozzle: Some(2), trays: vec![tray(4, "PLA", "#FF0000"), tray(5, "PLA-S", "#FFFFFF")] });
+        // The slicer put the part's PLA on the right nozzle, the support
+        // interface on the left.
+        let mut p = plate(vec![(1, "PLA", "#FF0000"), (2, "PLA-S", "#FFFFFF")]);
+        p.filaments[0].nozzle = Some(2);
+        p.filaments[1].nozzle = Some(1);
+        let m = suggest_mapping(&p, Some(&s));
+        assert_eq!(m, vec![4, 1]);
+        assert!(check_mapping(&p, &m, Some(&s)).is_empty());
+        let wrong = check_mapping(&p, &[0, 1], Some(&s));
+        assert_eq!(wrong.len(), 1, "{wrong:?}");
+        assert!(wrong[0].contains("right nozzle") && wrong[0].contains("left one"), "{wrong:?}");
+        // Single-nozzle printers and older packages: no constraint.
+        p.filaments[0].nozzle = None;
+        assert!(check_mapping(&p, &[0, 1], Some(&s)).is_empty());
     }
 
     #[test]

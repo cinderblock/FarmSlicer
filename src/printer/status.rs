@@ -55,8 +55,9 @@ pub struct Tray {
 pub struct AmsUnit {
     pub id: i64,
     pub humidity: Option<i64>,
-    /// Which nozzle the unit feeds on dual-nozzle printers (H2D): 1 left,
-    /// 2 right. `None` on single-nozzle printers.
+    /// Which nozzle the unit feeds on dual-nozzle printers (H2D), numbered
+    /// like the slicer's filament map: 1 left, 2 right. `None` on
+    /// single-nozzle printers.
     pub nozzle: Option<i64>,
     pub trays: Vec<Tray>,
 }

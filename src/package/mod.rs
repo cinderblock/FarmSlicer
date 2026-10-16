@@ -54,6 +54,10 @@ pub struct FilamentUse {
     pub filament_id: String,
     pub used_g: f64,
     pub used_m: f64,
+    /// The nozzle it prints from on dual-nozzle printers (H2D), as the
+    /// slicer assigned it (slice_info `filament_maps`): 1 left, 2 right.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nozzle: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

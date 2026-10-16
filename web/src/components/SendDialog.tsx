@@ -7,6 +7,8 @@ import {
   formatCost,
   formatMinutes,
   loadedTrays,
+  nozzleName,
+  trayNozzle,
   slotLabel,
   type GcodeCheck,
   type Plate,
@@ -125,6 +127,13 @@ export default function SendDialog({
       if (slot < 0 || !tray) out.push(`Filament ${f.id} (${f.material}) has no tray.`);
       else if ((tray.material ?? "").toUpperCase() !== f.material.toUpperCase())
         out.push(`Filament ${f.id} is ${f.material}, but ${slotLabel(tray)} holds ${tray.material}.`);
+      else {
+        const feeds = trayNozzle(selected.status, tray);
+        if (f.nozzle && feeds && f.nozzle !== feeds)
+          out.push(
+            `Filament ${f.id} prints from the ${nozzleName(f.nozzle)} nozzle, but ${slotLabel(tray)} feeds the ${nozzleName(feeds)} one.`,
+          );
+      }
     }
     return out;
   })();
@@ -276,19 +285,27 @@ export default function SendDialog({
                           </td>
                           <td>
                             {f.material}
-                            <span className="hint"> · {f.used_g.toFixed(1)} g</span>
+                            <span className="hint">
+                              {" "}
+                              · {f.used_g.toFixed(1)} g{f.nozzle ? ` · ${nozzleName(f.nozzle)} nozzle` : ""}
+                            </span>
                           </td>
                           <td>→</td>
                           <td>
                             <select value={slot} onChange={(e) => setSlot(f.id, Number(e.target.value))}>
                               <option value={-1}>Choose a tray…</option>
-                              {trays.map((t) => (
-                                <option key={t.slot} value={t.slot}>
-                                  {slotLabel(t)}: {t.name ?? t.material}
-                                  {t.color ? ` (${t.color})` : ""}
-                                  {t.material?.toUpperCase() !== f.material.toUpperCase() ? " ⚠ different material" : ""}
-                                </option>
-                              ))}
+                              {trays.map((t) => {
+                                const feeds = trayNozzle(selected.status, t);
+                                return (
+                                  <option key={t.slot} value={t.slot}>
+                                    {slotLabel(t)}
+                                    {feeds ? ` (${nozzleName(feeds)})` : ""}: {t.name ?? t.material}
+                                    {t.color ? ` (${t.color})` : ""}
+                                    {t.material?.toUpperCase() !== f.material.toUpperCase() ? " ⚠ different material" : ""}
+                                    {f.nozzle && feeds && f.nozzle !== feeds ? " ⚠ other nozzle" : ""}
+                                  </option>
+                                );
+                              })}
                             </select>
                           </td>
                           <td>

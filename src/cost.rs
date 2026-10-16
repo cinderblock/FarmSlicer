@@ -140,8 +140,8 @@ mod tests {
             print_time_sec: None,
             weight_g: None,
             filaments: vec![
-                FilamentUse { id: 1, material: "PLA".into(), color: String::new(), filament_id: String::new(), used_g: 100.0, used_m: 0.0 },
-                FilamentUse { id: 2, material: "PPA-CF".into(), color: String::new(), filament_id: String::new(), used_g: 10.0, used_m: 0.0 },
+                FilamentUse { id: 1, material: "PLA".into(), color: String::new(), filament_id: String::new(), used_g: 100.0, used_m: 0.0, nozzle: None },
+                FilamentUse { id: 2, material: "PPA-CF".into(), color: String::new(), filament_id: String::new(), used_g: 10.0, used_m: 0.0, nozzle: None },
             ],
             has_thumbnail: false,
             gcode_md5: String::new(),

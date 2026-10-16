@@ -178,6 +178,7 @@ fn filaments(c: &HashMap<&str, &str>) -> Vec<FilamentUse> {
             filament_id: String::new(),
             used_g: grams.get(i).copied().unwrap_or(0.0),
             used_m: mm.get(i).copied().unwrap_or(0.0) / 1000.0,
+            nozzle: None,
         })
         .collect()
 }
