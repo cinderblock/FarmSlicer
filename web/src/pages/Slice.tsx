@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router";
-import ModelViewer, { type BedShape, type Fit } from "../components/ModelViewer";
+import ModelViewer, { type BedShape, type PlateState } from "../components/ModelViewer";
 import OverridesPanel from "../components/OverridesPanel";
 import {
   BrowserEngine,
@@ -9,7 +9,7 @@ import {
   loadManifest,
   pickVariant,
 } from "../engine/client";
-import type { EngineManifest, Placement, SliceOptions } from "../engine/types";
+import type { EngineManifest, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
 import { BED_TYPES } from "../printers";
 import { saveLocalModel } from "../localModels";
@@ -174,12 +174,9 @@ function filamentDisplayName(name: string): string {
 
 export default function SlicePage() {
   const navigate = useNavigate();
-  const [modelFile, setModelFile] = useState<File | null>(null);
-  // Where the part sits on the plate (the viewer's), and whether it fits.
-  const [placement, setPlacement] = useState<{ placement: Placement | null; fit: Fit }>({
-    placement: null,
-    fit: "inside",
-  });
+  // What's on the plate (the viewer's): model files, parts, whether they fit.
+  const [layout, setLayout] = useState<PlateState | null>(null);
+  const modelFiles = useMemo(() => layout?.files ?? [], [layout]);
   const [slicing, setSlicing] = useState(false);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [printersLoaded, setPrintersLoaded] = useState(false);
@@ -513,23 +510,23 @@ export default function SlicePage() {
       formData.append("overrides", JSON.stringify(overrides));
     }
     if (groupId) formData.append("group_id", groupId);
-    if (placement.placement) formData.append("placement", JSON.stringify(placement.placement));
+    if (layout) formData.append("plate", JSON.stringify(layout.plate));
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, plate, color, overrides, groupId, placement]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, overrides, groupId, layout]);
 
   const sliceOnServer = useCallback(async () => {
-    if (!modelFile) return;
+    if (modelFiles.length === 0) return;
     const formData = buildJobForm();
-    formData.append("model", modelFile);
+    for (const f of modelFiles) formData.append("model", f);
     const res = await fetch("/api/jobs", { method: "POST", body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
     setResult({ ok: true, message: "Slicing started on the server" });
     setTimeout(() => navigate("/jobs"), 1500);
-  }, [modelFile, buildJobForm, navigate]);
+  }, [modelFiles, buildJobForm, navigate]);
 
   const sliceInBrowser = useCallback(async () => {
-    if (!modelFile) return;
+    if (modelFiles.length === 0) return;
     setProgress({ percent: 0, message: "Loading engine" });
 
     // Boot (or reuse) the engine first so a missing/broken engine fails
@@ -542,10 +539,11 @@ export default function SlicePage() {
     const formData = buildJobForm();
     formData.append("source", "browser");
     if (keepLocal) {
-      const sha256 = await saveLocalModel(modelFile);
-      formData.append("local_models", JSON.stringify([{ name: modelFile.name, bytes: modelFile.size, sha256 }]));
+      const local = [];
+      for (const f of modelFiles) local.push({ name: f.name, bytes: f.size, sha256: await saveLocalModel(f) });
+      formData.append("local_models", JSON.stringify(local));
     } else {
-      formData.append("model", modelFile);
+      for (const f of modelFiles) formData.append("model", f);
     }
     const res = await fetch("/api/jobs", { method: "POST", body: formData });
     const job: JobRecord & { error?: string } = await res.json();
@@ -560,7 +558,7 @@ export default function SlicePage() {
         const { logo_url, ...rest } = job.slice_options;
         options = { ...rest, logo: logo_url ? await loadLogo(logo_url) : undefined };
       }
-      const out = await engine.slice(modelFile, job.config_json ?? "{}", (percent, message) => {
+      const out = await engine.slice(modelFiles, job.config_json ?? "{}", (percent, message) => {
         setProgress({ percent, message });
         const now = Date.now();
         if (now - lastPost > 750) {
@@ -611,10 +609,10 @@ export default function SlicePage() {
     } finally {
       setBrowserJobId(null);
     }
-  }, [modelFile, buildJobForm, navigate, keepLocal]);
+  }, [modelFiles, buildJobForm, navigate, keepLocal]);
 
   const handleSlice = useCallback(async () => {
-    if (!modelFile) return;
+    if (modelFiles.length === 0) return;
     setSlicing(true);
     setResult(null);
     setProgress(null);
@@ -636,14 +634,10 @@ export default function SlicePage() {
       setSlicing(false);
       setProgress(null);
     }
-  }, [modelFile, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
+  }, [modelFiles, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
 
   const bed = useMemo(() => bedFromConfig(resolvedConfig), [resolvedConfig]);
-  const handlePlacementChange = useCallback(
-    (p: Placement | null, fit: Fit) => setPlacement({ placement: p, fit }),
-    [],
-  );
-  const offBed = !!modelFile && placement.fit !== "inside";
+  const offBed = !!layout && (layout.fit !== "inside" || layout.overlaps);
 
   const handleCancelBrowserSlice = useCallback(() => {
     engineRef.current?.cancel();
@@ -656,8 +650,7 @@ export default function SlicePage() {
         <div className="viewer-panel">
           <ModelViewer
             bed={bed}
-            onModelLoaded={setModelFile}
-            onPlacementChange={handlePlacementChange}
+            onPlateChange={setLayout}
           />
         </div>
         <div className="settings-panel">
@@ -937,11 +930,14 @@ export default function SlicePage() {
             </p>
           )}
 
-          {modelFile && (
+          {layout && (
             <div className="model-info">
-              <p>{modelFile.name}</p>
+              <p>
+                {modelFiles.length === 1 ? modelFiles[0].name : `${modelFiles.length} models`}
+                {layout.plate.objects.length > 1 && ` · ${layout.plate.objects.length} parts`}
+              </p>
               <p className="hint">
-                {(modelFile.size / 1024 / 1024).toFixed(1)} MB
+                {(modelFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(1)} MB
               </p>
             </div>
           )}
@@ -967,14 +963,16 @@ export default function SlicePage() {
 
           <button
             className="btn-primary"
-            disabled={!modelFile || slicing || offBed}
+            disabled={modelFiles.length === 0 || slicing || offBed}
             onClick={handleSlice}
           >
             {slicing ? (progress ? "Slicing in browser…" : "Submitting…") : "Slice"}
           </button>
           {offBed && (
             <p className="hint" style={{ marginTop: "0.5rem", color: "var(--error)" }}>
-              Move the part inside the build plate to slice it.
+              {layout?.overlaps && layout.fit === "inside"
+                ? "Move the parts apart (or Arrange them) to slice them."
+                : "Move the parts inside the build plate to slice them."}
             </p>
           )}
 

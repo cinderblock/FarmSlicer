@@ -7,6 +7,7 @@ namespace farmslicer {
 
 struct SliceResult;
 struct SliceOptions;
+struct ModelInput;
 
 /// Thin wrapper over libslic3r's Model → Print → G-code pipeline.
 ///
@@ -21,7 +22,7 @@ public:
 
     SliceResult slice(
         rust::Str job_id,
-        rust::Str model_path,
+        const rust::Vec<ModelInput>& models,
         rust::Str config_json,
         rust::Str output_path,
         const SliceOptions& options

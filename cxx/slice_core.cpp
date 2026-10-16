@@ -1,9 +1,9 @@
 // FarmSlicer slicing pipeline on top of libslic3r.
 //
-// Mirrors what OrcaSlicer's CLI does for a single plate: load the model, build
-// a DynamicPrintConfig from the merged profile JSON, place the objects on the
-// bed, Print::apply → validate → process → export_gcode, then collect the
-// statistics the G-code processor computed. Used unchanged by the native
+// Mirrors what OrcaSlicer's CLI does for a single plate: build a
+// DynamicPrintConfig from the merged profile JSON, load the models and put
+// every part where the user placed it, Print::apply → validate → process →
+// export_gcode, then collect the statistics the G-code processor computed. Used unchanged by the native
 // server and the WebAssembly engine so both produce the same G-code for the
 // same config.
 
@@ -123,55 +123,89 @@ void load_config(Slic3r::DynamicPrintConfig& config, const std::string& json,
     config.normalize_fdm();
 }
 
-// Put the model where the user placed it: rotate it as a whole (keeping
-// relative placement for multi-object files), centre its bounding box on
-// the bed centre plus the placement's offset (just the bed centre without
-// one, like the desktop plater on import) and drop it onto Z=0. Then refuse
-// a model that doesn't fit: libslic3r would slice it, and the G-code would
-// drive the head beyond the bed.
-void place_on_bed(Slic3r::Model& model, const Slic3r::DynamicPrintConfig& config, const Placement& placement)
+/// The bed's centre from `printable_area` (origin when there is none).
+Slic3r::Vec2d bed_center(const Slic3r::DynamicPrintConfig& config)
 {
     using namespace Slic3r;
-    for (ModelObject* obj : model.objects)
-        if (obj->instances.empty()) obj->add_instance();
+    BoundingBoxf bed;
+    if (const auto* area = config.option<ConfigOptionPoints>("printable_area"))
+        for (const Vec2d& p : area->values) bed.merge(p);
+    return bed.defined ? bed.center() : Vec2d(0.0, 0.0);
+}
 
-    if (placement.set) {
-        Transform3d rotation = Transform3d::Identity();
-        for (int r = 0; r < 3; ++r)
-            for (int c = 0; c < 3; ++c) rotation.linear()(r, c) = placement.rotation[r * 3 + c];
-        for (ModelObject* obj : model.objects) {
-            for (ModelInstance* inst : obj->instances)
-                inst->set_transformation(Geometry::Transformation(rotation * inst->get_matrix()));
-            obj->invalidate_bounding_box();
+// Build the plate: every model file once, every copy of it where the user
+// placed it. A copy is the file's objects (with their instances as loaded)
+// as one rigid group: rotated, its bounding box centred on the bed centre
+// plus the placement's offset (just the bed centre without one, like the
+// desktop plater on import) and dropped onto Z=0. Copies are instances of
+// the same objects, so libslic3r slices identical copies once.
+// (ModelObject::ensure_on_bed would drop every instance by the lowest one;
+// each copy here rests on the bed by itself.)
+Slic3r::Model build_plate(const std::vector<ModelInput>& inputs, const Slic3r::Vec2d& center)
+{
+    using namespace Slic3r;
+    Model plate;
+    for (const ModelInput& in : inputs) {
+        Model src = Model::read_from_file(in.path);
+        const std::string what = in.name.empty() ? std::string("a model file") : "\"" + in.name + "\"";
+        if (src.objects.empty()) throw std::runtime_error(what + " contains no objects");
+        if (!in.name.empty() && src.objects.size() == 1) src.objects.front()->name = in.name;
+
+        // The file's objects on the plate, and their instances as loaded.
+        std::vector<ModelObject*> objects;
+        std::vector<std::vector<Transform3d>> as_loaded;
+        for (ModelObject* o : src.objects) {
+            if (o->instances.empty()) o->add_instance();
+            ModelObject* copy = plate.add_object(*o);
+            std::vector<Transform3d> trafos;
+            for (const ModelInstance* inst : copy->instances) trafos.push_back(inst->get_matrix());
+            copy->clear_instances();
+            objects.push_back(copy);
+            as_loaded.push_back(std::move(trafos));
         }
-    }
 
-    std::vector<Vec2d> bed_shape;
-    if (const auto* area = config.option<ConfigOptionPoints>("printable_area")) bed_shape = area->values;
-    Vec2d bed_center(0.0, 0.0);
-    {
-        BoundingBoxf bed;
-        for (const Vec2d& p : bed_shape) bed.merge(p);
-        if (bed.defined) bed_center = bed.center();
+        const std::vector<Placement> parts = in.parts.empty() ? std::vector<Placement>{Placement{}} : in.parts;
+        for (const Placement& part : parts) {
+            Transform3d rotation = Transform3d::Identity();
+            if (part.set)
+                for (int r = 0; r < 3; ++r)
+                    for (int c = 0; c < 3; ++c) rotation.linear()(r, c) = part.rotation[r * 3 + c];
+            std::vector<ModelInstance*> group;
+            BoundingBoxf3 box;
+            for (size_t k = 0; k < objects.size(); ++k)
+                for (const Transform3d& trafo : as_loaded[k]) {
+                    ModelInstance* inst = objects[k]->add_instance();
+                    inst->set_transformation(Geometry::Transformation(rotation * trafo));
+                    box.merge(objects[k]->instance_bounding_box(*inst));
+                    group.push_back(inst);
+                }
+            const Vec2d target = center + (part.set ? Vec2d(part.offset[0], part.offset[1]) : Vec2d::Zero());
+            const Vec3d shift(target.x() - box.center().x(), target.y() - box.center().y(), -box.min.z());
+            for (ModelInstance* inst : group) inst->set_offset(inst->get_offset() + shift);
+        }
+        for (ModelObject* o : objects) o->invalidate_bounding_box();
     }
-    const Vec2d target = bed_center + (placement.set ? Vec2d(placement.offset[0], placement.offset[1]) : Vec2d::Zero());
+    return plate;
+}
 
-    const BoundingBoxf3 bbox = model.bounding_box_exact();
-    const Vec3d shift(target.x() - bbox.center().x(), target.y() - bbox.center().y(), 0.0);
-    for (ModelObject* obj : model.objects) {
-        for (ModelInstance* inst : obj->instances)
-            inst->set_offset(inst->get_offset() + shift);
-        obj->ensure_on_bed();
-    }
-
-    if (bed_shape.size() < 3) return;
+// Refuse parts that don't fit: libslic3r would slice them, and the G-code
+// would drive the head beyond the bed.
+void check_build_volume(Slic3r::Model& model, const Slic3r::DynamicPrintConfig& config)
+{
+    using namespace Slic3r;
+    const auto* area = config.option<ConfigOptionPoints>("printable_area");
+    if (!area || area->values.size() < 3) return;
     const auto* height = config.option<ConfigOptionFloat>("printable_height");
-    const BuildVolume volume(bed_shape, height ? height->value : 0.0, {}, {});
+    const BuildVolume volume(area->values, height ? height->value : 0.0, {}, {});
     model.update_print_volume_state(volume);
+    size_t parts = 0;
+    for (const ModelObject* obj : model.objects) parts += obj->instances.size();
     for (const ModelObject* obj : model.objects)
-        for (const ModelInstance* inst : obj->instances) {
+        for (size_t i = 0; i < obj->instances.size(); ++i) {
+            const ModelInstance* inst = obj->instances[i];
             if (inst->print_volume_state == ModelInstancePVS_Inside) continue;
-            const std::string what = model.objects.size() > 1 ? "\"" + obj->name + "\"" : std::string("the model");
+            std::string what = parts > 1 ? "\"" + obj->name + "\"" : std::string("the model");
+            if (obj->instances.size() > 1) what += " (copy " + std::to_string(i + 1) + ")";
             throw std::runtime_error(inst->print_volume_state == ModelInstancePVS_Fully_Outside
                                          ? what + " is off the bed: move it onto the build plate"
                                          : what + " doesn't fit in the printable volume: move, rotate or "
@@ -208,29 +242,27 @@ void init_runtime(const std::string& resources_dir, const std::string& temp_dir)
     Slic3r::set_logging_level(2); // errors + warnings
 }
 
-Outcome slice_file(const std::string& model_path,
-                   const std::string& config_json,
-                   const std::string& output_path,
-                   const Callbacks& cb,
-                   const Options& options)
+Outcome slice_models(const std::vector<ModelInput>& models,
+                     const std::string& config_json,
+                     const std::string& output_path,
+                     const Callbacks& cb,
+                     const Options& options)
 {
     using namespace Slic3r;
     Outcome out;
 
     try {
-        report(cb, 0, "Loading model");
-        Model model = Model::read_from_file(model_path);
-        if (model.objects.empty())
-            throw std::runtime_error("model file contains no objects");
-        if (!options.model_name.empty() && model.objects.size() == 1)
-            model.objects.front()->name = options.model_name;
+        if (models.empty()) throw std::runtime_error("nothing to slice: no model");
 
-        report(cb, 2, "Loading configuration");
+        report(cb, 0, "Loading configuration");
         DynamicPrintConfig config;
         load_config(config, config_json, out.warnings);
 
+        report(cb, 2, models.size() > 1 ? "Loading models" : "Loading model");
+        Model model = build_plate(models, bed_center(config));
+        check_build_volume(model, config);
+
         const int filament_count = int(std::max<size_t>(1, vector_size(config, "filament_diameter")));
-        place_on_bed(model, config, options.placement);
 
         Print print;
         print.set_plate_origin(Vec3d::Zero());

@@ -19,15 +19,26 @@ struct Callbacks {
     std::function<bool()> cancelled;
 };
 
-/// Where the user put the model on the bed (the web viewer's placement).
+/// Where the user put a part on the bed (the web viewer's placement).
 struct Placement {
-    /// False = centre the model on the bed in its file orientation.
+    /// False = centre the part on the bed in its file orientation.
     bool set = false;
     /// Rotation applied to the model as loaded: a 3x3 matrix, row-major.
     double rotation[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-    /// Where the rotated model's bounding-box centre goes, relative to the
+    /// Where the rotated part's bounding-box centre goes, relative to the
     /// bed centre (mm, XY). It always rests on the bed (Z = 0).
     double offset[2] = {0, 0};
+};
+
+/// One model file and every copy of it on the plate. A file with several
+/// objects is one rigid part (like the viewer shows it).
+struct ModelInput {
+    std::string path;
+    /// Name for a single-object model in the package and the G-code (the
+    /// file on disk may have a generated name).
+    std::string name;
+    /// Each copy on the plate. Empty = one copy, centred as loaded.
+    std::vector<Placement> parts;
 };
 
 struct Options {
@@ -37,14 +48,9 @@ struct Options {
     /// The vendor's model id recorded in slice_info.config ("BL-P001",
     /// "C12", ...); Bambu printers check it.
     std::string printer_model_id;
-    /// Name for a single-object model in the package and the G-code (the
-    /// file on disk may have a generated name).
-    std::string model_name;
     /// Label/logo drawn on every thumbnail. An empty font path means
     /// fonts/Sarabun-SemiBold.ttf in the resources directory.
     ThumbnailOverlay overlay;
-    /// Orientation and position on the bed.
-    Placement placement;
 };
 
 struct Outcome {
@@ -66,15 +72,15 @@ struct Outcome {
 /// matrices) and a scratch directory. Call once per process.
 void init_runtime(const std::string& resources_dir, const std::string& temp_dir);
 
-/// Slice `model_path` (STL/3MF/OBJ/STEP where supported) with the merged
-/// OrcaSlicer profile config `config_json` (a JSON object of profile keys) and
-/// write G-code to `output_path` (with embedded thumbnails where the printer
-/// takes them), plus the package `options` asks for. Never throws; errors
-/// land in Outcome::error.
-Outcome slice_file(const std::string& model_path,
-                   const std::string& config_json,
-                   const std::string& output_path,
-                   const Callbacks& callbacks,
-                   const Options& options = {});
+/// Slice the plate `models` make (STL/3MF/OBJ/STEP where supported) with
+/// the merged OrcaSlicer profile config `config_json` (a JSON object of
+/// profile keys) and write G-code to `output_path` (with embedded thumbnails
+/// where the printer takes them), plus the package `options` asks for.
+/// Never throws; errors land in Outcome::error.
+Outcome slice_models(const std::vector<ModelInput>& models,
+                     const std::string& config_json,
+                     const std::string& output_path,
+                     const Callbacks& callbacks,
+                     const Options& options = {});
 
 } // namespace farmslicer::core

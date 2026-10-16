@@ -1,4 +1,5 @@
-// The part on the plate: the loaded model, where it sits and whether it fits.
+// Parts on the plate: a loaded model (its shape, shared by every copy) and
+// each copy's placement, and whether it fits.
 //
 // The scene is in slicer coordinates (Z up, X right, Y back) with its origin
 // at the bed centre. The placement the slicer gets (src/placement.rs) is the
@@ -57,6 +58,8 @@ export const DEFAULT_BED: Bed = {
 };
 
 const partMaterial = new THREE.MeshStandardMaterial({ color: "#4a9eff", roughness: 0.6, metalness: 0.05 });
+/** Parts other than the selected one, when there are several. */
+const idleMaterial = new THREE.MeshStandardMaterial({ color: "#3b7fd0", roughness: 0.7, metalness: 0.05 });
 const errorMaterial = new THREE.MeshStandardMaterial({
   color: "#f87171",
   emissive: "#5c1010",
@@ -81,10 +84,7 @@ function parseModel(data: ArrayBuffer, filename: string): THREE.Object3D {
     let hasMeshes = false;
     group.traverse((child) => {
       const mesh = child as THREE.Mesh;
-      if (mesh.isMesh) {
-        hasMeshes = true;
-        if (!mesh.material) mesh.material = partMaterial;
-      }
+      if (mesh.isMesh) hasMeshes = true;
     });
     if (!hasMeshes) throw new Error("3MF file contains no geometry");
     return group;
@@ -198,63 +198,119 @@ function hullGeometry(hull: ConvexHull): THREE.BufferGeometry {
   return geo;
 }
 
-export class Part {
-  /** Placement: position and rotation. Add this to the scene. */
-  readonly root = new THREE.Group();
-  /** The model, shifted so its bounding-box centre is at the root's origin. */
-  readonly content: THREE.Object3D;
-  /**
-   * Convex hull as triangles, in the content's (centred) frame: picking for
-   * lay-on-face, which mounts it under the root.
-   */
-  readonly hullMesh: THREE.Mesh;
+/**
+ * A loaded model: its meshes (centred on their bounding box) and convex
+ * hull, shared by every copy of it on the plate.
+ */
+export class PartShape {
+  /** The model, shifted so its bounding-box centre is at the origin. Copies clone it (sharing geometry). */
+  readonly template: THREE.Object3D;
+  /** Convex hull as triangles, in the template's (centred) frame. */
+  readonly hullGeometry: THREE.BufferGeometry;
   /** Hull faces' outward normals and plane constants, one per triangle. */
   readonly hullFaces: { normal: THREE.Vector3; constant: number }[];
-  private readonly hullPoints: THREE.Vector3[];
-  private readonly meshes: THREE.Mesh[] = [];
-  private readonly materials = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
-  private showingError = false;
-  /** XY of the bounding-box centre (scene coordinates). */
-  readonly center = new THREE.Vector2();
-  /** Bounding box of the rotated part relative to the root's origin. */
-  readonly extent = new THREE.Box3();
-  /** Hull points rotated (relative to the root's origin), for fit checks. */
-  private rotated: THREE.Vector3[] = [];
+  readonly hullPoints: THREE.Vector3[];
+  /** The model file's name. */
+  readonly name: string;
+  private users = 0;
 
-  private constructor(content: THREE.Object3D) {
+  private constructor(content: THREE.Object3D, name: string) {
+    this.name = name;
     const box = new THREE.Box3().setFromObject(content, true);
     const mid = box.getCenter(new THREE.Vector3());
     content.position.sub(mid);
-    this.content = content;
-    this.root.add(content);
-    content.traverse((child) => {
-      const mesh = child as THREE.Mesh;
-      if (mesh.isMesh) {
-        this.meshes.push(mesh);
-        this.materials.set(mesh, mesh.material);
-      }
-    });
+    const holder = new THREE.Group();
+    holder.add(content);
+    holder.updateMatrixWorld(true);
+    this.template = content;
 
-    // Hull in the centred frame: vertices are taken with the content's
-    // shift applied (uniqueVertices reads world matrices; the root is
-    // still at the origin here).
-    this.root.updateMatrixWorld(true);
-    const vertices = uniqueVertices(this.root);
+    // Hull in the centred frame (uniqueVertices reads world matrices).
+    const vertices = uniqueVertices(holder);
+    holder.remove(content);
     const size = box.getSize(new THREE.Vector3()).length() || 1;
     const hull = new ConvexHull().setFromPoints(hullInput(vertices, size));
     const unique = new Map<string, THREE.Vector3>();
     for (const v of hull.vertices) unique.set(`${v.point.x},${v.point.y},${v.point.z}`, v.point);
     this.hullPoints = [...unique.values()];
     this.hullFaces = hull.faces.map((f) => ({ normal: f.normal.clone(), constant: f.constant }));
+    this.hullGeometry = hullGeometry(hull);
+  }
+
+  static load(data: ArrayBuffer, filename: string): PartShape {
+    return new PartShape(parseModel(data, filename), filename);
+  }
+
+  /** A part made of this shape is on the plate (or gone: free the geometry with the last one). */
+  retain() {
+    this.users++;
+  }
+  release() {
+    if (--this.users > 0) return;
+    this.template.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) mesh.geometry.dispose();
+    });
+    this.hullGeometry.dispose();
+  }
+}
+
+let nextPartId = 1;
+
+export class Part {
+  /** Stable id (React keys, selection). */
+  readonly id = nextPartId++;
+  /** Placement: position and rotation. Add this to the scene. */
+  readonly root = new THREE.Group();
+  /** The model, its bounding-box centre at the root's origin. */
+  readonly content: THREE.Object3D;
+  /** Convex hull as triangles: picking for lay-on-face, which mounts it under the root. */
+  readonly hullMesh: THREE.Mesh;
+  private readonly meshes: THREE.Mesh[] = [];
+  private look: "normal" | "idle" | "error" = "normal";
+  /** XY of the bounding-box centre (scene coordinates). */
+  readonly center = new THREE.Vector2();
+  /** Bounding box of the rotated part relative to the root's origin. */
+  readonly extent = new THREE.Box3();
+  /** Hull points rotated (relative to the root's origin), for fit checks and footprints. */
+  private rotated: THREE.Vector3[] = [];
+
+  /** The loaded model this part is a copy of. */
+  readonly shape: PartShape;
+
+  constructor(shape: PartShape) {
+    this.shape = shape;
+    shape.retain();
+    this.content = shape.template.clone();
+    this.root.add(this.content);
+    this.content.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.material = partMaterial;
+        this.meshes.push(mesh);
+      }
+    });
     this.hullMesh = new THREE.Mesh(
-      hullGeometry(hull),
+      shape.hullGeometry,
       new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
     );
     this.updateRotation();
   }
 
-  static load(data: ArrayBuffer, filename: string): Part {
-    return new Part(parseModel(data, filename));
+  /** The model's name (its file). */
+  get name(): string {
+    return this.shape.name;
+  }
+
+  get hullFaces() {
+    return this.shape.hullFaces;
+  }
+
+  /** Another part of the same shape, turned the same way, at the same place. */
+  clone(): Part {
+    const copy = new Part(this.shape);
+    copy.setRotation(this.root.quaternion);
+    copy.setCenter(this.center.x, this.center.y);
+    return copy;
   }
 
   get quaternion(): THREE.Quaternion {
@@ -278,9 +334,18 @@ export class Part {
     this.apply();
   }
 
+  /** Put the part where a placement says (the inverse of `placement()`). */
+  setPlacement(p: Placement) {
+    const r = p.rotation;
+    const m = new THREE.Matrix4().set(r[0], r[1], r[2], 0, r[3], r[4], r[5], 0, r[6], r[7], r[8], 0, 0, 0, 0, 1);
+    this.root.quaternion.setFromRotationMatrix(m);
+    this.updateRotation();
+    this.setCenter(p.offset[0], p.offset[1]);
+  }
+
   private updateRotation() {
     this.extent.makeEmpty();
-    this.rotated = this.hullPoints.map((p) => {
+    this.rotated = this.shape.hullPoints.map((p) => {
       const r = p.clone().applyQuaternion(this.root.quaternion);
       this.extent.expandByPoint(r);
       return r;
@@ -297,6 +362,11 @@ export class Part {
   /** Bounding box in scene coordinates. */
   worldBox(): THREE.Box3 {
     return this.extent.clone().translate(this.root.position);
+  }
+
+  /** The rotated hull's points on the plate (XY, scene coordinates). */
+  footprintPoints(): THREE.Vector2[] {
+    return this.rotated.map((r) => new THREE.Vector2(r.x + this.root.position.x, r.y + this.root.position.y));
   }
 
   /** The slicer's placement for where the part is now. */
@@ -328,25 +398,25 @@ export class Part {
     return "inside";
   }
 
-  /** Paint the part in the error colour (or back in its own). */
-  showError(error: boolean) {
-    if (error === this.showingError) return;
-    this.showingError = error;
-    for (const mesh of this.meshes) mesh.material = error ? errorMaterial : this.materials.get(mesh)!;
+  /**
+   * How the part is drawn: its own colour, the dimmer one of a part that
+   * isn't selected (several on the plate), or the error colour.
+   */
+  setLook(look: "normal" | "idle" | "error") {
+    if (look === this.look) return;
+    this.look = look;
+    const material = look === "error" ? errorMaterial : look === "idle" ? idleMaterial : partMaterial;
+    for (const mesh of this.meshes) mesh.material = material;
   }
 
   dispose() {
-    this.content.traverse((child) => {
-      const mesh = child as THREE.Mesh;
-      if (mesh.isMesh) mesh.geometry.dispose();
-    });
-    this.hullMesh.geometry.dispose();
     (this.hullMesh.material as THREE.Material).dispose();
+    this.shape.release();
   }
 }
 
 /** Point in polygon (on the edge counts as inside, within FIT_EPSILON). */
-function insidePolygon(p: THREE.Vector2, polygon: THREE.Vector2[]): boolean {
+export function insidePolygon(p: THREE.Vector2, polygon: THREE.Vector2[]): boolean {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const a = polygon[i];

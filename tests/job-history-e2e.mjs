@@ -71,10 +71,29 @@ r = await jobForm(alice, [
   ["process", "0.20mm Standard @BBL X1C"],
   ["bed_type", "Textured PEI Plate"],
 ]);
-// Several parts per plate arrive with the multi-part slicer; until then
-// the plate is refused, but the models and inputs are checked first.
-const multiPart = r.status === 201;
-check(r.status === 201 || (r.status === 400 && /several parts/.test(r.json?.error ?? "")), "a two-part plate is taken or refused clearly", json(r));
+check(r.status === 201, "a plate of two models", json(r));
+check(r.json?.model_count === 2 && r.json?.model_name === "cube.stl + 1 more", "the job has both models", json(r));
+check(
+  r.json?.slice_options?.plate?.objects?.length === 2 && r.json.slice_options.plate.objects[1].placement.offset[0] === 30,
+  "the browser engine gets every part",
+  json(r),
+);
+check(
+  JSON.stringify(r.json?.slice_options?.models) === JSON.stringify([{ name: "cube.stl" }, { name: "peg.stl" }]),
+  "and the models' names in plate order",
+  json(r),
+);
+check(r.json?.slice_options?.placement === null, "no single placement for a plate of several parts", json(r));
+const twoPart = r.json?.id;
+r = await alice.get(`/api/jobs/${twoPart}/models/1`);
+check(r.status === 200 && r.json?.raw?.startsWith("solid peg"), "the second model downloads", json(r));
+// Copies: one model placed three times.
+r = await jobForm(alice, [
+  ["source", "browser"],
+  model(CUBE, "cube.stl"),
+  ["plate", JSON.stringify({ objects: [0, 1, 2].map((i) => ({ model: 0, placement: { rotation: ID, offset: [i * 25, 0] } })) })],
+]);
+check(r.status === 201 && r.json?.slice_options?.plate?.objects?.length === 3 && r.json?.model_count === 1, "copies of one model", json(r));
 
 r = await jobForm(alice, [
   ["source", "browser"],
@@ -235,5 +254,4 @@ await browserResult(bob, bobJob);
 r = await owner.call("DELETE", `/api/jobs/${bobJob}`);
 check(r.status === 204, "an admin deletes another user's job", json(r));
 
-if (multiPart) console.log("  note: this server already takes multi-part plates");
 finish();

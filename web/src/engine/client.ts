@@ -144,21 +144,24 @@ export class BrowserEngine {
     }
   }
 
-  /** Slice one model file with a merged OrcaSlicer config (JSON object). One slice at a time. */
+  /**
+   * Slice the plate's model files (in the order the plate's `model` indexes
+   * them) with a merged OrcaSlicer config (JSON object). One slice at a time.
+   */
   async slice(
-    file: File,
+    files: File[],
     configJson: string,
     onProgress?: ProgressFn,
     options?: SliceOptions,
   ): Promise<SliceOutput> {
     if (this.pending) throw new Error("engine is busy");
-    const model = await file.arrayBuffer();
+    const models = await Promise.all(files.map(async (f) => ({ name: f.name, data: await f.arrayBuffer() })));
     const id = this.nextId++;
     return new Promise<SliceOutput>((resolve, reject) => {
       this.pending = { id, onProgress, resolve, reject };
-      const req: WorkerRequest = { type: "slice", id, modelName: file.name, model, config: configJson, options };
+      const req: WorkerRequest = { type: "slice", id, models, config: configJson, options };
       // The logo is small; it's copied rather than transferred so the caller keeps it.
-      this.worker.postMessage(req, [model]);
+      this.worker.postMessage(req, models.map((m) => m.data));
     });
   }
 

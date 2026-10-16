@@ -336,7 +336,7 @@ body {
 
 .viewer-fit-warning {
   position: absolute;
-  top: 5.5rem;
+  top: 7.5rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
@@ -356,6 +356,37 @@ body {
 .viewer-fit-warning button {
   padding: 0.2rem 0.6rem;
   font-size: 0.8rem;
+}
+
+.viewer-hint-error {
+  color: var(--error);
+}
+
+.viewer-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+}
+
+/* A short-lived message about the plate ("Added 12 copies"), top right. */
+.viewer-notice {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 3;
+  max-width: 40%;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.92);
+  color: var(--text);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.viewer-notice.bad {
+  border-color: var(--warning);
+  color: var(--warning);
 }
 
 /* Placement panel (bottom left of the viewer) */

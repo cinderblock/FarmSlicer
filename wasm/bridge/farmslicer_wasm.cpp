@@ -1,14 +1,16 @@
 // FarmSlicer WebAssembly engine: a small C ABI around the shared slicing
 // pipeline (cxx/slice_core.cpp), driven from web/src/engine/worker.ts.
 //
-//   fs_version()      → JSON {engine, orca, threads, placement}
+//   fs_version()      → JSON {engine, orca, threads, placement, plate}
 //   fs_slice(...)     → slice synchronously (single-threaded build, or the
 //                       pthreads build when the caller wants to block)
 //   fs_slice_start()  → pthreads build only: slice on a dedicated pthread,
 //                       completion signalled through `state` (see below)
 //   fs_set_options()  → how the next slice runs besides the config: where the
-//                       model goes on the bed, a Bambu sliced project
+//                       parts go on the bed, a Bambu sliced project
 //                       (.gcode.3mf), the thumbnail overlay
+//   fs_stage_model()  → a plate's further models (index 1, 2, ...; the model
+//                       passed to fs_slice is model 0), for the next slice
 //   fs_cancel()       → abort the running slice at its next checkpoint
 //   fs_free(p)        → free a buffer returned through an out-parameter
 //
@@ -38,7 +40,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <stdexcept>
 #include <string>
+#include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -46,8 +50,21 @@ namespace {
 
 std::atomic<bool> g_cancel{false};
 
-/// Options for the next slice (fs_set_options); consumed by it.
-farmslicer::core::Options g_next_options;
+/// How the next slice runs (fs_set_options); consumed by it.
+struct NextSlice {
+    farmslicer::core::Options options;
+    /// Name of model 0 (a single-object file's object name).
+    std::string model_name;
+    /// Model 0's placement, without a plate.
+    farmslicer::core::Placement placement;
+    /// With a plate: every model's name and the placements of its copies.
+    bool has_plate = false;
+    std::vector<std::string> names;
+    std::vector<std::vector<farmslicer::core::Placement>> parts;
+};
+NextSlice g_next;
+/// Models 1, 2, ... staged in MEMFS for the next slice (fs_stage_model).
+std::vector<std::string> g_staged;
 std::mutex g_options_mutex;
 const char* const PACKAGE_PATH = "/tmp/out.gcode.3mf";
 
@@ -160,7 +177,7 @@ char* dup_cstr(const std::string& s)
 
 std::string model_extension(const char* model_name)
 {
-    std::string name = model_name ? model_name : "";
+    const std::string name = model_name ? model_name : "";
     const size_t dot = name.find_last_of('.');
     std::string ext = dot == std::string::npos ? "stl" : name.substr(dot + 1);
     for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
@@ -181,7 +198,7 @@ int do_slice(const char* model_name, const uint8_t* model, int model_len,
 
     farmslicer::core::Outcome outcome;
 
-    const std::string model_path = "/tmp/model." + model_extension(model_name);
+    const std::string model_path = "/tmp/model_0." + model_extension(model_name);
     const std::string gcode_path = "/tmp/out.gcode";
     ::unlink(model_path.c_str());
     ::unlink(gcode_path.c_str());
@@ -194,23 +211,45 @@ int do_slice(const char* model_name, const uint8_t* model, int model_len,
         outcome.error = "could not stage the model in memory";
     }
 
-    farmslicer::core::Options options;
+    NextSlice next;
+    std::vector<std::string> staged;
     {
         std::lock_guard<std::mutex> lock(g_options_mutex);
-        options = std::move(g_next_options);
-        g_next_options = {};
+        next = std::move(g_next);
+        g_next = {};
+        staged = std::move(g_staged);
+        g_staged.clear();
     }
     ::unlink(PACKAGE_PATH);
+
+    // The plate: model 0 from this call, the others as staged.
+    std::vector<farmslicer::core::ModelInput> models;
+    if (!next.has_plate) {
+        farmslicer::core::ModelInput m{model_path, next.model_name, {}};
+        if (next.placement.set) m.parts.push_back(next.placement);
+        models.push_back(std::move(m));
+    } else {
+        for (size_t i = 0; i < next.parts.size(); ++i) {
+            const std::string path = i == 0 ? model_path : (i < staged.size() ? staged[i] : std::string());
+            if (path.empty()) {
+                if (outcome.error.empty()) outcome.error = "model " + std::to_string(i) + " of the plate was not staged";
+                break;
+            }
+            models.push_back({path, i < next.names.size() ? next.names[i] : std::string(), next.parts[i]});
+        }
+    }
 
     if (outcome.error.empty()) {
         farmslicer::core::Callbacks cb;
         cb.progress = [](int percent, const std::string& message) { progress(percent, message); };
         cb.cancelled = []() { return g_cancel.load(); };
-        outcome = farmslicer::core::slice_file(
-            model_path, std::string(config_json ? config_json : "", config_len > 0 ? size_t(config_len) : 0),
-            gcode_path, cb, options);
+        outcome = farmslicer::core::slice_models(
+            models, std::string(config_json ? config_json : "", config_len > 0 ? size_t(config_len) : 0),
+            gcode_path, cb, next.options);
     }
     ::unlink(model_path.c_str());
+    for (const std::string& p : staged)
+        if (!p.empty()) ::unlink(p.c_str());
 
     if (outcome.ok) {
         // Read the G-code straight into the output buffer, then drop the
@@ -292,6 +331,19 @@ void* slice_thread_main(void* p)
 }
 #endif
 
+// A placement from JSON {rotation: [9], offset: [2]}; throws when malformed.
+farmslicer::core::Placement parse_placement(const nlohmann::json& p)
+{
+    farmslicer::core::Placement out;
+    const auto& rotation = p.at("rotation");
+    const auto& offset = p.at("offset");
+    if (rotation.size() != 9 || offset.size() != 2) throw std::runtime_error("malformed placement");
+    for (int i = 0; i < 9; ++i) out.rotation[i] = rotation.at(i).get<double>();
+    for (int i = 0; i < 2; ++i) out.offset[i] = offset.at(i).get<double>();
+    out.set = true;
+    return out;
+}
+
 } // namespace
 
 extern "C" {
@@ -305,8 +357,9 @@ EMSCRIPTEN_KEEPALIVE const char* fs_version()
         "\",\"threads\":false"
 #endif
         // fs_set_options takes a placement (hosts refuse to slice a placed
-        // model with an engine that would ignore it).
-        ",\"placement\":true}";
+        // model with an engine that would ignore it), and a plate of several
+        // parts with fs_stage_model for the further models.
+        ",\"placement\":true,\"plate\":true}";
     return v.c_str();
 }
 
@@ -335,27 +388,47 @@ EMSCRIPTEN_KEEPALIVE int fs_slice(const char* model_name, const uint8_t* model, 
 
 // Options for the next fs_slice / fs_slice_start, as JSON:
 // {package: bool, printer_model_id, model_name, label, logo_width,
-// logo_height, placement: {rotation: [9], offset: [2]} | null}, plus the
-// logo as RGBA (rows top-down; may be null). Returns 0, or 1 when the JSON
-// doesn't parse, the placement is malformed or the logo size doesn't match.
+// logo_height, placement: {rotation: [9], offset: [2]} | null,
+// plate: {objects: [{model, placement?}]} | null, models: [{name}]}, plus
+// the logo as RGBA (rows top-down; may be null). With a plate, `model`
+// indexes the plate's models (0 = the one passed to fs_slice, the others
+// staged with fs_stage_model) and `placement` is ignored. Returns 0, or 1
+// when the JSON doesn't parse, a placement or the plate is malformed or the
+// logo size doesn't match.
 EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const uint8_t* logo, int logo_len)
 {
-    farmslicer::core::Options o;
+    NextSlice n;
+    farmslicer::core::Options& o = n.options;
     try {
         const auto j = nlohmann::json::parse(std::string(json ? json : "", json_len > 0 ? size_t(json_len) : 0));
         if (j.value("package", false)) o.package_path = PACKAGE_PATH;
         o.printer_model_id = j.value("printer_model_id", std::string());
-        o.model_name = j.value("model_name", std::string());
+        n.model_name = j.value("model_name", std::string());
         o.overlay.label = j.value("label", std::string());
         o.overlay.logo_width = j.value("logo_width", 0u);
         o.overlay.logo_height = j.value("logo_height", 0u);
-        if (const auto p = j.find("placement"); p != j.end() && !p->is_null()) {
-            const auto& rotation = p->at("rotation");
-            const auto& offset = p->at("offset");
-            if (rotation.size() != 9 || offset.size() != 2) return 1;
-            for (int i = 0; i < 9; ++i) o.placement.rotation[i] = rotation.at(i).get<double>();
-            for (int i = 0; i < 2; ++i) o.placement.offset[i] = offset.at(i).get<double>();
-            o.placement.set = true;
+        if (const auto p = j.find("placement"); p != j.end() && !p->is_null()) n.placement = parse_placement(*p);
+        if (const auto plate = j.find("plate"); plate != j.end() && !plate->is_null()) {
+            const auto& objects = plate->at("objects");
+            if (objects.empty()) return 1;
+            if (const auto models = j.find("models"); models != j.end() && models->is_array())
+                for (const auto& m : *models) n.names.push_back(m.value("name", std::string()));
+            for (const auto& obj : objects) {
+                const size_t model = obj.at("model").get<size_t>();
+                if (model >= 1000) return 1;
+                if (n.parts.size() <= model) n.parts.resize(model + 1);
+                farmslicer::core::Placement p;
+                if (const auto pl = obj.find("placement"); pl != obj.end() && !pl->is_null()) p = parse_placement(*pl);
+                n.parts[model].push_back(p);
+            }
+            // A lone unplaced part is centred (an empty list); every model
+            // must be on the plate.
+            for (auto& parts : n.parts) {
+                if (parts.empty()) return 1;
+                if (parts.size() == 1 && !parts[0].set) parts.clear();
+            }
+            if (n.names.empty() && !n.model_name.empty()) n.names.push_back(n.model_name);
+            n.has_plate = true;
         }
     } catch (...) {
         return 1;
@@ -365,7 +438,29 @@ EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const ui
         o.overlay.logo_rgba.assign(logo, logo + logo_len);
     }
     std::lock_guard<std::mutex> lock(g_options_mutex);
-    g_next_options = std::move(o);
+    g_next = std::move(n);
+    return 0;
+}
+
+// Stage model `index` (1, 2, ...) of the next slice's plate in MEMFS: the
+// bytes are copied, so the caller may free them. Returns 0, or 1 when the
+// index is out of range or the file can't be written.
+EMSCRIPTEN_KEEPALIVE int fs_stage_model(int index, const char* name, const uint8_t* data, int len)
+{
+    ensure_runtime();
+    if (index < 1 || index >= 1000 || len < 0) return 1;
+    const std::string path = "/tmp/model_" + std::to_string(index) + "." + model_extension(name);
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return 1;
+    const size_t wrote = len > 0 ? std::fwrite(data, 1, size_t(len), f) : 0;
+    std::fclose(f);
+    if (wrote != size_t(len)) {
+        ::unlink(path.c_str());
+        return 1;
+    }
+    std::lock_guard<std::mutex> lock(g_options_mutex);
+    if (g_staged.size() <= size_t(index)) g_staged.resize(size_t(index) + 1);
+    g_staged[size_t(index)] = path;
     return 0;
 }
 

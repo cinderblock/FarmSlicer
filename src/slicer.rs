@@ -25,13 +25,19 @@ mod ffi {
         logo_height: u32,
         /// TrueType font for the label.
         font_path: String,
+    }
+
+    /// One model file and every copy of it on the plate
+    /// (`crate::placement::PlateLayout`).
+    struct ModelInput {
+        path: String,
         /// Name for a single-object model (instead of the stored file's).
-        model_name: String,
-        /// Where the user put the model (`crate::placement::Placement`): a
-        /// row-major 3x3 rotation and the XY offset of its bounding-box
-        /// centre from the bed centre. Empty = centred, as loaded.
-        placement_rotation: Vec<f64>,
-        placement_offset: Vec<f64>,
+        name: String,
+        /// Per copy, where the user put it: a row-major 3x3 rotation (9
+        /// numbers each) and the XY offset of its bounding-box centre from
+        /// the bed centre (2 each). Empty = one copy, centred as loaded.
+        rotations: Vec<f64>,
+        offsets: Vec<f64>,
     }
 
     /// Outcome of one `Slicer::slice` call.
@@ -66,13 +72,13 @@ mod ffi {
         /// nozzle info tables, flush matrices).
         fn new_slicer(resources_dir: &str) -> UniquePtr<Slicer>;
 
-        /// Slice `model_path` (STL/3MF/OBJ/STEP) with the merged OrcaSlicer
-        /// config `config_json` (a JSON object of profile keys) and write
-        /// G-code to `output_path`, plus what `options` asks for.
+        /// Slice the plate `models` make (STL/3MF/OBJ/STEP) with the merged
+        /// OrcaSlicer config `config_json` (a JSON object of profile keys)
+        /// and write G-code to `output_path`, plus what `options` asks for.
         fn slice(
             &self,
             job_id: &str,
-            model_path: &str,
+            models: &Vec<ModelInput>,
             config_json: &str,
             output_path: &str,
             options: &SliceOptions,
@@ -101,9 +107,13 @@ mod stub {
         pub logo_width: u32,
         pub logo_height: u32,
         pub font_path: String,
-        pub model_name: String,
-        pub placement_rotation: Vec<f64>,
-        pub placement_offset: Vec<f64>,
+    }
+
+    pub struct ModelInput {
+        pub path: String,
+        pub name: String,
+        pub rotations: Vec<f64>,
+        pub offsets: Vec<f64>,
     }
 
     pub struct SliceResult {
@@ -133,7 +143,7 @@ mod stub {
         pub fn slice(
             &self,
             _job_id: &str,
-            _model_path: &str,
+            _models: &Vec<ModelInput>,
             _config_json: &str,
             _output_path: &str,
             _options: &SliceOptions,

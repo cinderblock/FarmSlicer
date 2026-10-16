@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace farmslicer {
 
@@ -23,7 +24,7 @@ Slicer::~Slicer() = default;
 
 SliceResult Slicer::slice(
     rust::Str job_id,
-    rust::Str model_path,
+    const rust::Vec<ModelInput>& models,
     rust::Str config_json,
     rust::Str output_path,
     const SliceOptions& options
@@ -44,15 +45,28 @@ SliceResult Slicer::slice(
     opts.overlay.logo_width = options.logo_width;
     opts.overlay.logo_height = options.logo_height;
     opts.overlay.font_path = std::string(options.font_path);
-    opts.model_name = std::string(options.model_name);
-    if (options.placement_rotation.size() == 9 && options.placement_offset.size() == 2) {
-        opts.placement.set = true;
-        std::copy(options.placement_rotation.begin(), options.placement_rotation.end(), opts.placement.rotation);
-        std::copy(options.placement_offset.begin(), options.placement_offset.end(), opts.placement.offset);
+
+    std::vector<core::ModelInput> inputs;
+    for (const ModelInput& m : models) {
+        core::ModelInput in;
+        in.path = std::string(m.path);
+        in.name = std::string(m.name);
+        // Placed copies: 9 rotation and 2 offset numbers each (the server
+        // checked them); anything else is one copy, centred.
+        const size_t copies = m.rotations.size() / 9;
+        if (m.rotations.size() == copies * 9 && m.offsets.size() == copies * 2) {
+            for (size_t c = 0; c < copies; ++c) {
+                core::Placement p;
+                p.set = true;
+                std::copy(m.rotations.begin() + c * 9, m.rotations.begin() + (c + 1) * 9, p.rotation);
+                std::copy(m.offsets.begin() + c * 2, m.offsets.begin() + (c + 1) * 2, p.offset);
+                in.parts.push_back(p);
+            }
+        }
+        inputs.push_back(std::move(in));
     }
 
-    const core::Outcome out = core::slice_file(
-        to_std(model_path), to_std(config_json), to_std(output_path), cb, opts);
+    const core::Outcome out = core::slice_models(inputs, to_std(config_json), to_std(output_path), cb, opts);
 
     SliceResult result;
     result.success = out.ok;

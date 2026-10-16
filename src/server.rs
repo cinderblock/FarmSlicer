@@ -855,9 +855,6 @@ async fn create_job(
     } else {
         PlateLayout::single(Some(Placement::parse(&placement_str).map_err(|e| bad(&e))?))
     };
-    if plate.objects.len() > 1 {
-        return Err(bad(&"several parts on one plate aren't supported yet"));
-    }
     let proposed = if proposed_str.is_empty() {
         None
     } else if proposed_str.len() > MAX_PROPOSED_BYTES
@@ -933,7 +930,7 @@ async fn create_job(
     let job = state.db.get_job(&job_id).expect("job just created");
     let state_clone = state.clone();
     tokio::task::spawn_blocking(move || {
-        run_slice(&state_clone, &job_id, &first_stored, &config_json);
+        run_slice(&state_clone, &job_id, &config_json);
     });
 
     Ok((StatusCode::CREATED, Json(json!(job))))
@@ -1020,6 +1017,11 @@ fn browser_slice_options(state: &AppState, job: &Job, config_json: &str) -> Valu
         "package": bambu,
         "printer_model_id": if bambu { printer_model_id(state, config_json).unwrap_or_default() } else { String::new() },
         "model_name": job.model_name,
+        // Every part on the plate, by model index (the engine stages the
+        // models in that order); single-part jobs also send `placement` for
+        // engines from before plates.
+        "plate": job_plate(job),
+        "models": state.db.job_models(&job.id).iter().map(|m| json!({"name": m.name})).collect::<Vec<_>>(),
         "label": overlay.label,
         "logo_url": overlay.logo.as_ref().and(job.group_id.as_ref()).map(|g| format!("/api/groups/{g}/overlay/logo")),
         "placement": job_placement(job),
@@ -1037,19 +1039,53 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
     if let Some(job) = state.db.get_job(job_id) {
         let overlay = crate::overlay::overlay_for_job(state, &job);
         options.font_path = crate::overlay::font_path();
-        options.model_name = job.model_name.clone();
         options.label = overlay.label;
         if let Some((rgba, w, h)) = overlay.logo {
             options.logo_rgba = rgba;
             options.logo_width = w;
             options.logo_height = h;
         }
-        if let Some(p) = job_placement(&job) {
-            options.placement_rotation = p.rotation.to_vec();
-            options.placement_offset = p.offset.to_vec();
-        }
     }
     options
+}
+
+/// What the server's slicer gets for a job: each stored model with the
+/// placements of its copies on the plate.
+fn model_inputs(state: &AppState, job: &Job) -> Result<Vec<slicer::ModelInput>, String> {
+    let mut models = state.db.job_models(&job.id);
+    if models.is_empty() && !job.model_path.is_empty() {
+        // A job from before job_models was backfilled.
+        models.push(crate::db::JobModel {
+            idx: 0,
+            name: job.model_name.clone(),
+            path: job.model_path.clone(),
+            bytes: 0,
+            sha256: None,
+        });
+    }
+    let plate = job_plate(job);
+    models
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            if m.path.is_empty() {
+                return Err(format!("{} stayed in the browser that sliced it", m.name));
+            }
+            let mut input = slicer::ModelInput {
+                path: m.path.clone(),
+                name: m.name.clone(),
+                rotations: Vec::new(),
+                offsets: Vec::new(),
+            };
+            for o in plate.objects.iter().filter(|o| o.model == i) {
+                if let Some(p) = &o.placement {
+                    input.rotations.extend(p.rotation);
+                    input.offsets.extend(p.offset);
+                }
+            }
+            Ok(input)
+        })
+        .collect()
 }
 
 /// The job's parts; stored plates were checked when the job was created.
@@ -1063,9 +1099,14 @@ pub(crate) fn job_plate(job: &Job) -> PlateLayout {
         })
 }
 
-/// The placement of a single-part job.
+/// The placement of a single-part job (engines from before plates take
+/// only that).
 fn job_placement(job: &Job) -> Option<Placement> {
-    job_plate(job).objects.into_iter().next().and_then(|o| o.placement)
+    let plate = job_plate(job);
+    match plate.objects.as_slice() {
+        [one] => one.placement.clone(),
+        _ => None,
+    }
 }
 
 /// Read a freshly written package, attach it to the job (sendable now) and
@@ -1106,23 +1147,33 @@ pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_fil
     }
 }
 
-fn run_slice(state: &Arc<AppState>, job_id: &str, model_path: &str, config_json: &str) {
+fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
     // One slice at a time: wait for the engine before leaving "queued".
     let handle = state.slicer.lock().unwrap();
 
     // Cancelled while waiting in the queue? Then don't start.
-    match state.db.get_job(job_id) {
-        Some(job) if job.status == "queued" => {}
+    let job = match state.db.get_job(job_id) {
+        Some(job) if job.status == "queued" => job,
         _ => {
             progress::clear(job_id);
             return;
         }
-    }
+    };
     state.db.update_job_status(job_id, "slicing", 0);
+    let models = match model_inputs(state, &job) {
+        Ok(models) => models,
+        Err(e) => {
+            drop(handle);
+            progress::clear(job_id);
+            state.db.fail_job(job_id, &e);
+            println!("job {job_id}: failed: {e}");
+            return;
+        }
+    };
 
     let output_path = gcode_output_path(state, job_id);
     let options = slice_options(state, job_id, config_json);
-    let result = handle.0.slice(job_id, model_path, config_json, &output_path, &options);
+    let result = handle.0.slice(job_id, &models, config_json, &output_path, &options);
     drop(handle);
     progress::clear(job_id);
 

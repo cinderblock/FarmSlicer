@@ -30,6 +30,8 @@ interface EngineModule {
   _fs_thread_count?(): number;
   /** Engines built before packaging lack it. */
   _fs_set_options?(json: number, jsonLen: number, logo: number, logoLen: number): number;
+  /** Engines built before plates of several parts lack it. */
+  _fs_stage_model?(index: number, name: number, data: number, len: number): number;
   FS: { readFile(path: string): Uint8Array; unlink(path: string): void };
   _fs_cancel(): void;
   _fs_free(ptr: number): void;
@@ -45,6 +47,7 @@ let engine: EngineModule | null = null;
 let threaded = false;
 /** The engine applies SliceOptions.placement (older engines ignore it). */
 let placesModels = false;
+let takesPlates = false;
 let currentId = 0;
 
 function writeString(m: EngineModule, s: string): { ptr: number; len: number } {
@@ -80,6 +83,7 @@ async function init(variant: "st" | "mt", baseUrl: string, threads?: number) {
   const version = JSON.parse(engine.UTF8ToString(engine._fs_version()));
   threaded = Boolean(version.threads) && typeof engine._fs_slice_start === "function";
   placesModels = Boolean(version.placement);
+  takesPlates = Boolean(version.plate) && typeof engine._fs_stage_model === "function";
   const threadCount = threaded && engine._fs_thread_count ? engine._fs_thread_count() : 1;
   post({ type: "ready", version, threadCount });
 }
@@ -128,7 +132,7 @@ function setOptions(m: EngineModule, options: SliceOptions): boolean {
   return rc === 0;
 }
 
-async function slice(id: number, modelName: string, model: ArrayBuffer, config: string, options?: SliceOptions) {
+async function slice(id: number, models: { name: string; data: ArrayBuffer }[], config: string, options?: SliceOptions) {
   if (!engine) {
     post({ type: "error", id, error: "engine not initialised" });
     return;
@@ -136,18 +140,49 @@ async function slice(id: number, modelName: string, model: ArrayBuffer, config: 
   const m = engine;
   currentId = id;
   const started = performance.now();
+  if (models.length === 0) {
+    post({ type: "error", id, error: "no model to slice" });
+    return;
+  }
+  // A plate of several parts needs an engine that takes plates; one part
+  // goes through `placement`, which older engines understand too.
+  const parts = options?.plate?.objects.length ?? 1;
+  if ((parts > 1 || models.length > 1) && !takesPlates) {
+    post({ type: "error", id, error: "this browser engine predates plates of several parts; reload the page, or slice on the server" });
+    return;
+  }
+  if (options && !takesPlates) {
+    options = { ...options };
+    delete options.plate;
+    delete options.models;
+  }
   // A placed model must not be sliced by an engine that would ignore the
   // placement: the G-code would come out centred, in the file's orientation.
   if (options?.placement && !placesModels) {
     post({ type: "error", id, error: "this browser engine predates part placement; reload the page, or slice on the server" });
     return;
   }
-  if (options && !setOptions(m, options) && options.placement) {
-    post({ type: "error", id, error: "the browser engine refused the part's placement" });
+  if (options && !setOptions(m, options) && (options.placement || options.plate)) {
+    post({ type: "error", id, error: "the browser engine refused the plate's layout" });
     return;
   }
+  // Models 1, 2, ... go to MEMFS first; model 0 is fs_slice's own argument.
+  for (let i = 1; i < models.length; i++) {
+    const bytes = new Uint8Array(models[i].data);
+    const ptr = m._malloc(Math.max(1, bytes.length));
+    m.HEAPU8.set(bytes, ptr);
+    const n = writeString(m, models[i].name);
+    const rc = m._fs_stage_model!(i, n.ptr, ptr, bytes.length);
+    m._free(ptr);
+    m._free(n.ptr);
+    if (rc !== 0) {
+      post({ type: "error", id, error: `could not stage ${models[i].name} in the engine` });
+      return;
+    }
+  }
 
-  const modelBytes = new Uint8Array(model);
+  const modelName = models[0].name;
+  const modelBytes = new Uint8Array(models[0].data);
   const modelPtr = m._malloc(Math.max(1, modelBytes.length));
   m.HEAPU8.set(modelBytes, modelPtr);
   const name = writeString(m, modelName);
@@ -230,7 +265,7 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       );
       break;
     case "slice":
-      void slice(msg.id, msg.modelName, msg.model, msg.config, msg.options);
+      void slice(msg.id, msg.models, msg.config, msg.options);
       break;
     case "cancel":
       engine?._fs_cancel();

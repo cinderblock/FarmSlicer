@@ -42,6 +42,15 @@ export interface Placement {
   offset: [number, number];
 }
 
+/**
+ * Every part on the plate (src/placement.rs `PlateLayout`): `model` indexes
+ * the job's models in order; a model can be placed several times (copies).
+ * A lone part may go without a placement (centred as loaded).
+ */
+export interface PlateLayout {
+  objects: { model: number; placement?: Placement | null }[];
+}
+
 /** What a slice produces besides G-code (the server decides; see POST /api/jobs). */
 export interface SliceOptions {
   /** Write a Bambu sliced project (.gcode.3mf). */
@@ -52,8 +61,12 @@ export interface SliceOptions {
   label: string;
   /** Thumbnail logo as RGBA rows, top-down. */
   logo?: { rgba: ArrayBuffer; width: number; height: number };
-  /** Where the job put the model; null/absent = centred as loaded. */
+  /** Where a single-part job put the model; null/absent = centred as loaded (engines from before plates). */
   placement?: Placement | null;
+  /** Every part on the plate, by model index. */
+  plate?: PlateLayout | null;
+  /** The plate's models, in order. */
+  models?: { name: string }[];
 }
 
 export interface SliceOutput {
@@ -70,11 +83,15 @@ export interface SliceOutput {
 
 export type WorkerRequest =
   | { type: "init"; variant: EngineVariant; baseUrl: string; threads?: number }
-  | { type: "slice"; id: number; modelName: string; model: ArrayBuffer; config: string; options?: SliceOptions }
+  | { type: "slice"; id: number; models: { name: string; data: ArrayBuffer }[]; config: string; options?: SliceOptions }
   | { type: "cancel" };
 
 export type WorkerResponse =
-  | { type: "ready"; version: { engine: string; orca: string; threads: boolean; placement?: boolean }; threadCount: number }
+  | {
+      type: "ready";
+      version: { engine: string; orca: string; threads: boolean; placement?: boolean; plate?: boolean };
+      threadCount: number;
+    }
   | { type: "init-error"; error: string }
   | { type: "progress"; id: number; percent: number; message: string }
   | { type: "done"; id: number; gcode: ArrayBuffer; package: ArrayBuffer | null; report: SliceReport; elapsedMs: number }
