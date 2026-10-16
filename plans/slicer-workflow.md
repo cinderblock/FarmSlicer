@@ -89,7 +89,7 @@ the user gave them):
   Support For PA PET, ...); base = the cheapest plain filament of the part's
   polymer by the farm's `filament_prices` (PLA-CF part → PLA Basic base).
   Single-material supports remain a choice. **Changed after measuring
-  (awaiting the user's OK, open question 1):** the default base is the
+  (the user OK'd it):** the default base is the
   part's own filament; cheaper bases are offered with their cost said. A
   separate base swaps filament on every support layer: the T test part
   took 43 min with its own base and 3 h 6 min with a PLA base (PLA-CF part,
@@ -158,8 +158,9 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
     real slices on buildhost (multi-part plate, support filaments on X1C and
     H2D).
 11. [x] Docs: README, CLAUDE.md project structure (`93b9136`).
-12. [ ] Push and deploy: needs the user (push to origin; the ops repo pins
-    the image CI builds).
+12. [x] Pushed (`91a48c2`, CI green) and deployed: ops `38297ff` pins
+    `sha256:629010bb...`; the Server Deploys run succeeded and on 2026-10-16
+    buildhost ran that digest, healthy.
 
 ## Findings / gotchas
 
@@ -250,16 +251,13 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
   (X1C and H2D), three filaments; native image: support slices, the crash
   case three times, a three-copy plate with an interface sliced, previewed
   and re-sliced, the Reports page (headless Chrome).
-- [ ] Not pushed; not deployed (needs the user).
+- [x] Pushed and deployed (user OK'd 2026-10-16), healthy in production.
 - [ ] H2D multi-filament print on hardware (needs a printer and the user).
 
 ## Open questions for the user
 
-1. Support base default: keep the part's own filament (measured: a
-   separate base made a small part take 3 h instead of 43 min), or go back
-   to the cheapest plain filament as first agreed? Recommendation: keep
-   the part's.
-2. Push `master` (CI builds the image) and pin it in the ops repo?
+(1. Support base default: the part's own filament — OK'd by the user.
+2. Push and pin — OK'd and done.)
 3. When convenient, send one multi-filament job (supports in Support For
    PLA) to the H2D to confirm the AMS nozzle mapping on hardware.
 
