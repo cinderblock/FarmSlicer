@@ -1513,6 +1513,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::farm_api::routes())
         .merge(crate::printer_thumbs::routes())
         .merge(crate::feedback_api::routes())
+        .merge(crate::reports_api::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),

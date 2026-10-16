@@ -21,6 +21,7 @@ import GroupPage from "./pages/Group";
 import JoinPage from "./pages/Join";
 import SettingsPage from "./pages/Settings";
 import FeedbackPage from "./pages/Feedback";
+import ReportsPage from "./pages/Reports";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
@@ -89,6 +90,7 @@ function Gate() {
         <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
         <Route path="settings" element={isAdmin ? <SettingsPage /> : <Navigate to="/" replace />} />
         <Route path="feedback" element={<FeedbackPage />} />
+        <Route path="reports" element={isAdmin ? <ReportsPage /> : <Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -1470,6 +1470,24 @@ impl Db {
         .unwrap();
     }
 
+    /// What jobs of the last `days` days (0 = all) were made from and what
+    /// the Slice page proposed for them: (inputs, proposed, overrides).
+    pub fn jobs_with_proposals(&self, days: u32) -> Vec<(String, String, Option<String>)> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT inputs_json, proposed_json, overrides_json FROM jobs
+                 WHERE inputs_json IS NOT NULL AND proposed_json IS NOT NULL
+                   AND (?1 = 0 OR created_at >= datetime('now', '-' || ?1 || ' days'))
+                 ORDER BY created_at DESC",
+            )
+            .unwrap();
+        stmt.query_map(params![days], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
     /// Jobs that have a package (for re-checking their G-code).
     pub fn jobs_with_packages(&self) -> Vec<String> {
         let conn = self.conn.lock().unwrap();

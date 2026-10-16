@@ -60,7 +60,14 @@ const plate = {
     { model: 1, placement: { rotation: ID, offset: [30, 0] } },
   ],
 };
-const proposed = { filaments: ["Bambu PLA Basic @BBL X1C"], overrides: {} };
+// What the page proposed: a Cool Plate the job then didn't use, supports on.
+const proposed = {
+  nozzle: "0.4",
+  bed_type: "Cool Plate",
+  filaments: ["Bambu PLA Basic @BBL X1C"],
+  supports: { enabled: true, materials: { mode: "same" } },
+  overrides: {},
+};
 r = await jobForm(alice, [
   ["source", "browser"],
   model(CUBE, "cube.stl"),
@@ -146,6 +153,18 @@ r = await browserResult(alice, job);
 check(r.status === 200 && r.json?.status === "done", "the browser slice finishes", json(r));
 r = await alice.get("/api/slices");
 check(r.json?.some((s) => s.job_id === job && s.has_model), "its slice says the model is kept", json(r));
+
+// ---- which defaults people change -------------------------------------------------
+r = await owner.get("/api/reports/defaults?days=0");
+check(r.status === 200 && r.json?.jobs >= 1, "admins get the defaults-changed report", json(r));
+const bed = r.json?.settings?.find((st) => st.key === "bed_type");
+check(bed?.changed >= 1 && bed?.to?.[0]?.[0] === "Textured PEI Plate", "the plate type is compared", json(r));
+const supportsStat = r.json?.settings?.find((st) => st.key === "enable_support");
+check(supportsStat?.jobs >= 1 && supportsStat?.changed === 0, "supports left on count as kept", json(r));
+const nozzle = r.json?.settings?.find((st) => st.key === "nozzle");
+check(nozzle?.jobs >= 1 && nozzle?.changed === 0, "the nozzle in the machine's name is compared", json(r));
+r = await alice.get("/api/reports/defaults");
+check(r.status === 403, "members don't", json(r));
 
 // ---- models kept on this device ---------------------------------------------------
 r = await jobForm(alice, [

@@ -20,6 +20,7 @@ const navItems = [
 const adminItems = [
   { to: "/users", label: "Users" },
   { to: "/feedback", label: "Feedback" },
+  { to: "/reports", label: "Reports" },
   { to: "/settings", label: "Settings" },
 ];
 

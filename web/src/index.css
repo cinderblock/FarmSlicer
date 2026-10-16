@@ -620,6 +620,25 @@ body {
   font-size: 0.9rem;
 }
 
+/* Reports: how often a default is changed. */
+.share-bar {
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  margin-bottom: 0.2rem;
+}
+
+.share-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.defaults-report td {
+  vertical-align: top;
+}
+
 /* Supports: on/off, style, support materials, the plate's overhang check. */
 .supports-panel {
   display: flex;
