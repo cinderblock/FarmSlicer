@@ -88,7 +88,12 @@ the user gave them):
   vendor support material matching the part's polymer (Support for PLA,
   Support For PA PET, ...); base = the cheapest plain filament of the part's
   polymer by the farm's `filament_prices` (PLA-CF part → PLA Basic base).
-  Single-material supports remain a choice.
+  Single-material supports remain a choice. **Changed after measuring
+  (awaiting the user's OK, open question 1):** the default base is the
+  part's own filament; cheaper bases are offered with their cost said. A
+  separate base swaps filament on every support layer: the T test part
+  took 43 min with its own base and 3 h 6 min with a PLA base (PLA-CF part,
+  X1C).
 - **Track how often users change defaults** (user, Q2): each job records
   what the Slice page proposed next to what was used, so an admin report can
   show which defaults (support materials and every other setting) get
@@ -106,8 +111,7 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
 (feedback) are independent of the rest.
 
 1. [x] Item 3: settings scroll / narrow layout (`928afc0`).
-2. [x] **Job inputs foundation (items 5, 7)** (`8fd9b23`; the defaults-changed
-   report itself is still to do, step 5b): `job_models` table (several
+2. [x] **Job inputs foundation (items 5, 7)** (`8fd9b23`): `job_models` table (several
    model files per job, `ON DELETE CASCADE`), `jobs.inputs_json` (machine,
    process, filaments, bed type, printer, routing, support choices),
    `jobs.plate_json` (objects: model index + placement, several per model),
@@ -120,16 +124,16 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
    package, delete slices rows + files. Bulk delete on the Jobs page.
 4. [x] **Re-slice (item 5)** (`3b323a1`): `/slice?from=<job>` loads the job's models,
    plate and inputs into the Slice page; slicing makes a new job.
-5. [ ] **Supports section (items 1, 6, 8)** ← current: a dedicated Supports
+5. [x] **Supports section (items 1, 6, 8)** (`2443e10`, preview `239c653`): a dedicated Supports
    block on the Slice page (not buried in Quick Settings): on by default,
    type, base/interface filament; the viewer highlights overhangs (threshold
    from the config) and floating islands; slicer support warnings shown
    prominently after slicing (and the "ignored N config keys" noise kept out
    of the user's way).
-5b. [ ] **Defaults-changed report**: the Slice page sends `proposed` (its
+5b. [x] **Defaults-changed report** (`ef5b7b8`, `/reports`): the Slice page sends `proposed` (its
    defaults: profiles, support choices, overrides); an admin report shows per
    setting how often users change it and to what.
-6. [ ] **Multi-filament configs (item 6)**: `resolve_config` takes a filament
+6. [x] **Multi-filament configs (item 6)** (`2a61118`, H2D mapping `563c852`): `resolve_config` takes a filament
    list and builds per-filament vectors like `PresetBundle::full_config`
    (including H2D extruder variants, `filament_self_index`, `filament_map`);
    `support_filament` / `support_interface_filament`; AMS mapping matches
@@ -138,7 +142,7 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
    add file, duplicate, fill plate, delete, arrange, overlap check);
    slice_core takes model inputs with per-instance placements; cxx and wasm
    bridges; server multipart with several models.
-8. [x] **Layer viewer (item 2)** (branch `gcode-preview`, `plans/gcode-preview.md`; the Slice page embedding is left to that page's thread): `GET /api/jobs/{id}/gcode`; a worker parses
+8. [x] **Layer viewer (item 2)** (merged `f75743a`, `plans/gcode-preview.md`; on the Slice page `239c653`): `GET /api/jobs/{id}/gcode`; a worker parses
    G-code into per-layer typed arrays (feature types from `;TYPE:`,
    widths/heights from `;WIDTH:`/`;HEIGHT:`); three.js preview with a layer
    slider, feature colours/legend, travel toggle. Shown in a job page
@@ -149,11 +153,13 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
    `window.onerror`, unhandled rejections, `console.error` (wrapped, never
    suppressed), React render errors and failed API calls, deduplicated by
    fingerprint with counts; server-side job failures too; admin triage page.
-10. [ ] Tests: e2e per server feature (delete, re-slice inputs, multi-model,
+10. [x] Tests: e2e per server feature (delete, re-slice inputs, multi-model,
     feedback, gcode endpoint), unit tests (profile vectors, placement list),
     real slices on buildhost (multi-part plate, support filaments on X1C and
     H2D).
-11. [ ] Docs: README, CLAUDE.md project structure.
+11. [x] Docs: README, CLAUDE.md project structure (`93b9136`).
+12. [ ] Push and deploy: needs the user (push to origin; the ops repo pins
+    the image CI builds).
 
 ## Findings / gotchas
 
@@ -194,6 +200,36 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
   `viewer.mjs`, `reslice.mjs`). The T3 preview tools went away mid-session
   ("No preview automation host").
 
+- Multi-filament slicing needed what the desktop app keeps in the project,
+  not the presets: `filament_colour` (one per filament; libslic3r sizes its
+  filament grouping by it, else "Grouping error: PLA can not be placed in
+  the right nozzle" from a filament map read out of bounds) and the purge
+  volume matrix ("Flush volumes matrix do not match to the correct
+  size!"). Per-variant filament keys must have an entry per nozzle variant
+  (X1C filaments have two variants too), else libslic3r reads a
+  neighbour's values ("variant index 2 out of range" in its log).
+- `RGB2HSV` (FlushVolCalculator) lives in OrcaSlicer's GUI library: a link
+  error in the engine; `cxx/color_space_shim.cpp`.
+- Native-only segfault (exit 139) in libslic3r's conflict check:
+  `FakeWipeTower` uninitialised when a multi-filament config prints one
+  filament. Found with gdb in a throwaway container on an unstripped image
+  (`Dockerfile.uxdbg`: the build without `strip`). Workaround `ZeroedPrint`;
+  `issues/libslic3r-fake-wipe-tower.md`.
+- libslic3r writes `M1020 S<n>` for Bambu tool changes; the G-code check's
+  hand-written list lacked it (FarmSlicer's own two-filament slice needed
+  review). Support materials print as "PLA-S"/"PA-S": the check now looks
+  them up under the base material.
+- AMS `info` is hex flags; bits 8-11 = extruder (0 main/right, 1 deputy/
+  left), per OrcaSlicer's DeviceCore. The old parser read the first
+  decimal digit (unused until now).
+- Print times on the X1C test T (one part): PLA alone 23 min; PLA + Support
+  For PLA interface 37 min; PLA-CF + interface 43 min; PLA-CF + interface +
+  PLA base 3 h 6 min. Three copies with an interface: 1 h 2 min, prime
+  tower 26% of it.
+- `support_threshold_angle` 0 = auto; the viewer uses 30° then.
+- The preview agent's screenshots are in `~/fs-pw/preview-shots` on the dev
+  machine (its worktree was removed after the merge).
+
 ## Progress log
 
 - [x] Explored jobs/storage, profiles/filaments/AMS, slicer core/viewer.
@@ -205,13 +241,27 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
 - [x] Re-slice from the Jobs page, checked headless against the real slicer.
 - [x] Feedback merged from its branch (`7e4768c`); full e2e green after the
   merge (12 suites, 124 unit tests).
-- [ ] Layer viewer: branch in progress (background agent).
-- [ ] Supports section, multi-filament, defaults-changed report.
-- [ ] Docs (README/CLAUDE.md) for job history, plates, re-slice.
+- [x] Layer viewer merged (`f75743a`); on the Slice page after slicing.
+- [x] Multi-filament jobs, support materials, dual-nozzle mapping; the
+  Supports section with the overhang check; the defaults-changed report.
+- [x] Docs (README/CLAUDE.md).
+- [x] Final verification: 133 Rust tests, 13 e2e suites, 35 web tests;
+  WebAssembly st engine: single, plate, plate + package, support interface
+  (X1C and H2D), three filaments; native image: support slices, the crash
+  case three times, a three-copy plate with an interface sliced, previewed
+  and re-sliced, the Reports page (headless Chrome).
+- [ ] Not pushed; not deployed (needs the user).
+- [ ] H2D multi-filament print on hardware (needs a printer and the user).
 
 ## Open questions for the user
 
-(none open; Q1-Q4 answered, see Decisions)
+1. Support base default: keep the part's own filament (measured: a
+   separate base made a small part take 3 h instead of 43 min), or go back
+   to the cheapest plain filament as first agreed? Recommendation: keep
+   the part's.
+2. Push `master` (CI builds the image) and pin it in the ops repo?
+3. When convenient, send one multi-filament job (supports in Support For
+   PLA) to the H2D to confirm the AMS nozzle mapping on hardware.
 
 ## Things not to do
 

@@ -43,3 +43,12 @@ username-less button. Affects setup, invites and the join flow alike.
 full (non-guest) user can rename, rewrite or delete profiles someone else
 made, including the farm's tuned ones. Why it matters: the maintainer keeps
 the farm's tuned profiles there (plans/printer-control.md).
+
+## Models kept in a browser are never removed from it
+
+"Keep the model on this device only" stores browser-sliced models in
+IndexedDB (`web/src/localModels.ts`, keyed by SHA-256). Nothing ever deletes
+them: deleting the job (Jobs page) leaves the file in that browser. Why it
+matters: the store only grows. A model may be shared by several jobs, so a
+delete has to check the user's other jobs first (`GET /api/jobs` carries
+`local_models`, `GET /api/jobs/{id}` the digests).
