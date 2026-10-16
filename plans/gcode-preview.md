@@ -13,7 +13,8 @@ job page (`/jobs/:id`). The Slice page will embed the same component later
 ## Environment / context
 
 - Branch `gcode-preview` (worktree `.claude/worktrees/agent-ac857d2a38cf7aa17`),
-  fast-forwarded to master `4f4d39f` first.
+  replayed onto master `130413a` (job history, plates, re-slice, feedback)
+  once those landed.
 - Rust checks run on buildhost: sources in `~/farmslicer-preview`, target dir
   `~/farmslicer-preview-target` (seeded from the placement target). e2e on a
   free port (9346 here) with `PATH=$HOME/.cargo/bin:$PATH`.
@@ -31,10 +32,9 @@ job page (`/jobs/:id`). The Slice page will embed the same component later
 
 ## Decisions already made (don't re-ask)
 
-- Job page fetches `GET /api/jobs/{id}` (master's handler, being added on the
-  main thread). Until it lands, a temporary handler sits in its own commit
-  (`8e7474c`, "temporary: replaced by master's get_job"): drop it when
-  merging.
+- Job page fetches `GET /api/jobs/{id}` (master's handler). The temporary
+  stand-in commit was dropped when the branch moved onto master, which has
+  it; the page names profiles from its `inputs` and offers Re-slice.
 - `GET /api/jobs/{id}/gcode` is ours: `src/preview_api.rs`, one `.merge` line
   in `src/server.rs`; `prints_api::visible_job` made `pub(crate)` instead of a
   third copy.
@@ -63,10 +63,10 @@ without the UI.
 ## Plan / steps
 
 1. [x] Real samples from the production image.
-2. [x] Server endpoint + e2e test (`e2dbe80`).
-3. [x] Parser in a worker + `bun test` unit tests (`52f1f2b`).
-4. [x] Renderer + controls (`3d3140e`).
-5. [x] Job page `/jobs/:id`, link from Jobs (`0297b65`).
+2. [x] Server endpoint + e2e test (`9114169`).
+3. [x] Parser in a worker + `bun test` unit tests (`38b1a1f`).
+4. [x] Renderer + controls (`cb3bd8e`).
+5. [x] Job page `/jobs/:id`, link from Jobs (`4728cb6`, `8d71c0f`).
 6. [x] Browser check with real files, performance numbers.
 7. [x] Docs (README, CLAUDE.md), plan updates.
 
@@ -115,7 +115,9 @@ without the UI.
   X1C 256 mm, Voron 350 mm, MK4S 250x210), supports, travel/retractions,
   colour modes, feature hiding, lines, narrow layout, missing job, in-memory
   sources (text, bytes, view, Blob) and abort.
-- [x] Full `cargo test` (112 passed) and all 11 e2e suites (exit 0).
+- [x] Full `cargo test` (126 passed, 1 ignored) and all 13 e2e suites
+  (exit 0) on the branch replayed onto master; the browser checks re-run
+  there too.
 
 ## Open questions for the user
 
