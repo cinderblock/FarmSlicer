@@ -138,7 +138,7 @@ Order chosen so shared foundations land first. Items 2 (layer viewer) and 4
    add file, duplicate, fill plate, delete, arrange, overlap check);
    slice_core takes model inputs with per-instance placements; cxx and wasm
    bridges; server multipart with several models.
-8. [ ] **Layer viewer (item 2)**: `GET /api/jobs/{id}/gcode`; a worker parses
+8. [x] **Layer viewer (item 2)** (branch `gcode-preview`, `plans/gcode-preview.md`; the Slice page embedding is left to that page's thread): `GET /api/jobs/{id}/gcode`; a worker parses
    G-code into per-layer typed arrays (feature types from `;TYPE:`,
    widths/heights from `;WIDTH:`/`;HEIGHT:`); three.js preview with a layer
    slider, feature colours/legend, travel toggle. Shown in a job page
