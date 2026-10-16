@@ -19,8 +19,14 @@ import GroupsPage from "./pages/Groups";
 import GroupPage from "./pages/Group";
 import JoinPage from "./pages/Join";
 import SettingsPage from "./pages/Settings";
+import FeedbackPage from "./pages/Feedback";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
+import { installErrorReporting, setSignedIn } from "./errorReporting";
 import "./index.css";
+
+// First, so errors while the app starts are caught too.
+installErrorReporting();
 
 declare const __BUILD_VERSION__: string;
 
@@ -80,23 +86,35 @@ function Gate() {
         <Route path="groups/:id" element={<GroupPage />} />
         <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
         <Route path="settings" element={isAdmin ? <SettingsPage /> : <Navigate to="/" replace />} />
+        <Route path="feedback" element={<FeedbackPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );
 }
 
+/** Error reports wait in the browser until someone is signed in. */
+function useReportingAuth() {
+  const { status } = useAuth();
+  useEffect(() => {
+    if (status) setSignedIn(status.authenticated);
+  }, [status]);
+}
+
 function App() {
   useAutoRefresh();
+  useReportingAuth();
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/invite/:token" element={<InvitePage />} />
-        <Route path="/recover" element={<RecoverPage />} />
-        <Route path="/join/group/:id" element={<JoinPage />} />
-        <Route path="/join/:code" element={<JoinPage />} />
-        <Route path="/*" element={<Gate />} />
-      </Routes>
+      <ErrorBoundary fullPage>
+        <Routes>
+          <Route path="/invite/:token" element={<InvitePage />} />
+          <Route path="/recover" element={<RecoverPage />} />
+          <Route path="/join/group/:id" element={<JoinPage />} />
+          <Route path="/join/:code" element={<JoinPage />} />
+          <Route path="/*" element={<Gate />} />
+        </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }
