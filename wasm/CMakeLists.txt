@@ -167,7 +167,8 @@ add_executable(farmslicer_engine
   bridge/farmslicer_wasm.cpp
   bridge/fast_strtod.cpp
   ../cxx/slice_core.cpp
-  ../cxx/thumbnail.cpp)
+  ../cxx/thumbnail.cpp
+  ../cxx/color_space_shim.cpp)
 set_target_properties(farmslicer_engine PROPERTIES OUTPUT_NAME "${_engine_name}" SUFFIX ".mjs")
 target_include_directories(farmslicer_engine PRIVATE
   ${ORCA_SRC_DIR}/src

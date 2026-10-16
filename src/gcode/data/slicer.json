@@ -238,6 +238,15 @@
       "why": "tool change",
       "any_tool": true
     },
+    "M1020": {
+      "why": "tool change on Bambu printers (libslic3r's GCodeWriter::toolchange_prefix writes M1020 S<filament> there instead of T)",
+      "words": {
+        "S": {
+          "min": 0,
+          "max": 63
+        }
+      }
+    },
     "M201": {
       "why": "machine acceleration limits from the machine profile; bounded by the largest any Bambu profile has",
       "words": {

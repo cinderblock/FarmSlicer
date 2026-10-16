@@ -291,7 +291,13 @@ impl Data {
     /// every other vendor's.
     pub fn material(&self, name: &str, other: bool) -> Option<&MaterialLimits> {
         let key = name.trim().to_uppercase();
-        if other { self.other_materials.get(&key) } else { self.materials.get(&key) }
+        let table = if other { &self.other_materials } else { &self.materials };
+        // Bambu's support materials print as "PLA-S", "PA-S", "ABS-S"
+        // (libslic3r's get_filament_type); their profiles, harvested here,
+        // are of the base type.
+        table
+            .get(&key)
+            .or_else(|| key.strip_suffix("-S").and_then(|base| table.get(base)))
     }
 }
 

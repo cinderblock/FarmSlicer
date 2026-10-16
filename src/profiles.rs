@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// OrcaSlicer's shared filament library: generic and brand filaments for
 /// printers of every vendor.
@@ -55,6 +56,24 @@ pub struct ProfileStore {
     /// contents, so inheritance must be resolved within the chain's vendor.
     by_name: HashMap<String, Vec<(String, PathBuf)>>,
     machine_models: Vec<MachineModel>,
+    /// What each filament is, once resolved (`filament_info`).
+    filament_info: Mutex<HashMap<String, FilamentInfo>>,
+}
+
+/// What a filament profile is, from its resolved settings: the Slice page
+/// picks support materials and prices with it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FilamentInfo {
+    /// `filament_type` ("PLA", "PETG", "PLA-CF", ...).
+    pub material: String,
+    /// A support material (`filament_is_support`).
+    pub support: bool,
+    /// Dissolves in water (`filament_soluble`: PVA, BVOH).
+    pub soluble: bool,
+    /// The material printers name it by: `material`, or "PLA-S"/"PA-S"/...
+    /// for support materials, as libslic3r's `get_filament_type` and the
+    /// AMS report them (and `filament_prices` lists them).
+    pub tray_material: String,
 }
 
 impl ProfileStore {
@@ -76,6 +95,7 @@ impl ProfileStore {
                 filaments,
                 by_name,
                 machine_models: Vec::new(),
+                filament_info: Mutex::new(HashMap::new()),
             };
         };
 
@@ -202,7 +222,36 @@ impl ProfileStore {
             filaments,
             by_name,
             machine_models,
+            filament_info: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// What a filament is (resolved once per name, then remembered).
+    pub fn filament_info(&self, name: &str) -> Option<FilamentInfo> {
+        if let Some(info) = self.filament_info.lock().unwrap().get(name) {
+            return Some(info.clone());
+        }
+        let config = self.resolve_inheritance(name).ok()?;
+        let first = |key: &str| -> String {
+            match config.get(key) {
+                Some(Value::Array(a)) => a.first().and_then(Value::as_str).unwrap_or("").to_string(),
+                Some(Value::String(s)) => s.clone(),
+                _ => String::new(),
+            }
+        };
+        let material = first("filament_type");
+        let support = first("filament_is_support") == "1";
+        let soluble = first("filament_soluble") == "1";
+        // libslic3r's get_filament_type: Bambu's support materials print as
+        // "<type>-S" (PLA-S, PA-S, ABS-S); soluble ones keep their type.
+        let tray_material = if support && !soluble && matches!(material.as_str(), "PLA" | "PA" | "ABS" | "PETG") {
+            format!("{material}-S")
+        } else {
+            material.clone()
+        };
+        let info = FilamentInfo { material, support, soluble, tray_material };
+        self.filament_info.lock().unwrap().insert(name.to_string(), info.clone());
+        Some(info)
     }
 
     pub fn machine_models(&self) -> &[MachineModel] {
@@ -302,12 +351,19 @@ impl ProfileStore {
             .collect()
     }
 
-    pub fn resolve_config(
-        &self,
-        machine: &str,
-        process: &str,
-        filament: &str,
-    ) -> Result<String, String> {
+    /// One merged config for a machine, a process and the plate's filaments
+    /// (in order: filament 1, 2, ...), like OrcaSlicer's
+    /// `PresetBundle::full_fff_config` with `apply_extruder` off (libslic3r
+    /// applies the extruders itself when slicing): machine, then process,
+    /// then the filaments. A filament key that's a list gets every
+    /// filament's entries one after the other; `filament_self_index` says
+    /// which filament each entry belongs to (several per filament on
+    /// printers with nozzle variants, like the H2D). A filament key that's a
+    /// single value comes from the first filament.
+    pub fn resolve_config(&self, machine: &str, process: &str, filaments: &[&str]) -> Result<String, String> {
+        if filaments.is_empty() {
+            return Err("no filament".into());
+        }
         let mut merged = Map::new();
 
         let machine_config = self
@@ -320,27 +376,30 @@ impl ProfileStore {
             .map_err(|e| format!("process profile: {e}"))?;
         merge_into(&mut merged, &process_config);
 
-        let filament_config = self
-            .resolve_inheritance(filament)
-            .map_err(|e| format!("filament profile: {e}"))?;
-        merge_into(&mut merged, &filament_config);
-
-        merged.remove("type");
-        merged.remove("name");
-        merged.remove("inherits");
-        merged.remove("from");
-        merged.remove("instantiation");
-        merged.remove("setting_id");
-        merged.remove("compatible_printers");
-        merged.remove("compatible_printers_condition");
-        merged.remove("compatible_prints");
-        merged.remove("compatible_prints_condition");
+        let mut filament_configs = Vec::new();
+        for f in filaments {
+            let mut config = self
+                .resolve_inheritance(f)
+                .map_err(|e| format!("filament profile: {e}"))?;
+            for key in PRESET_METADATA {
+                config.remove(*key);
+            }
+            filament_configs.push(config);
+        }
+        merge_filaments(&mut merged, &filament_configs);
+        for key in PRESET_METADATA {
+            merged.remove(*key);
+        }
 
         // What the desktop app records about the chosen presets: the Bambu
-        // filament id ends up in slice_info's tray_info_idx (printers use it
-        // to match AMS trays), the preset names in the G-code header.
-        if let Some(id) = merged.get("filament_id").and_then(Value::as_str).map(String::from) {
-            merged.entry("filament_ids").or_insert_with(|| json!([id]));
+        // filament ids end up in slice_info's tray_info_idx (printers use
+        // them to match AMS trays), the preset names in the G-code header.
+        let ids: Vec<Value> = filament_configs
+            .iter()
+            .map(|c| c.get("filament_id").and_then(Value::as_str).unwrap_or("").into())
+            .collect();
+        if ids.iter().any(|id| id.as_str().is_some_and(|s| !s.is_empty())) {
+            merged.insert("filament_ids".into(), Value::Array(ids));
         }
         let empty = |v: Option<&Value>| match v {
             None | Some(Value::Null) => true,
@@ -354,9 +413,7 @@ impl ProfileStore {
         if empty(merged.get("print_settings_id")) {
             merged.insert("print_settings_id".into(), json!(process));
         }
-        if empty(merged.get("filament_settings_id")) {
-            merged.insert("filament_settings_id".into(), json!([filament]));
-        }
+        merged.insert("filament_settings_id".into(), json!(filaments));
 
         Ok(serde_json::to_string(&Value::Object(merged)).unwrap())
     }
@@ -416,6 +473,160 @@ impl ProfileStore {
         }
         Ok(result)
     }
+}
+
+/// Keys that describe a preset rather than configure the slicer.
+const PRESET_METADATA: &[&str] = &[
+    "type",
+    "name",
+    "inherits",
+    "from",
+    "instantiation",
+    "setting_id",
+    "compatible_printers",
+    "compatible_printers_condition",
+    "compatible_prints",
+    "compatible_prints_condition",
+];
+
+/// Filament keys with an entry per nozzle variant (libslic3r's
+/// `filament_options_with_variant`, PrintConfig.cpp). OrcaSlicer resizes
+/// them to the filament's variant count when it loads a preset
+/// (`Preset::normalize`); profiles often give one value for all variants.
+const FILAMENT_VARIANT_KEYS: &[&str] = &[
+    "filament_flow_ratio",
+    "filament_max_volumetric_speed",
+    "filament_extruder_variant",
+    "filament_retraction_length",
+    "filament_z_hop",
+    "filament_z_hop_types",
+    "filament_retract_lift_above",
+    "filament_retract_lift_below",
+    "filament_retract_lift_enforce",
+    "filament_retract_restart_extra",
+    "filament_retraction_speed",
+    "filament_deretraction_speed",
+    "filament_retraction_minimum_travel",
+    "filament_retract_when_changing_layer",
+    "filament_wipe",
+    "filament_wipe_distance",
+    "filament_retract_before_wipe",
+    "filament_long_retractions_when_cut",
+    "filament_retraction_distances_when_cut",
+    "long_retractions_when_ec",
+    "retraction_distances_when_ec",
+    "nozzle_temperature_initial_layer",
+    "nozzle_temperature",
+    "filament_flush_volumetric_speed",
+    "filament_flush_temp",
+    "filament_cooling_before_tower",
+    "volumetric_speed_coefficients",
+    "filament_adaptive_volumetric_speed",
+    "filament_ironing_flow",
+    "filament_ironing_spacing",
+    "filament_ironing_inset",
+    "filament_ironing_speed",
+    "activate_air_filtration",
+    "activate_air_filtration_during_print",
+    "activate_air_filtration_on_completion",
+    "during_print_exhaust_fan_speed",
+    "complete_print_exhaust_fan_speed",
+];
+
+/// libslic3r's defaults for filament keys whose value says what the
+/// filament *is*: a filament profile that doesn't set them must not borrow
+/// another filament's (a support material's "1").
+const FILAMENT_FLAG_DEFAULTS: &[(&str, &str)] = &[("filament_is_support", "0"), ("filament_soluble", "0")];
+
+/// Put the plate's filaments on top of `merged` (see
+/// `ProfileStore::resolve_config`). Every key any filament sets counts as a
+/// filament key. Per-variant keys (FILAMENT_VARIANT_KEYS) get exactly one
+/// entry per nozzle variant of each filament, like OrcaSlicer's preset
+/// loading makes them (the first value repeated, or cut short): libslic3r
+/// finds a filament's entries by counting, so one short list would hand the
+/// next filament's values to the wrong one. A filament that lacks a list key
+/// another one sets gets libslic3r's default for flags
+/// (FILAMENT_FLAG_DEFAULTS), else that one's first entry (what libslic3r
+/// reads from a short list anyway), as many times as it needs.
+fn merge_filaments(merged: &mut Map<String, Value>, filaments: &[Map<String, Value>]) {
+    // How many entries each filament has per list key: one per nozzle
+    // variant it has settings for (two on the H2D), else one.
+    let variants: Vec<usize> = filaments
+        .iter()
+        .map(|f| match f.get("filament_extruder_variant") {
+            Some(Value::Array(a)) if !a.is_empty() => a.len(),
+            _ => 1,
+        })
+        .collect();
+    let mut keys: Vec<&String> = filaments.iter().flat_map(|f| f.keys()).collect();
+    keys.sort();
+    keys.dedup();
+    for key in keys {
+        let source = filaments.iter().find_map(|f| f.get(key)).expect("a filament sets it");
+        let value = match source {
+            Value::Array(entries) => {
+                let per_variant = FILAMENT_VARIANT_KEYS.contains(&key.as_str());
+                let fill = FILAMENT_FLAG_DEFAULTS
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, v)| json!(v))
+                    .or_else(|| entries.first().cloned())
+                    .unwrap_or(Value::Null);
+                let mut all = Vec::new();
+                for (f, n) in filaments.iter().zip(&variants) {
+                    let own: Vec<Value> = match f.get(key) {
+                        Some(Value::Array(a)) if !a.is_empty() => a.clone(),
+                        Some(Value::Array(_)) | None => vec![fill.clone(); if per_variant { 1 } else { entries.len() }],
+                        Some(other) => vec![other.clone()],
+                    };
+                    if per_variant {
+                        let first = own[0].clone();
+                        all.extend(own.into_iter().chain(std::iter::repeat(first)).take(*n));
+                    } else {
+                        all.extend(own);
+                    }
+                }
+                Value::Array(all)
+            }
+            _ => filaments.iter().find_map(|f| f.get(key)).cloned().unwrap_or(Value::Null),
+        };
+        merged.insert(key.clone(), value);
+    }
+    let self_index: Vec<Value> = variants
+        .iter()
+        .enumerate()
+        .flat_map(|(i, n)| std::iter::repeat_n(json!((i + 1).to_string()), *n))
+        .collect();
+    merged.insert("filament_self_index".into(), Value::Array(self_index));
+    // A colour per filament (OrcaSlicer keeps them in the project, not the
+    // presets): libslic3r sizes its filament grouping by this list and
+    // works out purge volumes from it. The profile's own colour when it has
+    // one, white for support materials, else grey.
+    if filaments.len() > 1 && !filaments.iter().any(|f| f.contains_key("filament_colour")) {
+        let colours: Vec<Value> = filaments
+            .iter()
+            .map(|f| {
+                let own = match f.get("default_filament_colour") {
+                    Some(Value::Array(a)) => a.first().and_then(Value::as_str).unwrap_or(""),
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => "",
+                };
+                let support = matches!(f.get("filament_is_support"), Some(Value::Array(a)) if a.first().and_then(Value::as_str) == Some("1"));
+                json!(if own.starts_with('#') {
+                    own
+                } else if support {
+                    "#FFFFFF"
+                } else {
+                    "#808080"
+                })
+            })
+            .collect();
+        merged.insert("filament_colour".into(), Value::Array(colours));
+    }
+    // Which nozzle each filament prints from: libslic3r chooses on printers
+    // with several ("Auto For Flush", its default); the list just has to be
+    // as long as the filament list.
+    merged.insert("filament_map".into(), Value::Array(vec![json!("1"); filaments.len()]));
 }
 
 fn merge_into(base: &mut Map<String, Value>, overlay: &Map<String, Value>) {
@@ -555,6 +766,70 @@ mod tests {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, json.to_string()).unwrap();
+    }
+
+    #[test]
+    fn several_filaments() {
+        let root = std::env::temp_dir().join(format!("farmslicer-profiles-{}", uuid::Uuid::new_v4()));
+        write(&root, "Acme/machine/Acme H2 0.4 nozzle.json", json!({
+            "type": "machine", "name": "Acme H2 0.4 nozzle", "instantiation": "true",
+            "nozzle_diameter": ["0.4", "0.4"], "printer_settings_id": "Acme H2 0.4 nozzle"
+        }));
+        write(&root, "Acme/process/0.20mm @Acme H2.json", json!({
+            "type": "process", "name": "0.20mm @Acme H2", "instantiation": "true", "layer_height": "0.2"
+        }));
+        // Two variants each (like the H2D's Standard / High Flow nozzles).
+        write(&root, "Acme/filament/Acme PLA @Acme H2.json", json!({
+            "type": "filament", "name": "Acme PLA @Acme H2", "instantiation": "true", "filament_id": "A01",
+            "filament_type": ["PLA"], "nozzle_temperature": ["220", "225"],
+            "filament_extruder_variant": ["Direct Drive Standard", "Direct Drive High Flow"],
+            "filament_vendor": ["Acme"], "filament_start_gcode": ["; PLA"],
+            "filament_max_volumetric_speed": ["21", "25"], "filament_ironing_flow": ["10%"]
+        }));
+        write(&root, "Acme/filament/Acme Support @Acme H2.json", json!({
+            "type": "filament", "name": "Acme Support @Acme H2", "instantiation": "true", "filament_id": "S01",
+            "filament_type": ["PLA"], "filament_is_support": ["1"], "nozzle_temperature": ["210", "215"],
+            "filament_extruder_variant": ["Direct Drive Standard", "Direct Drive High Flow"],
+            "filament_start_gcode": ["; support"]
+        }));
+        let store = ProfileStore::load(&root);
+        let one: Value = serde_json::from_str(
+            &store.resolve_config("Acme H2 0.4 nozzle", "0.20mm @Acme H2", &["Acme PLA @Acme H2"]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(one["nozzle_temperature"], json!(["220", "225"]));
+        assert_eq!(one["filament_self_index"], json!(["1", "1"]));
+        assert_eq!(one["filament_ids"], json!(["A01"]));
+        assert_eq!(one["filament_settings_id"], json!(["Acme PLA @Acme H2"]));
+        assert_eq!(one["filament_map"], json!(["1"]));
+        assert!(one.get("name").is_none() && one.get("type").is_none());
+
+        let two: Value = serde_json::from_str(
+            &store
+                .resolve_config("Acme H2 0.4 nozzle", "0.20mm @Acme H2", &["Acme PLA @Acme H2", "Acme Support @Acme H2"])
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(two["nozzle_temperature"], json!(["220", "225", "210", "215"]));
+        assert_eq!(two["filament_type"], json!(["PLA", "PLA"]));
+        assert_eq!(two["filament_self_index"], json!(["1", "1", "2", "2"]));
+        // The PLA sets no filament_is_support: libslic3r's default, not the
+        // support's "1". Nor does the support set a vendor: the PLA's.
+        assert_eq!(two["filament_is_support"], json!(["0", "1"]));
+        assert_eq!(two["filament_vendor"], json!(["Acme", "Acme"]));
+        assert_eq!(two["filament_start_gcode"], json!(["; PLA", "; support"]));
+        // A per-variant key the support lacks: one entry per variant.
+        assert_eq!(two["filament_max_volumetric_speed"], json!(["21", "25", "21", "21"]));
+        // One value for two variants: repeated, like OrcaSlicer loads it.
+        assert_eq!(two["filament_ironing_flow"], json!(["10%", "10%", "10%", "10%"]));
+        assert_eq!(one["filament_ironing_flow"], json!(["10%", "10%"]));
+        assert_eq!(two["filament_ids"], json!(["A01", "S01"]));
+        assert_eq!(two["filament_map"], json!(["1", "1"]));
+        assert_eq!(two["layer_height"], json!("0.2"));
+        // A colour each: libslic3r counts the filaments by them.
+        assert_eq!(two["filament_colour"], json!(["#808080", "#FFFFFF"]));
+        assert!(one.get("filament_colour").is_none());
+        assert!(store.resolve_config("Acme H2 0.4 nozzle", "0.20mm @Acme H2", &[]).is_err());
     }
 
     #[test]

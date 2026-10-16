@@ -1269,6 +1269,22 @@ mod tests {
     }
 
     #[test]
+    fn libslic3rs_tool_changes_are_ordinary() {
+        // Several filaments (a support interface): libslic3r switches with
+        // M1020 S<filament> on Bambu printers.
+        let c = check_str("M1020 S0
+M1020 S1
+", data(), &x1(&["PLA", "PLA-S"]), &Limits::default());
+        assert_eq!(c.verdict, None, "{:?}", c.findings);
+        assert!(run("M1020 S500
+").needs_review());
+        // Support materials have PLA's (PA's, ...) temperatures.
+        let hot = check_str("M104 S300
+", data(), &x1(&["PLA-S"]), &Limits::default());
+        assert_eq!(codes(&hot), vec!["hot_nozzle"], "{:?}", hot.findings);
+    }
+
+    #[test]
     fn unreadable_lines_block() {
         let c = run("G1 X10 Y10\nG1 X(1)\n");
         assert!(c.blocked(), "{:?}", c.findings);

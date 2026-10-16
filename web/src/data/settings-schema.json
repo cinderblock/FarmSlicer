@@ -807,6 +807,26 @@
     "common": true
   },
   {
+    "key": "support_filament",
+    "label": "Support Base Filament",
+    "type": "int",
+    "min": 0,
+    "max": 32,
+    "step": 1,
+    "category": "Support",
+    "common": false
+  },
+  {
+    "key": "support_interface_filament",
+    "label": "Support Interface Filament",
+    "type": "int",
+    "min": 0,
+    "max": 32,
+    "step": 1,
+    "category": "Support",
+    "common": false
+  },
+  {
     "key": "support_threshold_angle",
     "label": "Support Threshold Angle",
     "type": "int",

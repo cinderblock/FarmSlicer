@@ -3,7 +3,7 @@
 //
 //   node wasm/test/smoke.mjs [--engine web/public/wasm] [--variant st|mt]
 //                            [--model path.stl] [--config merged.json] [--out out.gcode]
-//                            [--plate]
+//                            [--plate] [--package]
 //
 // With no --model it slices a generated 20 mm cube with libslic3r's defaults
 // (an empty config), which exercises load → place → slice → export. Exit code
@@ -12,6 +12,9 @@
 // --plate: a plate of three parts from two models (two copies of the model,
 // one turned on its side, and a 10 mm cube staged with fs_stage_model); also
 // fails unless the G-code prints three objects.
+//
+// --package: also write a Bambu sliced project (.gcode.3mf), as the server
+// asks for Bambu printers; fails unless one comes back.
 import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -74,6 +77,11 @@ const cfgBytes = enc.encode(config);
 const cfgPtr = put(cfgBytes);
 const outGcode = m._malloc(4), outLen = m._malloc(4), outReport = m._malloc(4), state = m._malloc(8);
 
+if (args.package && !args.plate) {
+  const options = enc.encode(JSON.stringify({ package: true, printer_model_id: "BL-P001", model_name: modelName }));
+  const optPtr = put(options);
+  if (m._fs_set_options(optPtr, options.length, 0, 0) !== 0) throw new Error("fs_set_options refused the package");
+}
 if (args.plate) {
   if (typeof m._fs_stage_model !== "function" || !version.plate) throw new Error("this engine takes no plates");
   const small = enc.encode(cubeStl(10));
@@ -84,7 +92,8 @@ if (args.plate) {
   const RX90 = [1, 0, 0, 0, 0, -1, 0, 1, 0];
   const options = enc.encode(
     JSON.stringify({
-      package: false,
+      package: Boolean(args.package),
+      printer_model_id: "BL-P001",
       model_name: modelName,
       models: [{ name: modelName }, { name: "small.stl" }],
       plate: {
@@ -149,6 +158,11 @@ if (rc === 0 && gcodeLen > 0) {
     console.log(`  objects printed: ${objects.size} ${JSON.stringify([...objects])}`);
     if (objects.size !== 3) rc = 1;
   }
+}
+if (args.package) {
+  const ok = Boolean(report?.package) && m.FS.analyzePath(report.package).exists;
+  console.log(`  package: ${ok ? `${m.FS.stat(report.package).size} bytes` : "missing"}`);
+  if (!ok) rc = 1;
 }
 if (m.fsTerminateThreads) m.fsTerminateThreads();
 process.exit(rc === 0 && gcodeLen > 0 ? 0 : 1);

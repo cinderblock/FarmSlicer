@@ -17,13 +17,14 @@ fn main() {
 
     let is_windows = cfg!(target_os = "windows");
 
-    // Build the cxx bridge, the shared slicing pipeline and the nanosvg
-    // implementation shim.
+    // Build the cxx bridge, the shared slicing pipeline and the shims for
+    // what upstream keeps in GUI code (nanosvg, RGB2HSV).
     let mut build = cxx_build::bridge("src/slicer.rs");
     build
         .file("cxx/slicer_bridge.cpp")
         .file("cxx/slice_core.cpp")
         .file("cxx/thumbnail.cpp")
+        .file("cxx/color_space_shim.cpp")
         .file("cxx/nanosvg_impl.cpp")
         .std("c++17")
         .include(".")
@@ -125,6 +126,7 @@ fn main() {
     println!("cargo:rerun-if-changed=cxx/slicer_bridge.cpp");
     println!("cargo:rerun-if-changed=cxx/thumbnail.hpp");
     println!("cargo:rerun-if-changed=cxx/thumbnail.cpp");
+    println!("cargo:rerun-if-changed=cxx/color_space_shim.cpp");
     println!("cargo:rerun-if-changed=src/slicer.rs");
 }
 

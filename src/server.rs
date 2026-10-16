@@ -147,7 +147,7 @@ async fn resolve_profiles(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config_str = state
         .profile_store
-        .resolve_config(&q.machine, &q.process, &q.filament)
+        .resolve_config(&q.machine, &q.process, &[q.filament.as_str()])
         .map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -210,12 +210,25 @@ async fn list_filaments(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProfileQuery>,
 ) -> Json<Value> {
+    let prices = crate::cost::Prices::load(&state.db);
     let filaments: Vec<_> = match &q.machine {
+        // With what each filament is and costs: the Slice page picks
+        // support materials with it.
         Some(machine) => state
             .profile_store
             .filaments_for_machine(machine)
             .into_iter()
-            .map(|f| json!({"name": f.name, "vendor": f.vendor}))
+            .map(|f| {
+                let mut v = json!({"name": f.name, "vendor": f.vendor});
+                if let Some(info) = state.profile_store.filament_info(&f.name) {
+                    v["price_per_kg"] = json!(prices.per_kg(&info.tray_material));
+                    v["material"] = json!(info.material);
+                    v["support"] = json!(info.support);
+                    v["soluble"] = json!(info.soluble);
+                    v["tray_material"] = json!(info.tray_material);
+                }
+                v
+            })
             .collect(),
         None => state
             .profile_store
@@ -672,6 +685,10 @@ pub struct JobInputs {
     pub source: String,
 }
 
+/// The most filaments a job may use (a plate's parts and supports; AMS
+/// setups go up to 4 units x 4 trays plus external spools).
+const MAX_FILAMENTS: usize = 32;
+
 /// The most a `proposed` blob (the page's defaults, for the
 /// defaults-changed report) may weigh.
 const MAX_PROPOSED_BYTES: usize = 64 * 1024;
@@ -737,7 +754,9 @@ fn model_extension(file_name: &str) -> String {
 ///   so it can be sliced again.
 /// - `local_models`: browser jobs whose models stay in the browser, JSON
 ///   `[{"name", "bytes", "sha256"}]` (`model_name`: one, from older pages).
-/// - `machine`, `process`, `filament`, `overrides`, `bed_type`, `color`,
+/// - `machine`, `process`, `filament` (repeatable: filament 1, 2, ...; the
+///   overrides' `support_filament` / `support_interface_filament` pick
+///   among them), `overrides`, `bed_type`, `color`,
 ///   `printer_id`, `routing`, `group_id`, `source` ("server" | "browser").
 /// - `plate`: the parts (src/placement.rs `PlateLayout`); `placement`: one
 ///   model's placement, from older pages.
@@ -864,18 +883,19 @@ async fn create_job(
     } else {
         Some(proposed_str)
     };
-    if inputs.filaments.len() > 1 {
-        return Err(bad(&"several filaments per job aren't supported yet"));
+    if inputs.filaments.len() > MAX_FILAMENTS {
+        return Err(bad(&format!("at most {MAX_FILAMENTS} filaments per job")));
     }
     if !inputs.bed_type.is_empty() && !crate::printing::BED_TYPES.contains(&inputs.bed_type.as_str()) {
         return Err(bad(&format!("unknown build plate {:?}", inputs.bed_type)));
     }
 
     let config_json = match inputs.filaments.first() {
-        Some(filament) if !inputs.machine.is_empty() && !inputs.process.is_empty() => {
+        Some(_) if !inputs.machine.is_empty() && !inputs.process.is_empty() => {
+            let filaments: Vec<&str> = inputs.filaments.iter().map(String::as_str).collect();
             let config_str = state
                 .profile_store
-                .resolve_config(&inputs.machine, &inputs.process, filament)
+                .resolve_config(&inputs.machine, &inputs.process, &filaments)
                 .map_err(|e| bad(&format!("Profile error: {e}")))?;
             let mut config: serde_json::Map<String, Value> = serde_json::from_str(&config_str)
                 .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

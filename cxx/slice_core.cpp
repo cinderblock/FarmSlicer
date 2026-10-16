@@ -17,6 +17,8 @@
 #include <libslic3r/Layer.hpp>
 #include <libslic3r/PrintBase.hpp>
 #include <libslic3r/PrintConfig.hpp>
+#include <libslic3r/Preset.hpp>
+#include <libslic3r/FlushVolCalc.hpp>
 #include <libslic3r/Config.hpp>
 #include <libslic3r/Exception.hpp>
 #include <libslic3r/GCode/GCodeProcessor.hpp>
@@ -24,9 +26,13 @@
 #include <libslic3r/Format/bbs_3mf.hpp>
 #include <libslic3r/ProjectTask.hpp>
 
+#include <array>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
+#include <cstdlib>
+#include <new>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -75,6 +81,99 @@ size_t vector_size(const Slic3r::DynamicPrintConfig& cfg, const char* key)
     return 0;
 }
 
+/// "#RRGGBB" (or "#RRGGBBAA") as RGBA; black when unreadable.
+std::array<unsigned char, 4> parse_colour(const std::string& hex)
+{
+    std::array<unsigned char, 4> rgba{0, 0, 0, 255};
+    const std::string h = !hex.empty() && hex[0] == '#' ? hex.substr(1) : hex;
+    for (size_t i = 0; i < 4 && i * 2 + 2 <= h.size(); ++i) {
+        try {
+            rgba[i] = static_cast<unsigned char>(std::stoi(h.substr(i * 2, 2), nullptr, 16));
+        } catch (...) {
+        }
+    }
+    return rgba;
+}
+
+/// Filament volume a nozzle's own purge already covers (mm³), less what a
+/// long retraction before the cut pulls out (Plater.cpp
+/// get_min_flush_volumes in the desktop app).
+std::vector<int> min_flush_volumes(const Slic3r::DynamicPrintConfig& config, size_t nozzle, size_t filaments)
+{
+    using namespace Slic3r;
+    const auto* volume = config.option<ConfigOptionFloatsNullable>("nozzle_volume");
+    const int nozzle_volume = volume && !volume->values.empty() ? int(volume->get_at(nozzle)) : 0;
+    const auto* level = config.option<ConfigOptionInt>("enable_long_retraction_when_cut");
+    const int enabled = level ? level->value : 0;
+    const auto* machine_on = config.option<ConfigOptionBools>("long_retractions_when_cut");
+    const bool activated = machine_on && !machine_on->values.empty() && machine_on->get_at(nozzle);
+    const auto* filament_dist = config.option<ConfigOptionFloats>("filament_retraction_distances_when_cut");
+    const auto* machine_dist = config.option<ConfigOptionFloats>("retraction_distances_when_cut");
+    const auto* filament_on = config.option<ConfigOptionBools>("filament_long_retractions_when_cut");
+    std::vector<int> out;
+    for (size_t i = 0; i < filaments; ++i) {
+        double retract = enabled && activated && machine_dist ? machine_dist->get_at(nozzle) : 0.0;
+        const unsigned char on = filament_on && !filament_on->values.empty() ? filament_on->get_at(i) : 0;
+        if (on == 0)
+            retract = 0;
+        else if (on == 1 && enabled == LongRectrationLevel::EnableFilament) {
+            const double d = filament_dist && !filament_dist->values.empty() ? filament_dist->get_at(i) : NAN;
+            retract = !std::isnan(d) ? d : (machine_dist ? machine_dist->get_at(nozzle) : 0.0);
+        }
+        out.push_back(int(nozzle_volume - M_PI * 1.75 * 1.75 / 4 * retract));
+    }
+    return out;
+}
+
+// What the desktop app keeps in the project rather than in presets, for
+// more than one filament: purge volumes between every pair of filaments on
+// every nozzle (from their colours, with libslic3r's flush model; a support
+// material takes a fixed amount), like OrcaSlicer's CLI computes them.
+void complete_flush_volumes(Slic3r::DynamicPrintConfig& config, size_t filaments, size_t nozzles)
+{
+    using namespace Slic3r;
+    auto& matrix = config.option<ConfigOptionFloats>("flush_volumes_matrix", true)->values;
+    if (filaments < 2 || matrix.size() == filaments * filaments * nozzles) return;
+    matrix.assign(filaments * filaments * nozzles, 0.0);
+    config.option<ConfigOptionFloats>("flush_multiplier", true)->values.resize(nozzles, 1.0);
+    const auto& colours = config.option<ConfigOptionStrings>("filament_colour", true)->values;
+    const auto* support = config.option<ConfigOptionBools>("filament_is_support");
+    std::vector<int> dataset_full;
+    if (const auto* d = config.option<ConfigOptionIntsNullable>("nozzle_flush_dataset")) dataset_full = d->values;
+    for (size_t nozzle = 0; nozzle < nozzles; ++nozzle) {
+        // The flush data set of the nozzle's variant (Standard / High Flow).
+        int dataset = dataset_full.empty() ? 0 : dataset_full[0];
+        if (config.has("printer_extruder_id") && config.has("printer_extruder_variant") && config.has("extruder_type") &&
+            config.has("nozzle_volume_type")) {
+            const int type = config.option<ConfigOptionEnumsGeneric>("extruder_type")->get_at(nozzle);
+            const int volume = config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type")->get_at(nozzle);
+            const int index = config.get_index_for_extruder(int(nozzle) + 1, "printer_extruder_id", ExtruderType(type),
+                                                            NozzleVolumeType(volume), "printer_extruder_variant");
+            if (index >= 0 && size_t(index) < dataset_full.size()) dataset = dataset_full[index];
+        }
+        const std::vector<int> minimum = min_flush_volumes(config, nozzle, filaments);
+        std::vector<double> nozzle_matrix(filaments * filaments, 0.0);
+        for (size_t from = 0; from < filaments; ++from) {
+            const auto a = parse_colour(from < colours.size() ? colours[from] : "#FFFFFF");
+            const bool from_support = support && !support->values.empty() && support->get_at(from);
+            for (size_t to = 0; to < filaments; ++to) {
+                if (from == to) continue;
+                int volume;
+                if (support && !support->values.empty() && support->get_at(to)) {
+                    volume = g_flush_volume_to_support;
+                } else {
+                    const auto b = parse_colour(to < colours.size() ? colours[to] : "#FFFFFF");
+                    FlushVolCalculator calc(minimum[from], g_max_flush_volume, dataset);
+                    volume = calc.calc_flush_vol(a[3], a[0], a[1], a[2], b[3], b[0], b[1], b[2]);
+                    if (from_support) volume = std::max(g_min_flush_volume_from_support, volume);
+                }
+                nozzle_matrix[filaments * from + to] = volume;
+            }
+        }
+        set_flush_volumes_matrix(matrix, nozzle_matrix, nozzles > 1 ? nozzle : size_t(-1), nozzles);
+    }
+}
+
 // Load the merged profile JSON on top of the full defaults, recording
 // substitutions and unknown keys as warnings instead of failing.
 void load_config(Slic3r::DynamicPrintConfig& config, const std::string& json,
@@ -108,9 +207,17 @@ void load_config(Slic3r::DynamicPrintConfig& config, const std::string& json,
         }
     }
 
+    // Every filament key gets an entry per filament, like the desktop app
+    // makes presets when it loads them: a key no profile sets keeps
+    // libslic3r's one-entry default otherwise, and with several filaments
+    // libslic3r reads past it (filament_colour sizes the filament grouping:
+    // "Grouping error: PLA can not be placed in the right nozzle").
+    Preset::normalize(config);
+
     // Multi-extruder bookkeeping the desktop app does before slicing.
     const int filament_count = int(std::max<size_t>(1, vector_size(config, "filament_diameter")));
     const int extruder_count = int(std::max<size_t>(1, vector_size(config, "nozzle_diameter")));
+    complete_flush_volumes(config, size_t(filament_count), size_t(extruder_count));
     {
         auto& fmap = config.option<ConfigOptionInts>("filament_map", true)->values;
         if (int(fmap.size()) < filament_count) fmap.resize(filament_count, 1);
@@ -226,6 +333,39 @@ double filament_diameter(const Slic3r::DynamicPrintConfig& cfg, size_t e)
     return diam && !diam->values.empty() ? diam->get_at(e) : 1.75;
 }
 
+// A Print built in zeroed memory. libslic3r's Print leaves its stand-in
+// prime tower (FakeWipeTower: position, size, layer height) uninitialised
+// until a prime tower is built, yet checks the plate for path conflicts
+// against it whenever the config lists more than one filament
+// (Print::has_wipe_tower). A plate that ends up printing with one of them
+// gets no tower, and the check reads whatever was in memory: a segfault in
+// FakeWipeTower::getFakeExtrusionPathsFromWipeTower2 (seen with three
+// filaments on a plate that needed no supports). Zeroed, those fields read
+// 0, an empty tower, as in the desktop app's fresh heap and the WebAssembly
+// engine. See issues/libslic3r-fake-wipe-tower.md.
+class ZeroedPrint {
+public:
+    ZeroedPrint()
+    {
+        static_assert(alignof(Slic3r::Print) <= alignof(std::max_align_t), "calloc alignment");
+        memory_ = std::calloc(1, sizeof(Slic3r::Print));
+        if (!memory_) throw std::bad_alloc();
+        print_ = new (memory_) Slic3r::Print();
+    }
+    ~ZeroedPrint()
+    {
+        print_->~Print();
+        std::free(memory_);
+    }
+    ZeroedPrint(const ZeroedPrint&) = delete;
+    ZeroedPrint& operator=(const ZeroedPrint&) = delete;
+    Slic3r::Print& get() { return *print_; }
+
+private:
+    void* memory_ = nullptr;
+    Slic3r::Print* print_ = nullptr;
+};
+
 void report(const Callbacks& cb, int percent, const std::string& message)
 {
     if (cb.progress) cb.progress(percent, message);
@@ -264,7 +404,8 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 
         const int filament_count = int(std::max<size_t>(1, vector_size(config, "filament_diameter")));
 
-        Print print;
+        ZeroedPrint print_holder;
+        Print& print = print_holder.get();
         print.set_plate_origin(Vec3d::Zero());
         const std::string printer_model = config.opt_string("printer_model", true);
         print.is_BBL_printer() = printer_model.rfind("Bambu Lab", 0) == 0;
@@ -371,6 +512,10 @@ Outcome slice_models(const std::vector<ModelInput>& models,
             std::snprintf(weight, sizeof weight, "%.2f", out.filament_used_g);
             plate->gcode_weight = weight;
             plate->is_support_used = print.is_support_used();
+            // Which nozzle each filament printed from (1-based), as libslic3r
+            // chose it on printers with several: dual-nozzle printers read
+            // it from slice_info.
+            plate->filament_maps = print.get_filament_maps();
             plate->parse_filament_info(&gcode_result);
             const auto* filament_ids = config.option<ConfigOptionStrings>("filament_ids");
             for (FilamentInfo& f : plate->slice_filaments_info) {
