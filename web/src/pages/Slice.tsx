@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import ModelViewer, { type BedShape, type PlateState } from "../components/ModelViewer";
 import OverridesPanel from "../components/OverridesPanel";
 import {
@@ -9,10 +9,10 @@ import {
   loadManifest,
   pickVariant,
 } from "../engine/client";
-import type { EngineManifest, SliceOptions } from "../engine/types";
+import type { EngineManifest, PlateLayout, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
 import { BED_TYPES } from "../printers";
-import { saveLocalModel } from "../localModels";
+import { loadLocalModel, saveLocalModel } from "../localModels";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
 type ComputeMode = "auto" | "server" | "browser";
@@ -98,6 +98,24 @@ function printerProfile(p: Printer, models: MachineModel[]): string {
     models.find((m) => m.name === p.machine_profile)?.variants[p.nozzle_diameter] ??
     `${p.machine_profile} ${p.nozzle_diameter} nozzle`
   );
+}
+
+/** What re-slicing reads from GET /api/jobs/{id}. */
+interface ResliceJob {
+  model_name: string;
+  overrides_json: string | null;
+  models: { idx: number; name: string; sha256: string | null; stored: boolean }[];
+  inputs: {
+    machine: string;
+    process: string;
+    filaments: string[];
+    bed_type: string;
+    printer_id: string | null;
+    routing: string;
+    color: string;
+    group_id: string | null;
+  } | null;
+  plate: PlateLayout | null;
 }
 
 interface ProfileEntry {
@@ -257,6 +275,66 @@ export default function SlicePage() {
       engineRef.current = null;
     };
   }, []);
+
+  // Slicing a job again (/slice?from=<job>): its models, plate and choices.
+  const [searchParams] = useSearchParams();
+  const fromJob = searchParams.get("from");
+  const [initialPlate, setInitialPlate] = useState<{ key: string; files: File[]; plate: PlateLayout | null } | null>(null);
+  const [reslice, setReslice] = useState<{ name: string; error?: string } | null>(null);
+  const machineModelsLoaded = machineModels.length > 0;
+  useEffect(() => {
+    if (!fromJob || !printersLoaded || !machineModelsLoaded) return;
+    let stale = false;
+    (async () => {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(fromJob)}`);
+      const job: ResliceJob & { error?: string } = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(job.error ?? `HTTP ${res.status}`);
+      if (stale) return;
+      setReslice({ name: job.model_name });
+      const files: File[] = [];
+      for (const m of job.models) {
+        if (m.stored) {
+          const r = await fetch(`/api/jobs/${encodeURIComponent(fromJob)}/models/${m.idx}`);
+          if (!r.ok) throw new Error(`${m.name}: HTTP ${r.status}`);
+          files.push(new File([await r.blob()], m.name));
+        } else {
+          const local = m.sha256 ? await loadLocalModel(m.sha256) : null;
+          if (!local) throw new Error(`${m.name} stayed in the browser that sliced this job; it isn't in this one.`);
+          files.push(local);
+        }
+      }
+      if (stale) return;
+      const inputs = job.inputs;
+      if (inputs) {
+        const printer = printers.find((p) => p.id === inputs.printer_id);
+        setPrinterId(printer ? printer.id : "");
+        const owner = machineModels.find((m) => Object.values(m.variants).includes(inputs.machine));
+        if (owner) {
+          setModelChoice(owner.name);
+          setNozzleChoice(Object.entries(owner.variants).find(([, v]) => v === inputs.machine)?.[0] ?? "");
+        }
+        if (inputs.process) setProcess(inputs.process);
+        if (inputs.filaments[0]) setFilament(inputs.filaments[0]);
+        if (inputs.bed_type) setPlateChoice(inputs.bed_type);
+        setColor(inputs.color ?? "");
+        if (inputs.routing) setRouting(inputs.routing);
+        if (inputs.group_id) setGroupChoice(inputs.group_id);
+      }
+      try {
+        setOverrides(JSON.parse(job.overrides_json ?? "{}") ?? {});
+      } catch {
+        setOverrides({});
+      }
+      setInitialPlate({ key: fromJob, files, plate: job.plate });
+    })().catch((err) => {
+      if (!stale) setReslice((r) => ({ name: r?.name ?? "this job", error: err instanceof Error ? err.message : String(err) }));
+    });
+    return () => {
+      stale = true;
+    };
+    // Load once per job; the setters and lists it reads are settled by then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromJob, printersLoaded, machineModelsLoaded]);
 
   const engineVariant = engineManifest ? pickVariant(engineManifest) : null;
   const browserAvailable =
@@ -444,9 +522,11 @@ export default function SlicePage() {
       .then((data: ProfileEntry[]) => {
         if (stale) return;
         setFilaments(data);
-        // Default to PLA material filter
+        // A filament this machine also has stays chosen (a job sliced
+        // again, a nozzle change), with its material and variant; else PLA.
+        const kept = data.find((f) => f.name === filament);
         const types = [...new Set(data.map((f) => materialType(f.name)))];
-        const defaultType = types.includes("PLA") ? "PLA" : types[0] ?? "";
+        const defaultType = kept ? materialType(kept.name) : types.includes("PLA") ? "PLA" : types[0] ?? "";
         setMaterialFilter(defaultType);
         // Default to Standard variant
         const ofType = data.filter(
@@ -455,9 +535,11 @@ export default function SlicePage() {
         const variants = [
           ...new Set(ofType.map((f) => materialVariant(f.name))),
         ];
-        const defaultVariant = variants.includes("Standard")
-          ? "Standard"
-          : variants[0] ?? "";
+        const defaultVariant = kept
+          ? materialVariant(kept.name)
+          : variants.includes("Standard")
+            ? "Standard"
+            : variants[0] ?? "";
         setVariantFilter(defaultVariant);
         // Auto-select a default filament from the filtered material + variant
         const filtered = ofType.filter(
@@ -651,10 +733,18 @@ export default function SlicePage() {
           <ModelViewer
             bed={bed}
             onPlateChange={setLayout}
+            initial={initialPlate}
           />
         </div>
         <div className="settings-panel">
           <h3>Settings</h3>
+          {reslice && (
+            <p className={`hint reslice-note ${reslice.error ? "bad" : ""}`}>
+              {reslice.error
+                ? `Can't slice ${reslice.name} again: ${reslice.error}`
+                : `Slicing ${reslice.name} again: its parts and settings are loaded. Change what you like; it becomes a new job.`}
+            </p>
+          )}
 
           <label>
             Printer

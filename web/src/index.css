@@ -521,6 +521,19 @@ body {
   font-size: 0.9rem;
 }
 
+/* Slicing a job again: where the page's settings came from. */
+.reslice-note {
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+.reslice-note.bad {
+  border-left-color: var(--error);
+  color: var(--error);
+}
+
 /* A checkbox and its label on one line. */
 .settings-panel label.check-row {
   flex-direction: row;

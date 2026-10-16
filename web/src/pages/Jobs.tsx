@@ -33,6 +33,8 @@ interface Job {
   local_models: number;
 }
 
+/** Jobs that can be sliced again: they have their models (here or in a browser). */
+const canReslice = (job: Job) => job.model_count > 0 && job.source !== "upload";
 const finished = (job: Job) => job.status !== "queued" && job.status !== "slicing";
 
 function hasThumbnail(job: Job): boolean {
@@ -341,6 +343,15 @@ export default function JobsPage() {
                     {job.status === "done" && job.package_json && (
                       <button className="btn-sm" onClick={() => setSending(job)}>
                         Print…
+                      </button>
+                    )}
+                    {canReslice(job) && finished(job) && (
+                      <button
+                        className="btn-sm"
+                        title="Open this job's models and settings on the Slice page, change what you like, and slice it as a new job"
+                        onClick={() => navigate(`/slice?from=${job.id}`)}
+                      >
+                        Re-slice
                       </button>
                     )}
                     {(job.status === "queued" || job.status === "slicing") && (
