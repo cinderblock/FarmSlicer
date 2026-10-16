@@ -1501,6 +1501,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())
         .merge(prints_api::routes())
+        .merge(crate::preview_api::routes())
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())
         .merge(crate::printer_thumbs::routes())

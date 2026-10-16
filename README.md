@@ -16,6 +16,15 @@ can run in the user's browser.
   on the plate. Position and rotation can also be typed. Both engines slice
   the part where it sits. A part that leaves the printable volume turns red
   and can't be sliced. The slicer refuses one too.
+- **Preview:** every job's G-code, layer by layer, like the desktop
+  slicers' Preview (the job page, `/jobs/{id}`): toolpaths in 3D on the
+  printer's bed, a layer range slider and a scrubber through the top
+  layer's moves, colours by feature, filament, speed or layer time, feature
+  types hidden from the legend, travel moves and retractions, time per
+  feature and filament per tool. The file is streamed and parsed in a Web
+  Worker, so 300 MB of G-code doesn't freeze the page. The page also shows
+  the slicer's warnings (a part printing in mid-air first), the G-code
+  check and "Print…".
 - **Compute:** each slice runs either on the server or in the browser
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
   isolated). Browser slicing uploads only the resulting G-code, unless the
@@ -273,6 +282,7 @@ Frontend only:
 ```bash
 cd web && bun install && bun run dev      # Vite dev server, proxies /api and /wasm to :9337
 cd web && bun run build                    # tsc + vite → dist/web
+cd web && bun test                         # unit tests (web/test/: the G-code parser)
 ```
 
 ### Browser engine (WebAssembly)
@@ -344,6 +354,7 @@ summary prints the `pin.json` to paste there.
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
 | `DELETE /api/jobs/{id}`, `POST /api/jobs/delete` `{ids}` | delete jobs with their files (creator, group managers, admins); refused while slicing or while a print still needs the package. The bulk form answers `{deleted, refused: [{id, error}]}` |
 | `GET /api/jobs/{id}/model`, `GET /api/jobs/{id}/models/{idx}` | the job's (first, or idx-th) source model; 404 when it stayed in a browser |
+| `GET /api/jobs/{id}/gcode?plate=` | the job's G-code for the preview (plate N of a `.gcode.3mf`, default the first; the plain file when there is one), streamed; gzip when accepted (a package's plate is sent as the archive's own deflate stream); `X-Gcode-Bytes` = uncompressed size |
 | `POST /api/jobs/{id}/progress` | browser engine progress tick |
 | `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `package`) | browser engine result upload (the `.gcode.3mf` makes the job sendable) |
 | `POST /api/jobs/{id}/fail`, `POST /api/jobs/{id}/cancel` | browser failure / cancel either kind |
@@ -376,6 +387,7 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 printer/ (protocols, capabilities, status, the link hub),
                 bambu/, moonraker/, octoprint/, prusalink/, sdcp/ (drivers),
                 printing.rs + prints_api.rs (sending, tracking),
+                preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,
                 discovery/ (SSDP, mDNS, SDCP), feedback.rs +
                 feedback_api.rs + db/feedback.rs (reports, error reports)
@@ -384,7 +396,9 @@ cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
 wasm/           Emscripten superbuild + C bridge for the browser engine
 web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker;
                 web/src/components/viewer/ = the Slice page's 3D view (bed, part, gizmos);
-                web/src/errorReporting.ts = automatic error reports, console ring buffer
+                web/src/components/preview/ = the G-code preview (parser + worker, renderer);
+                web/src/errorReporting.ts = automatic error reports, console ring buffer;
+                web/test/ = bun unit tests
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build
 tests/          API end-to-end tests (run-e2e.sh), their shared helpers, and a

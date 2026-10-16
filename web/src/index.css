@@ -2468,3 +2468,457 @@ a.btn-sm {
   gap: 0.75rem;
   align-items: center;
 }
+
+/* G-code preview (components/preview/) */
+.gcode-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1rem;
+  height: 100%;
+  min-height: 480px;
+}
+
+.gp-viewport {
+  position: relative;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0d1117;
+  outline: none;
+}
+
+.gp-viewport:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.gp-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  grid-column: 1 / -1;
+}
+
+.gp-loading {
+  width: min(360px, 80%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.gp-readout {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  max-width: calc(100% - 7rem);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.gp-notice,
+.gp-stats {
+  position: absolute;
+  top: 2.6rem;
+  left: 0.5rem;
+  max-width: calc(100% - 7rem);
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+  color: var(--warning);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.gp-stats {
+  top: auto;
+  bottom: 3.2rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Layer range slider: right edge of the viewport. */
+.gp-layer-slider {
+  position: absolute;
+  top: 1rem;
+  bottom: 3.5rem;
+  right: 0.75rem;
+  width: 5.5rem;
+  display: flex;
+  justify-content: flex-end;
+  touch-action: none;
+  user-select: none;
+  cursor: pointer;
+}
+
+.gp-layer-track {
+  position: relative;
+  width: 6px;
+  margin: 0.6rem 0.9rem 0.6rem 0;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.gp-layer-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.gp-layer-handle {
+  position: absolute;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  margin: 0 0 -9px -9px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 3px solid var(--accent);
+  outline: none;
+}
+
+.gp-layer-handle:focus-visible {
+  box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.5);
+}
+
+.gp-layer-label {
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(13, 17, 23, 0.85);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-layer-label small {
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.gp-layer-bottom .gp-layer-label {
+  transform: translateY(10%);
+}
+
+.gp-layer-top .gp-layer-label {
+  transform: translateY(-90%);
+}
+
+/* Move scrubber: bottom of the viewport. */
+.gp-scrub {
+  position: absolute;
+  left: 0.75rem;
+  right: 7rem;
+  bottom: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+}
+
+.gp-scrub input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.gp-scrub-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Side panel: legend, options, summary. */
+.gp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+
+.gp-side > section {
+  flex-shrink: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.gp-color-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-dim);
+}
+
+.gp-color-mode select {
+  flex: 1;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.gp-legend-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gp-legend-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 0.9rem minmax(0, 1fr) auto 2.5rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.3rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gp-legend-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.gp-legend-item.static {
+  grid-template-columns: 0.9rem minmax(0, 1fr);
+  cursor: default;
+}
+
+.gp-legend-item.off {
+  color: var(--text-dim);
+}
+
+.gp-legend-item.off .gp-swatch {
+  opacity: 0.25;
+}
+
+.gp-legend-item.off .gp-legend-name {
+  text-decoration: line-through;
+}
+
+.gp-swatch {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  vertical-align: -0.1rem;
+}
+
+.gp-legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gp-legend-time,
+.gp-legend-pct {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gp-gradient-bar {
+  height: 0.7rem;
+  border-radius: 3px;
+}
+
+.gp-gradient-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.2rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.gp-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.gp-summary h4 {
+  margin: 0 0 0.5rem;
+  font-weight: 500;
+}
+
+.gp-summary dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.3rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.gp-summary dt {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.gp-summary dd {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .gcode-preview {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(420px, 70vh) auto;
+    height: auto;
+  }
+}
+
+/* Job page (pages/Job.tsx) */
+.job-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.job-page .job-header h2 {
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.job-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.job-actions .btn-primary {
+  width: auto;
+  padding: 0.5rem 1.25rem;
+}
+
+.job-actions a.btn-sm {
+  text-decoration: none;
+}
+
+.job-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.job-facts dt {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.job-facts dd {
+  overflow-wrap: anywhere;
+}
+
+.job-alert {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.08);
+  font-size: 0.9rem;
+}
+
+.job-alert ul {
+  margin: 0.35rem 0;
+  padding-left: 1.2rem;
+}
+
+.job-alert-support {
+  border-color: var(--error);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.job-alert-support strong {
+  color: var(--error);
+}
+
+.job-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 420px;
+  margin-bottom: 1rem;
+}
+
+.job-plates {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.job-plates button {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.job-plates button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-card);
+}
+
+.job-preview {
+  height: calc(100vh - 16rem);
+  min-height: 520px;
+  margin-bottom: 1rem;
+}
+
+.job-technical {
+  margin-top: 1rem;
+}
+
+.job-technical ul {
+  padding-left: 1.2rem;
+  overflow-wrap: anywhere;
+}

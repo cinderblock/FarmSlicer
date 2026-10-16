@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import Layout from "./components/Layout";
 import SlicePage from "./pages/Slice";
 import JobsPage from "./pages/Jobs";
+import JobPage from "./pages/Job";
 import PrintsPage from "./pages/Prints";
 import GuidePage from "./pages/Guide";
 import PrintersPage from "./pages/Printers";
@@ -76,6 +77,7 @@ function Gate() {
         <Route index element={<PrintersPage />} />
         <Route path="slice" element={<SlicePage />} />
         <Route path="jobs" element={<JobsPage />} />
+        <Route path="jobs/:id" element={<JobPage />} />
         <Route path="prints" element={<PrintsPage />} />
         <Route path="guide" element={<GuidePage />} />
         <Route path="printers" element={<PrintersPage />} />

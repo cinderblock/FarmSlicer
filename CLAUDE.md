@@ -41,8 +41,10 @@ Native builds mirror the Dockerfile's steps:
   `tests/lib.mjs` has the software passkey authenticator + cookie client.
   From Windows, run it on buildhost: tar `Cargo.* build.rs .cargo src tests
   web/src/data` (src includes a JSON from there) to a home dir there and run
-  with `CARGO_TARGET_DIR` set. CI runs it too. A test can ask for extra
-  server environment with a `// e2e-env: K=V` line.
+  with `CARGO_TARGET_DIR` set (and `~/.cargo/bin` on PATH: a plain `ssh`
+  command doesn't have it). CI runs it too. A test can ask for extra
+  server environment with a `// e2e-env: K=V` line. Web unit tests:
+  `cd web && bun test` (`web/test/`, outside `src` so `tsc -b` skips them).
 - Windows: Visual Studio Build Tools, Strawberry Perl (MSYS perl can't build
   OpenSSL), CMake before Strawberry's `c/bin` in PATH. `build.rs` expects the
   MSVC layout (`Release/` subdirs, `.lib`), and OCCT/GMP/MPFR DLLs must be
@@ -185,6 +187,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   the driver's send, and `track()` moving prints along from printer
   statuses (a print not yet seen running can only start); `src/prints_api.rs`
   — uploads, targets, send, prints, control
+- `src/preview_api.rs` — `GET /api/jobs/{id}/gcode?plate=N` for the preview:
+  the plain G-code, else plate N of the `.gcode.3mf` (zipcheck first),
+  streamed from a blocking task through a channel; with gzip accepted, a
+  deflated plate goes out as the archive's own deflate stream in a gzip
+  frame (CRC and size from the zip directory), plain files are gzipped on
+  the fly; `X-Gcode-Bytes` = uncompressed size
 - `tests/fake-printer/` — Docker fake Bambu printer (mosquitto TLS + vsftpd
   with `require_ssl_reuse`); `tests/fake-{moonraker,octoprint,prusalink,sdcp}/`
   — Node fakes the e2e tests start in-process (`tests/fake-lib.mjs`: WebSocket
@@ -213,6 +221,20 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `Bed.tsx`, `drag.ts` (pointer rays, snapping, dragging the part),
   `Gizmo.tsx` (move arrows, rotate rings, lay on face). No camera damping
   on purpose (CAD-style direct control)
+- `web/src/components/preview/` — the G-code preview. `GcodePreview.tsx`
+  (`source={{url}}` or `{{data}}`: text, bytes or a Blob already in memory;
+  optional `bed`, `filamentColors`): layer range slider (`LayerSlider.tsx`),
+  move scrubber, colour modes + legend (`colors.ts`, `features.ts`:
+  feature names folded onto OrcaSlicer's), summary. `parser.ts` (pure, no
+  DOM; `web/test/`) runs in `worker.ts`, started by `load.ts`; output
+  (`types.ts`): extrusions as a point chain with gap segments, 16-bit
+  sizes/speeds, travels, retractions, per-layer offsets. `scene.ts`:
+  instanced beads drawn straight from those arrays in 256k chunks (layer
+  range = instance count + a shader lower bound), lines above
+  `BEAD_BUDGET`, lines while the camera moves above `MOVING_LINES`. Same
+  scene convention as `viewer/` (bed centre at the origin), damping off
+- `web/src/pages/Job.tsx` — `/jobs/:id`: facts, slicer warnings (support
+  ones in red), progress, the preview per plate, G-code check, Print…
 - `cxx/thumbnail.{hpp,cpp}` — software rasteriser for plate thumbnails (no
   GL anywhere) and the label/logo overlay (stb_truetype from libslic3r's
   Emboss.cpp; logo arrives as RGBA). slice_core passes it to

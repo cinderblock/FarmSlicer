@@ -3,6 +3,7 @@
 // with a cookie jar, and check/summary bookkeeping. No dependencies beyond
 // Node 22. The base URL is the first command-line argument.
 import { createHash, generateKeyPairSync, sign as cryptoSign, randomBytes } from "node:crypto";
+import { deflateRawSync } from "node:zlib";
 
 export const BASE = (process.argv[2] ?? "http://localhost:9337").replace(/\/$/, "");
 export const ORIGIN = new URL(BASE).origin;
@@ -209,7 +210,7 @@ export function finish() {
   process.exit(failures === 0 ? 0 : 1);
 }
 
-// ---- a stored (uncompressed) zip, enough for 3MF fixtures --------------------------
+// ---- a zip, enough for 3MF fixtures ------------------------------------------------
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   let c = n;
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -223,9 +224,10 @@ function crc32(bytes) {
 
 /**
  * entries: { "path/in/zip": string | Uint8Array }, or a list of
- * [path, content] pairs (which may repeat a path) → Uint8Array
+ * [path, content] pairs (which may repeat a path) → Uint8Array. Entries are
+ * stored, or deflated with `{ deflate: true }` (as slicers write them).
  */
-export function zip(entries) {
+export function zip(entries, { deflate = false } = {}) {
   const list = Array.isArray(entries) ? entries : Object.entries(entries);
   const enc = new TextEncoder();
   const locals = [];
@@ -235,25 +237,29 @@ export function zip(entries) {
     const nameBytes = enc.encode(name);
     const data = typeof content === "string" ? enc.encode(content) : content;
     const crc = crc32(data);
+    const stored = deflate ? new Uint8Array(deflateRawSync(data)) : data;
+    const method = deflate ? 8 : 0;
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);
     local.setUint16(4, 20, true);
+    local.setUint16(8, method, true);
     local.setUint32(14, crc, true);
-    local.setUint32(18, data.length, true);
+    local.setUint32(18, stored.length, true);
     local.setUint32(22, data.length, true);
     local.setUint16(26, nameBytes.length, true);
-    locals.push(new Uint8Array(local.buffer), nameBytes, data);
+    locals.push(new Uint8Array(local.buffer), nameBytes, stored);
     const central = new DataView(new ArrayBuffer(46));
     central.setUint32(0, 0x02014b50, true);
     central.setUint16(4, 20, true);
     central.setUint16(6, 20, true);
+    central.setUint16(10, method, true);
     central.setUint32(16, crc, true);
-    central.setUint32(20, data.length, true);
+    central.setUint32(20, stored.length, true);
     central.setUint32(24, data.length, true);
     central.setUint16(28, nameBytes.length, true);
     central.setUint32(42, offset, true);
     centrals.push(new Uint8Array(central.buffer), nameBytes);
-    offset += 30 + nameBytes.length + data.length;
+    offset += 30 + nameBytes.length + stored.length;
   }
   const centralSize = centrals.reduce((n, a) => n + a.length, 0);
   const end = new DataView(new ArrayBuffer(22));
