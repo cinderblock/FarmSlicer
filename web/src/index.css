@@ -430,6 +430,8 @@ body {
   grid-template-rows: minmax(0, 1fr);
   gap: 1.5rem;
   height: calc(100vh - 8rem);
+  /* A short window scrolls the page rather than crushing the viewer. */
+  min-height: 480px;
 }
 
 .viewer-panel {
@@ -443,6 +445,28 @@ body {
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.25rem;
+}
+
+/* Items keep their natural height so the panel scrolls. Shrinking them
+   squashed Quick Settings (overflow: hidden lets it shrink to nothing) and
+   cut off the settings below the fold. */
+.settings-panel > * {
+  flex-shrink: 0;
+}
+
+/* Narrow windows: the viewer on top, the settings below it, and the page
+   scrolls. */
+@media (max-width: 1000px) {
+  .slice-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(400px, 65vh) auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .settings-panel {
+    overflow-y: visible;
+  }
 }
 
 .settings-panel h3 {
