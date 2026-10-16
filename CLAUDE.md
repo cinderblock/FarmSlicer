@@ -62,8 +62,12 @@ Native builds mirror the Dockerfile's steps:
 `ORCA_SRC_DIR=<copy>` to keep the submodule pristine next to a native build.
 Output: `web/public/wasm/{st,mt}/farmslicer-engine*.{mjs,wasm,data}` +
 `manifest.json`. `node wasm/test/smoke.mjs --variant st --config <merged.json>`
-slices a cube; `wasm/test/resolve-profile.mjs` produces such a config from the
-profiles dir without a server. The `mt` variant needs cross-origin isolation
+slices a cube (`--plate`: three parts from two models; `--package`: a
+`.gcode.3mf` too; CI runs the first two); `wasm/test/resolve-profile.mjs`
+produces such a config from the profiles dir without a server (one
+filament; a multi-filament config comes from `POST /api/jobs` with
+`source=browser`, its `config_json`). An empty config fails libslic3r's
+validation ("Relative extruder addressing requires ... G92 E0"). The `mt` variant needs cross-origin isolation
 (COOP/COEP; the server and `vite dev` both send them) and a secure context.
 
 ### Dev on buildhost
@@ -86,11 +90,29 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `src/server.rs` — HTTP router, API handlers, job pipeline (`run_slice` in
   `spawn_blocking`, one slice at a time behind the slicer mutex), browser-job
   endpoints, COOP/COEP headers
-- `src/db.rs` — SQLite (printers, jobs, slices, custom_profiles), WAL, additive migrations
-- `src/profiles.rs` — OrcaSlicer profile loading, `inherits` resolution, merge
+- `src/db.rs` — SQLite (printers, jobs, slices, custom_profiles), WAL, additive
+  migrations. A job's source models are `job_models` (several, in order;
+  `path` '' = kept in the user's browser, found again by `sha256`); what
+  it was made from is `jobs.inputs_json` (`server::JobInputs`: machine,
+  process, filaments, plate type, printer, routing, group, source), what
+  the Slice page proposed `proposed_json`, its parts `plate_json`.
+  `delete_job` returns the files to remove (slices rows go too; prints and
+  incidents keep their history)
+- `src/profiles.rs` — OrcaSlicer profile loading, `inherits` resolution,
+  merge. `resolve_config(machine, process, &[filaments])` is
+  `PresetBundle::full_fff_config` without applied extruders: filament list
+  keys concatenate per filament, `FILAMENT_VARIANT_KEYS` (libslic3r's
+  `filament_options_with_variant`) get one entry per nozzle variant,
+  `filament_self_index` says whose, missing flags take libslic3r's default
+  (never a neighbour's `filament_is_support`), several filaments get a
+  colour each. `filament_info` (cached): material, support, soluble, the
+  printers' name ("PLA-S")
+- `src/reports_api.rs` — `GET /api/reports/defaults` (admins): proposed vs
+  made-with per setting (`web/src/pages/Reports.tsx`)
 - `src/progress.rs` — process-wide progress sink + cancellation flags (libslic3r
   calls back without user data, so jobs are looked up by id)
-- `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, model, config_json, out)`;
+- `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, &models, config_json,
+  out, options)` (`ModelInput`: path, name, per copy a rotation and offset);
   `extern "Rust"` `slice_progress` / `slice_cancelled`
 - `src/printer/` — vendor-neutral printers: `mod.rs` (`Protocol` = the
   `printers.protocol` values, `Capabilities` the UI gates controls on,
@@ -203,24 +225,40 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (groups, members, links, library, usage, site settings);
   `src/join_api.rs` (join flow, guest accounts); `src/quota.rs`
   (rules, periods, three-layer check). Plan: `plans/groups-quotas-registration.md`
-- `cxx/slice_core.{hpp,cpp}` — **the** slicing pipeline (Model::read_from_file →
-  config from JSON via temp file on top of `FullPrintConfig::defaults()` →
-  place on bed (the job's `Placement`, then a `BuildVolume` check that
-  refuses parts outside the printable volume) →
-  Print::apply/validate/process/export_gcode → stats). Shared by
-  the cxx bridge and the wasm bridge; no Rust or Emscripten includes allowed.
-- `src/placement.rs` — the job's `placement`: a row-major rotation applied to
-  the model as loaded, plus the XY offset of its bounding-box centre from the
-  bed centre. Checked on `POST /api/jobs`, stored as `jobs.placement_json`,
-  and handed to both engines (`SliceOptions.placement_*`,
-  `fs_set_options`). `fs_version` reports `placement: true`, and the worker
-  refuses a placed slice on an engine without it
+- `cxx/slice_core.{hpp,cpp}` — **the** slicing pipeline, `slice_models`:
+  config from JSON via temp file on top of `FullPrintConfig::defaults()`,
+  then `Preset::normalize` (every filament key an entry per filament, as
+  the desktop app loads presets) and, for several filaments, purge volumes
+  from their colours (`complete_flush_volumes`, the CLI's method) → the
+  plate (`build_plate`: each model file once, each copy an instance of its
+  objects, rotated, centred on its offset and dropped onto the bed by
+  itself) → a `BuildVolume` check naming the part that doesn't fit →
+  Print::apply/validate/process/export_gcode → stats, the package (with
+  libslic3r's filament-to-nozzle map). The `Print` lives in zeroed memory
+  (`ZeroedPrint`; `issues/libslic3r-fake-wipe-tower.md`). Shared by the
+  cxx bridge and the wasm bridge; no Rust or Emscripten includes allowed.
+- `src/placement.rs` — `Placement` (a row-major rotation applied to the
+  model as loaded, plus the XY offset of its bounding-box centre from the
+  bed centre) and `PlateLayout` (the job's `plate`: parts by model index,
+  copies allowed; a lone part may be unplaced = centred). Checked on
+  `POST /api/jobs`, stored as `jobs.plate_json` (`placement_json` on older
+  jobs; `server::job_plate` reads either) and handed to both engines. The
+  wasm engine stages models 1.. with `fs_stage_model` and takes the plate in
+  `fs_set_options`; `fs_version` reports `placement` and `plate`, and the
+  worker refuses what an older engine would ignore
 - `web/src/components/viewer/` — the Slice page's 3D view, Z-up in slicer
-  coordinates with the origin at the bed centre: `part.ts` (loading, convex
-  hull (capped input, see the file), placement, fit against the bed),
-  `Bed.tsx`, `drag.ts` (pointer rays, snapping, dragging the part),
-  `Gizmo.tsx` (move arrows, rotate rings, lay on face). No camera damping
-  on purpose (CAD-style direct control)
+  coordinates with the origin at the bed centre: `part.ts` (`PartShape`: a
+  loaded model, its convex hull (capped input, see the file) and overhang
+  cache, shared by copies; `Part`: one copy's placement, fit against the
+  bed, look), `layout.ts` (footprints = 2D hulls, overlap by separating
+  axes, free spots for Duplicate/Add/Fill, shelf-packing Arrange),
+  `overhangs.ts` (faces under the support threshold off the plate, points
+  that start in mid-air; the amber/red overlay), `Bed.tsx`, `drag.ts`
+  (pointer rays, snapping, dragging a part), `Gizmo.tsx` (move arrows,
+  rotate rings, lay on face, for the selected part). `ModelViewer.tsx`
+  reports `PlateState` (files in plate order, the plate, fit, overlaps) and
+  the support check. No camera damping on purpose (CAD-style direct
+  control)
 - `web/src/components/preview/` — the G-code preview. `GcodePreview.tsx`
   (`source={{url}}` or `{{data}}`: text, bytes or a Blob already in memory;
   optional `bed`, `filamentColors`): layer range slider (`LayerSlider.tsx`),
@@ -241,7 +279,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `export_gcode` as the thumbnail callback and writes the Bambu
   `.gcode.3mf` with libslic3r's `store_bbs_3mf` (Options::package_path)
 - `cxx/slicer_bridge.{h,cpp}` — thin cxx glue around slice_core
-- `cxx/nanosvg_impl.cpp` — NanoSVG implementation shim (lives in GUI code upstream)
+- `cxx/nanosvg_impl.cpp`, `cxx/color_space_shim.cpp` — NanoSVG and
+  `RGB2HSV` (libslic3r's flush model needs it): upstream keeps both in GUI
+  code
 - `wasm/` — Emscripten superbuild (`CMakeLists.txt`), C bridge
   (`bridge/farmslicer_wasm.cpp`: `fs_version`, `fs_slice`, `fs_slice_start` (mt),
   `fs_set_options` (package + thumbnail overlay for the next slice; the
@@ -249,15 +289,23 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `fs_free`), vendored find-modules/shims/patch, `build.sh`, tests
 - `web/src/engine/` — browser engine: `client.ts` (main thread API),
   `worker.ts` (Web Worker hosting the module), `types.ts`
-- `web/src/pages/Slice.tsx` — upload, profile cascade, overrides, **Compute**
-  selector (Auto / Server / This browser), browser-slice progress + upload
+- `web/src/pages/Slice.tsx` — the plate (Prepare) and the last slice
+  (Preview, `components/SliceResult.tsx`: progress, layers, warnings,
+  Send), profile cascade, Supports (`components/SupportsPanel.tsx`; the
+  choice of materials is `web/src/supports.ts`, unit-tested), overrides,
+  **Compute** selector (Auto / Server / This browser), re-slicing
+  (`?from=<job>`), what it proposed (`proposed`), models kept in the
+  browser (`web/src/localModels.ts`, IndexedDB)
+- `web/src/slicerWarnings.ts` — sorting a job's warnings: support ones,
+  others, technical notes (older jobs; the server now only logs those)
 - `build.rs` — compiles the bridge + slice_core, links ~50 static libs
 - `Dockerfile`, `.dockerignore`, `docker/cmake-stubs/` — the image
 - `.github/workflows/build.yml` — check → wasm → image (registry build cache)
 - `extern/OrcaSlicer/` — submodule @ v2.4.2 (libslic3r + 11k vendor profiles)
 - `data/` — runtime (gitignored): SQLite db, models, G-code
-- `tests/` — API end-to-end tests (`run-e2e.sh`, `lib.mjs`, `*-e2e.mjs`,
-  one per printer protocol). `run-e2e.sh` prints no summary of its own:
+- `tests/` — API end-to-end tests (`run-e2e.sh`, `lib.mjs`, `*-e2e.mjs`:
+  one per printer protocol, plus job history (models, plates, delete, the
+  defaults report), G-code preview, feedback, placement, ...). `run-e2e.sh` prints no summary of its own:
   check its exit code, not the last suite's "ALL PASSED"
 - `plans/` — living plans
 
@@ -266,9 +314,19 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - Rust handles HTTP, job queue, database, profile resolution; libslic3r does
   the slicing. `SlicerHandle(slicer::SlicerBox)` with `unsafe impl Send + Sync`,
   behind a `Mutex` → one slice at a time; queued jobs wait on the mutex.
-- Profile system merges machine + process + filament JSON (child keys win) into
-  one config object; per-job overrides are merged on top; stored on the job as
+- Profile system merges machine + process + the job's filaments (child keys
+  win; several filaments as OrcaSlicer combines them) into one config
+  object; per-job overrides are merged on top; stored on the job as
   `config_json`. Both engines consume exactly that JSON.
+- Every job keeps its source models (uploaded with the job, browser slices
+  too, unless kept on the device), its inputs and its plate, so it can be
+  sliced again (`/slice?from=<job>`) or deleted with its files.
+- Supports: the Slice page sends `enable_support` (on by default),
+  `support_filament` / `support_interface_filament` and the filaments they
+  point at (1 = the part's, 2 = the interface's, 3 = a separate base).
+  On dual-nozzle printers libslic3r picks each filament's nozzle; the
+  package records it and the AMS mapping keeps each filament on an AMS that
+  feeds its nozzle (`AmsUnit.nozzle` from the unit's `info` flags).
 - Browser slicing: `POST /api/jobs` with `source=browser` creates the job and
   returns `config_json`; the worker slices; progress ticks go to
   `/api/jobs/{id}/progress` (409 = cancelled, stop); the G-code and stats go to
@@ -340,6 +398,17 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   stack for the real caller. Every report from a no-libslic3r build's
   server slice is a "server slice failed" error report (the stub fails
   them all).
+- `issues/libslic3r-fake-wipe-tower.md` — libslic3r reads an uninitialised
+  stand-in prime tower when a multi-filament config prints one filament;
+  worked around in slice_core (`ZeroedPrint`).
+- Dual-nozzle (H2D) AMS mapping by nozzle is unverified on hardware (the
+  `info` bits follow Bambu's own device code); see
+  `issues/untested-printers.md`.
+- A support base in another filament than the part's changes filament on
+  every layer with supports (a small PLA-CF part: 43 min with its own base,
+  3 h with a PLA one on an X1C); the Slice page defaults to the part's.
+- Models kept in a browser (IndexedDB) are never pruned there, even when
+  their jobs are deleted.
 - Profiles' `compatible_printers_condition` isn't evaluated (OrcaSlicer runs
   it through its PlaceholderParser); filaments and processes with only a
   condition are offered to every printer of the vendor.

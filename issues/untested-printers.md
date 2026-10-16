@@ -13,7 +13,7 @@ resume, stop.
 | Printer | Protocol | Checked |
 | --- | --- | --- |
 | Bambu Lab X1 Carbon | Bambu | 2026-10-12: status, AMS trays, camera (RTSPS), pictures of outside prints, sending and starting prints, stop (0300_400C → cancelled) |
-| Bambu Lab H2D | Bambu | 2026-10-12: status (both nozzles, AMS), camera (RTSPS), pictures of outside prints. No print sent yet |
+| Bambu Lab H2D | Bambu | 2026-10-12: status (both nozzles, AMS), camera (RTSPS), pictures of outside prints. No print sent yet. Untried: a multi-filament job (supports in a support material), where the AMS mapping keeps each filament on an AMS that feeds the nozzle libslic3r gave it (`AmsUnit.nozzle` from bits 8-11 of the unit's `info`, as Bambu's device code reads them: 0 = right, 1 = left) |
 
 ## Tested against real printer software, not a printer
 

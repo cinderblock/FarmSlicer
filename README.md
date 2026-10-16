@@ -10,14 +10,36 @@ can run in the user's browser.
 - **Frontend:** React + TypeScript + Three.js (Vite), served by the backend.
 - **Profiles:** OrcaSlicer's vendor profiles (machine / process / filament) with
   inheritance resolved server-side; per-job overrides and saved custom profiles.
-- **Placing the part:** the Slice page's 3D view shows the selected printer's
-  bed in the slicer's coordinates. Move the part with arrows or by dragging
-  it, rotate it with rings (15° snaps; Shift for free movement), or lay a face
-  on the plate. Position and rotation can also be typed. Both engines slice
-  the part where it sits. A part that leaves the printable volume turns red
-  and can't be sliced. The slicer refuses one too.
-- **Preview:** every job's G-code, layer by layer, like the desktop
-  slicers' Preview (the job page, `/jobs/{id}`): toolpaths in 3D on the
+- **The plate:** the Slice page's 3D view shows the selected printer's bed
+  in the slicer's coordinates, with any number of parts: drop or add several
+  model files, Duplicate the selected part into free space, Fill the plate
+  with as many copies as fit, Arrange packs everything (A), Delete removes
+  one. Move a part with arrows or by dragging it, rotate it with rings (15°
+  snaps; Shift for free movement), or lay a face on the plate; position and
+  rotation can also be typed. Both engines slice every part where it sits
+  (copies of one model slice once). A part that leaves the printable volume
+  or overlaps another turns red and can't be sliced. The slicer refuses one
+  too.
+- **Supports:** their own section on the Slice page, on by default (the
+  slicer only adds them where a part needs them): style, only from the
+  plate, and which filaments print them. With an AMS the interface (the
+  layers touching the part) is printed in a support material matched to the
+  part (Support For PLA, PLA/PETG, PA/PET, ABS...), preferring one loaded on
+  the printers in question; the base stays in the part's filament unless
+  you pick a cheaper one (that changes filament on every layer with
+  supports). The view paints what hangs over nothing (amber where supports
+  will hold it, red where it would print in the air) and says how much
+  there is, before slicing.
+- **Job history:** every job keeps its source models, profiles, plate and
+  overrides. **Re-slice** opens a job's parts and settings on the Slice page
+  to change and slice as a new job. A browser slice can keep its models on
+  that device only (IndexedDB; the job is tagged **local** and can be sliced
+  again from that browser). Jobs can be deleted, one or a selection, with
+  their files.
+- **Preview:** after slicing, the Slice page stays and shows the result
+  (Preview, next to the plate's Prepare); every job's G-code is on its job
+  page (`/jobs/{id}`) too, layer by layer, like the desktop slicers'
+  Preview: toolpaths in 3D on the
   printer's bed, a layer range slider and a scrubber through the top
   layer's moves, colours by feature, filament, speed or layer time, feature
   types hidden from the legend, travel moves and retractions, time per
@@ -27,8 +49,8 @@ can run in the user's browser.
   check and "Print…".
 - **Compute:** each slice runs either on the server or in the browser
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
-  isolated). Browser slicing uploads only the resulting G-code, unless the
-  job's group is set to keep models.
+  isolated). A browser slice uploads its models with the job (or keeps
+  them on the device), then its G-code.
 - **Printers:** five kinds, each on the LAN (see [Printers](#printers)):
   Bambu Lab, Klipper (Moonraker), OctoPrint, Prusa (PrusaLink) and Elegoo
   Centauri Carbon (SDCP). Discovery, live status (state, progress,
@@ -83,6 +105,9 @@ can run in the user's browser.
   Errors from before sign-in wait in the browser. Admins triage everything
   on the Feedback page (status, a note the reporter sees); everyone else
   sees their own reports there.
+- **Reports:** which of the Slice page's defaults people change (print
+  quality, filament, nozzle, plate, supports, support materials, every
+  Quick Setting), how often and to what, for admins (`/reports`).
 
 License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
 
@@ -282,7 +307,7 @@ Frontend only:
 ```bash
 cd web && bun install && bun run dev      # Vite dev server, proxies /api and /wasm to :9337
 cd web && bun run build                    # tsc + vite → dist/web
-cd web && bun test                         # unit tests (web/test/: the G-code parser)
+cd web && bun test                         # unit tests (the G-code parser, support materials, slicer warnings)
 ```
 
 ### Browser engine (WebAssembly)
@@ -326,7 +351,7 @@ summary prints the `pin.json` to paste there.
 | `GET /api/auth/status`, `POST /api/auth/{setup,login,recover}/{start,finish}`, `GET /api/auth/invite/{token}`, `POST /api/auth/invite/{token}/{start,finish}`, `POST /api/auth/logout` | passkey ceremonies and sessions (see Accounts) |
 | `GET /api/me`, `GET/POST /api/me/passkeys…`, `GET/POST/DELETE /api/me/api-keys…`, `POST /api/me/recovery-code` | own account |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/invite` | user admin |
-| `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue |
+| `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue; a machine's filaments say what each is (`material`, `support`, `soluble`, `tray_material` as printers name it, `price_per_kg`) |
 | `GET /api/profiles/resolve?machine=&process=&filament=` | merged config JSON (what the engines slice with) |
 | `GET /api/profiles/resolve-single?name=` | one profile with inheritance resolved |
 | `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set` |
@@ -349,7 +374,7 @@ summary prints the `pin.json` to paste there.
 | `GET /api/discovery` | printers seen on the LAN, each with the protocol and address to add it with |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides (members: only the Slice page's settings; nobody: `post_process`) |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
-| `POST /api/jobs` (multipart) | `model` (repeatable) + profile names (`machine`, `process`, `filament`, `overrides`, `bed_type`, `color`, `printer_id`, `routing`). `source=server` slices here, `source=browser` in the browser. Every job keeps its models so it can be sliced again; a browser job may instead name models kept in the browser (`local_models`: `[{"name", "bytes", "sha256"}]`). Optional `group_id`; optional `plate` (`{"objects": [{"model": 0, "placement": {"rotation": [3x3 row-major], "offset": [dx, dy]}}]}`: per part, the rotation applied to the model as loaded and its bounding-box centre relative to the bed centre in mm; a lone part without a placement is centred as loaded; `placement` alone still works for one model); optional `proposed` (what the page defaulted to, JSON); 429 when a quota is used up |
+| `POST /api/jobs` (multipart) | `model` (repeatable) + profile names (`machine`, `process`, `filament` (repeatable: filament 1, 2, ...; `support_filament` / `support_interface_filament` in the overrides pick among them), `overrides`, `bed_type`, `color`, `printer_id`, `routing`). `source=server` slices here, `source=browser` in the browser. Every job keeps its models so it can be sliced again; a browser job may instead name models kept in the browser (`local_models`: `[{"name", "bytes", "sha256"}]`). Optional `group_id`; optional `plate` (`{"objects": [{"model": 0, "placement": {"rotation": [3x3 row-major], "offset": [dx, dy]}}]}`: per part, the rotation applied to the model as loaded and its bounding-box centre relative to the bed centre in mm; a lone part without a placement is centred as loaded; `placement` alone still works for one model); optional `proposed` (what the page defaulted to, JSON); 429 when a quota is used up |
 | `GET /api/jobs/{id}` | one job with its `models` (name, bytes, sha256, `stored`), `inputs` (what it was made from) and `plate` |
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
 | `DELETE /api/jobs/{id}`, `POST /api/jobs/delete` `{ids}` | delete jobs with their files (creator, group managers, admins); refused while slicing or while a print still needs the package. The bulk form answers `{deleted, refused: [{id, error}]}` |
@@ -370,6 +395,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/feedback/errors` | automatic error reports from the browser: `{reports: [{source: window\|promise\|console\|react\|api\|resource, message, stack?, url?, version?, count?, kind?, context?}]}`, at most 20 per request; fields are truncated, and each account may send 60, then one every 10 s (429 with `retry_after_secs`). Deduplicated by fingerprint (source + message + first stack frame, ids, numbers, line numbers and asset hashes left out) |
 | `GET /api/feedback?automatic=1\|0&kind=&status=&mine=1&limit=`, `GET /api/feedback/counts`, `GET /api/feedback/{id}` | admins: every report and error (with who hit it, in which version); others: their own reports and their own occurrences of errors they hit. `status=open` = new or acknowledged |
 | `PUT /api/feedback/{id}` (`{status: new\|acknowledged\|resolved\|wont_fix, admin_note}`), `DELETE /api/feedback/{id}` | triage (admins). A resolved error that happens again is new again |
+| `GET /api/reports/defaults?days=` | which of the Slice page's defaults jobs changed, how often and to what (admins; `days=0`: all) |
 | `GET /api/me/usage`, `GET/PUT /api/settings` | own quota usage; site-wide settings (admins), including `uploads` (allow / review / deny) and `gcode_limits` |
 
 ## Repository layout
@@ -390,15 +416,19 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,
                 discovery/ (SSDP, mDNS, SDCP), feedback.rs +
-                feedback_api.rs + db/feedback.rs (reports, error reports)
+                feedback_api.rs + db/feedback.rs (reports, error reports),
+                reports_api.rs (defaults people change)
 cxx/            slice_core.{hpp,cpp}: the libslic3r pipeline shared by both
-                engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp
+                engines; slicer_bridge.cpp: cxx glue; nanosvg_impl.cpp and
+                color_space_shim.cpp (what upstream keeps in GUI code)
 wasm/           Emscripten superbuild + C bridge for the browser engine
 web/            React frontend (Vite, Bun); web/src/engine/ = browser engine client + worker;
-                web/src/components/viewer/ = the Slice page's 3D view (bed, part, gizmos);
+                web/src/components/viewer/ = the Slice page's 3D view (bed, parts, gizmos,
+                plate layout, overhangs); web/src/supports.ts = support materials;
+                web/src/localModels.ts = models kept in the browser (IndexedDB);
                 web/src/components/preview/ = the G-code preview (parser + worker, renderer);
                 web/src/errorReporting.ts = automatic error reports, console ring buffer;
-                web/test/ = bun unit tests
+                web/test/ and web/src/*.test.ts = bun unit tests
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build
 tests/          API end-to-end tests (run-e2e.sh), their shared helpers, and a
