@@ -11,6 +11,7 @@ import { ConvexHull } from "three/examples/jsm/math/ConvexHull.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
 import type { Placement } from "../../engine/types";
+import { findOverhangs, OverhangOverlay, type Overhangs } from "./overhangs";
 
 /** The printer's bed from the resolved profile: absolute slicer coordinates. */
 export interface Bed {
@@ -210,6 +211,8 @@ export class PartShape {
   /** Hull faces' outward normals and plane constants, one per triangle. */
   readonly hullFaces: { normal: THREE.Vector3; constant: number }[];
   readonly hullPoints: THREE.Vector3[];
+  /** Overhangs by rotation and threshold: copies turned alike share them. */
+  readonly overhangs = new Map<string, Overhangs>();
   /** The model file's name. */
   readonly name: string;
   private users = 0;
@@ -271,6 +274,10 @@ export class Part {
   readonly center = new THREE.Vector2();
   /** Bounding box of the rotated part relative to the root's origin. */
   readonly extent = new THREE.Box3();
+  /** What would print in the air, painted on the part. */
+  private readonly overlay = new OverhangOverlay();
+  private overhangKey = "";
+  private current: Overhangs | null = null;
   /** Hull points rotated (relative to the root's origin), for fit checks and footprints. */
   private rotated: THREE.Vector3[] = [];
 
@@ -293,7 +300,33 @@ export class Part {
       shape.hullGeometry,
       new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
     );
+    this.root.add(this.overlay.group);
     this.updateRotation();
+  }
+
+  /**
+   * Find (or recall) the overhangs for the part as turned now and paint
+   * them: amber when supports will hold them, red when they'd print in the
+   * air. `show` false hides the paint.
+   */
+  updateOverhangs(thresholdDeg: number, supported: boolean, show: boolean): Overhangs {
+    const q = this.root.quaternion;
+    const key = `${thresholdDeg}|${q.x.toFixed(5)},${q.y.toFixed(5)},${q.z.toFixed(5)},${q.w.toFixed(5)}`;
+    if (key !== this.overhangKey || !this.current) {
+      let found = this.shape.overhangs.get(key);
+      if (!found) {
+        found = findOverhangs(this.root, this.content, thresholdDeg);
+        // A handful of orientations per model is plenty to remember.
+        if (this.shape.overhangs.size >= 8) this.shape.overhangs.delete(this.shape.overhangs.keys().next().value!);
+        this.shape.overhangs.set(key, found);
+      }
+      this.current = found;
+      this.overhangKey = key;
+      this.overlay.show(found, supported);
+    }
+    this.overlay.setSupported(supported);
+    this.overlay.group.visible = show;
+    return this.current;
   }
 
   /** The model's name (its file). */
@@ -411,6 +444,7 @@ export class Part {
 
   dispose() {
     (this.hullMesh.material as THREE.Material).dispose();
+    this.overlay.dispose();
     this.shape.release();
   }
 }

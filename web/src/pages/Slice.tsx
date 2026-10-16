@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import ModelViewer, { type BedShape, type PlateState } from "../components/ModelViewer";
+import ModelViewer, { type BedShape, type PlateState, type SupportCheck } from "../components/ModelViewer";
+import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
 import OverridesPanel from "../components/OverridesPanel";
 import {
   BrowserEngine,
@@ -11,7 +12,14 @@ import {
 } from "../engine/client";
 import type { EngineManifest, PlateLayout, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
-import { BED_TYPES } from "../printers";
+import { BED_TYPES, loadedTrays, type PrinterStatus } from "../printers";
+import {
+  defaultSupportMaterials,
+  materialsFromJob,
+  supportFilaments,
+  type FilamentOption,
+  type SupportMaterials,
+} from "../supports";
 import { loadLocalModel, saveLocalModel } from "../localModels";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
@@ -118,10 +126,32 @@ interface ResliceJob {
   plate: PlateLayout | null;
 }
 
-interface ProfileEntry {
-  name: string;
-  vendor: string;
+interface ProfileEntry extends FilamentOption {
   description?: string;
+}
+
+/** Overrides the Supports section owns (Quick Settings leaves them out). */
+const SUPPORT_KEYS = [
+  "enable_support",
+  "support_type",
+  "support_on_build_plate_only",
+  "support_filament",
+  "support_interface_filament",
+];
+
+/**
+ * The filament to offer from a list: the machine maker's own "Basic" line
+ * (Bambu PLA Basic on a Bambu printer, not another brand's), then any
+ * "Basic", then a generic one, then the first.
+ */
+function pickDefaultFilament(list: ProfileEntry[], maker: string): ProfileEntry | undefined {
+  const own = (f: ProfileEntry) => maker !== "" && f.name.startsWith(`${maker} `);
+  return (
+    list.find((f) => own(f) && /\bBasic\b/.test(f.name)) ??
+    list.find((f) => /\bBasic\b/.test(f.name)) ??
+    list.find((f) => f.name.startsWith("Generic")) ??
+    list[0]
+  );
 }
 
 // Extract the base material type from a filament profile name.
@@ -211,6 +241,14 @@ export default function SlicePage() {
   const [variantFilter, setVariantFilter] = useState("");
   const [color, setColor] = useState("");
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  // Supports: on by default (libslic3r only adds them where needed); the
+  // support materials follow the part's filament unless the user picks.
+  const [supports, setSupports] = useState<SupportSettings>({ enabled: true, type: null, buildPlateOnly: null });
+  const [materialsChoice, setMaterialsChoice] = useState<{ part: string; value: SupportMaterials } | null>(null);
+  const [supportCheck, setSupportCheck] = useState<SupportCheck | null>(null);
+  const statuses = useJson<PrinterStatus[]>("/api/printers/status").data;
+  // What the page chose by itself (for the defaults-changed report).
+  const proposedPicks = useRef<{ process?: string; filament?: string }>({});
   const [resolvedConfig, setResolvedConfig] = useState<Record<string, string> | null>(null);
   const [routing, setRouting] = useState("auto");
   const [groupChoice, setGroupChoice] = useState(() => localStorage.getItem(GROUP_KEY) ?? "");
@@ -320,11 +358,23 @@ export default function SlicePage() {
         if (inputs.routing) setRouting(inputs.routing);
         if (inputs.group_id) setGroupChoice(inputs.group_id);
       }
-      try {
-        setOverrides(JSON.parse(job.overrides_json ?? "{}") ?? {});
-      } catch {
-        setOverrides({});
-      }
+      const saved: Record<string, string> = (() => {
+        try {
+          return JSON.parse(job.overrides_json ?? "{}") ?? {};
+        } catch {
+          return {};
+        }
+      })();
+      // Jobs from before the Supports section: supports as the profile had
+      // them (off, for the vendors' processes) unless overridden.
+      setSupports({
+        enabled: saved.enable_support === "1",
+        type: saved.support_type ?? null,
+        buildPlateOnly: saved.support_on_build_plate_only === undefined ? null : saved.support_on_build_plate_only === "1",
+      });
+      if (inputs?.filaments[0])
+        setMaterialsChoice({ part: inputs.filaments[0], value: materialsFromJob(inputs.filaments, saved) });
+      setOverrides(Object.fromEntries(Object.entries(saved).filter(([k]) => !SUPPORT_KEYS.includes(k))));
       setInitialPlate({ key: fromJob, files, plate: job.plate });
     })().catch((err) => {
       if (!stale) setReslice((r) => ({ name: r?.name ?? "this job", error: err instanceof Error ? err.message : String(err) }));
@@ -411,6 +461,41 @@ export default function SlicePage() {
     if (p.machine_profile === model && p.plate_type) plateCounts.set(p.plate_type, (plateCounts.get(p.plate_type) ?? 0) + 1);
   const defaultPlate = [...plateCounts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Textured PEI Plate";
   const plate = selectedPrinter?.plate_type || plateChoice || defaultPlate;
+  // The machine's maker, for default filaments ("Bambu" for Bambu Lab).
+  const maker = (modelInfo?.vendor_display ?? "").split(" ")[0] ?? "";
+
+  // The printers this job may go to, and what they have loaded.
+  const targetStatuses = useMemo(() => {
+    const all = statuses ?? [];
+    if (selectedPrinter) return all.filter((st) => st.printer_id === selectedPrinter.id);
+    const ofModel = new Set(printers.filter((p) => p.machine_profile === model).map((p) => p.id));
+    return all.filter((st) => ofModel.has(st.printer_id));
+  }, [statuses, selectedPrinter, printers, model]);
+  const loadedMaterials = useMemo(
+    () => new Set(targetStatuses.flatMap((st) => loadedTrays(st)).map((t) => (t.material ?? "").toUpperCase())),
+    [targetStatuses],
+  );
+  // An AMS on any of them (no status yet: Bambu printers usually have one).
+  const multiMaterial =
+    targetStatuses.length > 0 ? targetStatuses.some((st) => st.ams.length > 0) : model.startsWith("Bambu Lab");
+  const partFilament = filaments.find((f) => f.name === filament);
+  const defaultMaterials = useMemo(
+    () => defaultSupportMaterials(partFilament, filaments, { multiMaterial, loaded: loadedMaterials }),
+    [partFilament, filaments, multiMaterial, loadedMaterials],
+  );
+  const supportMaterials = materialsChoice && materialsChoice.part === filament ? materialsChoice.value : defaultMaterials;
+  const supportPlan = useMemo(
+    () => supportFilaments(filament, supports.enabled, supportMaterials),
+    [filament, supports.enabled, supportMaterials],
+  );
+  // The overrides the job goes out with: Quick Settings plus Supports.
+  const jobOverrides = useMemo(() => {
+    const o: Record<string, string> = { ...overrides, enable_support: supports.enabled ? "1" : "0" };
+    if (supports.type) o.support_type = supports.type;
+    if (supports.buildPlateOnly !== null) o.support_on_build_plate_only = supports.buildPlateOnly ? "1" : "0";
+    if (supports.enabled) Object.assign(o, supportPlan.overrides);
+    return o;
+  }, [overrides, supports, supportPlan]);
 
   // The machine profile to slice with
   const resolvedMachine = selectedPrinter
@@ -471,11 +556,8 @@ export default function SlicePage() {
       (f) => materialVariant(f.name) === defaultVariant,
     );
     if (filtered.length > 0 && !filtered.some((f) => f.name === filament)) {
-      const basic =
-        filtered.find((f) => f.name.includes("Basic")) ??
-        filtered.find((f) => f.name.startsWith("Generic")) ??
-        filtered[0];
-      setFilament(basic.name);
+      const basic = pickDefaultFilament(filtered, maker);
+      if (basic) setFilament(basic.name);
     }
   };
 
@@ -485,11 +567,8 @@ export default function SlicePage() {
       .filter((f) => materialType(f.name) === materialFilter)
       .filter((f) => materialVariant(f.name) === variant);
     if (filtered.length > 0 && !filtered.some((f) => f.name === filament)) {
-      const basic =
-        filtered.find((f) => f.name.includes("Basic")) ??
-        filtered.find((f) => f.name.startsWith("Generic")) ??
-        filtered[0];
-      setFilament(basic.name);
+      const basic = pickDefaultFilament(filtered, maker);
+      if (basic) setFilament(basic.name);
     }
   };
 
@@ -512,6 +591,7 @@ export default function SlicePage() {
         if (data.length > 0 && !data.some((p) => p.name === process)) {
           const standard = data.find((p) => p.name.includes("0.20mm"));
           setProcess(standard?.name ?? data[0].name);
+          proposedPicks.current.process = standard?.name ?? data[0].name;
         }
       })
       .catch(() => {});
@@ -546,11 +626,13 @@ export default function SlicePage() {
           (f) => materialVariant(f.name) === defaultVariant,
         );
         if (filtered.length > 0 && !filtered.some((f) => f.name === filament)) {
-          const basic =
-            filtered.find((f) => f.name.includes("Basic")) ??
-            filtered.find((f) => f.name.startsWith("Generic")) ??
-            filtered[0];
-          setFilament(basic.name);
+          const basic = pickDefaultFilament(filtered, maker);
+          if (basic) {
+            setFilament(basic.name);
+            proposedPicks.current.filament = basic.name;
+          }
+        } else if (kept) {
+          proposedPicks.current.filament = kept.name;
         }
       })
       .catch(() => {});
@@ -585,16 +667,28 @@ export default function SlicePage() {
     if (printerId) formData.append("printer_id", printerId);
     if (resolvedMachine) formData.append("machine", resolvedMachine);
     if (process) formData.append("process", process);
-    if (filament) formData.append("filament", filament);
+    if (filament) for (const f of supportPlan.filaments) formData.append("filament", f);
     if (plate) formData.append("bed_type", plate);
     if (color) formData.append("color", color);
-    if (Object.keys(overrides).length > 0) {
-      formData.append("overrides", JSON.stringify(overrides));
-    }
+    formData.append("overrides", JSON.stringify(jobOverrides));
     if (groupId) formData.append("group_id", groupId);
     if (layout) formData.append("plate", JSON.stringify(layout.plate));
+    // What the page would have sent untouched: the defaults-changed report
+    // compares it with what the job was made from.
+    formData.append(
+      "proposed",
+      JSON.stringify({
+        nozzle: defaultNozzle(model),
+        bed_type: defaultPlate,
+        process: proposedPicks.current.process ?? null,
+        filament: proposedPicks.current.filament ?? null,
+        filaments: supportFilaments(proposedPicks.current.filament ?? filament, true, defaultMaterials).filaments,
+        supports: { enabled: true, type: null, build_plate_only: null, materials: defaultMaterials },
+        overrides: {},
+      }),
+    );
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, plate, color, overrides, groupId, layout]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials]);
 
   const sliceOnServer = useCallback(async () => {
     if (modelFiles.length === 0) return;
@@ -719,6 +813,11 @@ export default function SlicePage() {
   }, [modelFiles, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
 
   const bed = useMemo(() => bedFromConfig(resolvedConfig), [resolvedConfig]);
+  const profileValue = (key: string): string | undefined => {
+    const v: unknown = resolvedConfig?.[key];
+    return Array.isArray(v) ? String(v[0]) : v === undefined || v === null ? undefined : String(v);
+  };
+  const supportThreshold = Number(profileValue("support_threshold_angle")) || 0;
   const offBed = !!layout && (layout.fit !== "inside" || layout.overlaps);
 
   const handleCancelBrowserSlice = useCallback(() => {
@@ -734,6 +833,9 @@ export default function SlicePage() {
             bed={bed}
             onPlateChange={setLayout}
             initial={initialPlate}
+            supportThreshold={supportThreshold}
+            supportsOn={supports.enabled}
+            onSupportCheck={setSupportCheck}
           />
         </div>
         <div className="settings-panel">
@@ -932,6 +1034,21 @@ export default function SlicePage() {
             />
           </label>
 
+          <SupportsPanel
+            settings={supports}
+            onSettings={setSupports}
+            materials={supportMaterials}
+            onMaterials={(value) => setMaterialsChoice({ part: filament, value })}
+            part={partFilament}
+            filaments={filaments}
+            profileType={profileValue("support_type")}
+            profileBuildPlateOnly={profileValue("support_on_build_plate_only") === "1"}
+            loaded={loadedMaterials}
+            multiMaterial={multiMaterial}
+            check={supportCheck}
+            disabled={!resolvedMachine || slicing}
+          />
+
           <OverridesPanel
             resolvedConfig={resolvedConfig}
             overrides={overrides}
@@ -939,6 +1056,7 @@ export default function SlicePage() {
             disabled={!resolvedMachine}
             processName={process}
             filamentName={filament}
+            hiddenKeys={SUPPORT_KEYS}
           />
 
           <label>

@@ -10,6 +10,8 @@ interface Props {
   disabled?: boolean;
   processName?: string;
   filamentName?: string;
+  /** Settings shown elsewhere on the page (the Supports section's). */
+  hiddenKeys?: string[];
 }
 
 const schema = settingsSchema as SettingDef[];
@@ -21,6 +23,7 @@ export default function OverridesPanel({
   disabled,
   processName,
   filamentName,
+  hiddenKeys,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -29,8 +32,8 @@ export default function OverridesPanel({
   const [saveMsg, setSaveMsg] = useState("");
 
   const commonSettings = useMemo(
-    () => schema.filter((s) => s.common),
-    [],
+    () => schema.filter((s) => s.common && !hiddenKeys?.includes(s.key)),
+    [hiddenKeys],
   );
 
   const categories = useMemo(() => {

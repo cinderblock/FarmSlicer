@@ -7,9 +7,11 @@ import Bed from "./viewer/Bed";
 import { FaceTool, MoveGizmo, RotateGizmo } from "./viewer/Gizmo";
 import { useBodyDrag, type GizmoProps, type Guide, type Tool } from "./viewer/drag";
 import { arrange, fillCopies, findFreeSpot, overlapping } from "./viewer/layout";
+import type { SupportCheck } from "./viewer/overhangs";
 import { DEFAULT_BED, Part, PartShape, sceneBed, type Bed as BedShape, type Fit, type SceneBed } from "./viewer/part";
 
 export type { Fit } from "./viewer/part";
+export type { SupportCheck } from "./viewer/overhangs";
 export type { BedShape };
 
 /** Rotation fields: extrinsic X, then Y, then Z (libslic3r's convention). */
@@ -250,6 +252,9 @@ export default function ModelViewer({
   bed,
   onPlateChange,
   initial,
+  supportThreshold = 0,
+  supportsOn = true,
+  onSupportCheck,
 }: {
   /** The selected printer's bed; a 256 mm bed until there is one. */
   bed?: BedShape | null;
@@ -257,11 +262,21 @@ export default function ModelViewer({
   onPlateChange?: (state: PlateState | null) => void;
   /** Models and parts to start from (a job being sliced again); loaded whenever `key` changes. */
   initial?: { key: string; files: File[]; plate: PlateLayout | null } | null;
+  /** The process's `support_threshold_angle` (0 = auto). */
+  supportThreshold?: number;
+  /** Will the slicer generate supports? (Overhangs show amber, else red.) */
+  supportsOn?: boolean;
+  /** What would print in the air on the plate (null: no parts). */
+  onSupportCheck?: (check: SupportCheck | null) => void;
 }) {
   const [models, setModels] = useState<LoadedModel[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>("move");
+  const [showOverhangs, setShowOverhangs] = useState(true);
+  // Bumped when a manipulation ends: overhangs are found again then (not
+  // on every frame of a drag).
+  const [settled, setSettled] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -312,8 +327,29 @@ export default function ModelViewer({
   /** A manipulation finished: tell the page what's on the plate. */
   const commit = useCallback(() => {
     refresh();
+    setSettled((n) => n + 1);
     report.current?.(plateState(parts, models, shape));
   }, [refresh, parts, models, shape]);
+
+  // What would print in the air: painted on the parts, totalled for the page.
+  const reportCheck = useRef(onSupportCheck);
+  useEffect(() => {
+    reportCheck.current = onSupportCheck;
+  }, [onSupportCheck]);
+  useEffect(() => {
+    if (parts.length === 0) {
+      reportCheck.current?.(null);
+      return;
+    }
+    let overhangArea = 0;
+    let floating = 0;
+    for (const p of parts) {
+      const o = p.updateOverhangs(supportThreshold, supportsOn, showOverhangs);
+      overhangArea += o.area;
+      floating += o.floating;
+    }
+    reportCheck.current?.({ overhangArea, floating });
+  }, [parts, settled, supportThreshold, supportsOn, showOverhangs]);
 
   // New parts, or a different printer's bed: report the plate again.
   useEffect(() => {
@@ -590,6 +626,13 @@ export default function ModelViewer({
             </button>
             <button onClick={arrangeAll} title="Pack every part on the plate">
               Arrange <kbd>A</kbd>
+            </button>
+            <button
+              className={showOverhangs ? "active" : ""}
+              onClick={() => setShowOverhangs((v) => !v)}
+              title="Paint what hangs over nothing: amber where supports will hold it, red where it would print in the air"
+            >
+              Overhangs
             </button>
             <span className="toolbar-sep" />
             <button onClick={remove} disabled={!selected} title="Remove the selected part">

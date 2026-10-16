@@ -54,6 +54,10 @@ jobs:
         working-directory: web
         run: bun run build
 
+      - name: Frontend unit tests
+        working-directory: web
+        run: bun test
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Rust typecheck
