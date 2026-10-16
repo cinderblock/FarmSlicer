@@ -490,6 +490,18 @@ body {
   font-size: 0.9rem;
 }
 
+/* A checkbox and its label on one line. */
+.settings-panel label.check-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+}
+
+.settings-panel label.check-row input {
+  width: auto;
+}
+
 /* Model and nozzle side by side; the nozzle list is short. */
 .settings-panel .machine-row {
   display: grid;

@@ -12,16 +12,18 @@ import {
 import type { EngineManifest, Placement, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
 import { BED_TYPES } from "../printers";
+import { saveLocalModel } from "../localModels";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
 type ComputeMode = "auto" | "server" | "browser";
 const COMPUTE_KEY = "farmslicer.compute";
 /** The group jobs are charged to, remembered per browser. */
 const GROUP_KEY = "farmslicer.group";
+/** Browser slices keep the model in this browser instead of uploading it. */
+const KEEP_LOCAL_KEY = "farmslicer.keepLocal";
 
 interface MeGroups {
   chargeable: { id: string; path: string }[];
-  groups: { group_id: string; keep_models: boolean }[];
 }
 
 interface ServerStatus {
@@ -34,8 +36,6 @@ interface ServerStatus {
 interface JobRecord {
   id: string;
   config_json: string | null;
-  /** The job's group keeps models: upload it with the result. */
-  keep_model?: boolean;
   /** Browser jobs: what to produce besides G-code (server-decided). */
   slice_options?: Omit<SliceOptions, "logo"> & { logo_url: string | null };
 }
@@ -203,7 +203,7 @@ export default function SlicePage() {
   const chargeable = me?.chargeable ?? [];
   // A remembered group the user has since left falls back to personal.
   const groupId = chargeable.some((g) => g.id === groupChoice) ? groupChoice : "";
-  const groupKeepsModels = !!me?.groups.find((g) => g.group_id === groupId)?.keep_models;
+  const [keepLocal, setKeepLocal] = useState(() => localStorage.getItem(KEEP_LOCAL_KEY) === "1");
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
   );
@@ -537,11 +537,16 @@ export default function SlicePage() {
     if (!engineRef.current) engineRef.current = await BrowserEngine.create();
     const engine = engineRef.current;
 
-    // Register the job. The model stays on this machine unless the job's
-    // group keeps models (then it goes up with the result).
+    // Register the job. The model goes up with it (every job keeps its
+    // model so it can be sliced again), or stays in this browser.
     const formData = buildJobForm();
     formData.append("source", "browser");
-    formData.append("model_name", modelFile.name);
+    if (keepLocal) {
+      const sha256 = await saveLocalModel(modelFile);
+      formData.append("local_models", JSON.stringify([{ name: modelFile.name, bytes: modelFile.size, sha256 }]));
+    } else {
+      formData.append("model", modelFile);
+    }
     const res = await fetch("/api/jobs", { method: "POST", body: formData });
     const job: JobRecord & { error?: string } = await res.json();
     if (!res.ok) throw new Error(job.error ?? `HTTP ${res.status}`);
@@ -579,7 +584,6 @@ export default function SlicePage() {
       upload.append("print_time_sec", String(out.report.stats.printTimeSec));
       upload.append("filament_used_g", String(out.report.stats.filamentG));
       upload.append("warnings", JSON.stringify(out.report.warnings));
-      if (job.keep_model) upload.append("model", modelFile, modelFile.name);
       if (out.package) upload.append("package", new Blob([out.package]), `${job.id}.gcode.3mf`);
       const up = await fetch(`/api/jobs/${job.id}/result`, { method: "POST", body: upload });
       if (!up.ok) {
@@ -607,7 +611,7 @@ export default function SlicePage() {
     } finally {
       setBrowserJobId(null);
     }
-  }, [modelFile, buildJobForm, navigate]);
+  }, [modelFile, buildJobForm, navigate, keepLocal]);
 
   const handleSlice = useCallback(async () => {
     if (!modelFile) return;
@@ -883,9 +887,6 @@ export default function SlicePage() {
               ))}
             </select>
           </label>
-          {groupId && groupKeepsModels && (
-            <p className="hint">This group keeps models: the model file is stored with the job.</p>
-          )}
 
           <label>
             Compute
@@ -915,6 +916,26 @@ export default function SlicePage() {
               </>
             )}
           </p>
+          {compute !== "server" && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={keepLocal}
+                disabled={slicing}
+                onChange={(e) => {
+                  setKeepLocal(e.target.checked);
+                  localStorage.setItem(KEEP_LOCAL_KEY, e.target.checked ? "1" : "0");
+                }}
+              />
+              Keep the model on this device only
+            </label>
+          )}
+          {compute !== "server" && keepLocal && (
+            <p className="hint">
+              Browser slices keep the model in this browser; the job is tagged local and can be
+              sliced again only here. Server slices always upload it.
+            </p>
+          )}
 
           {modelFile && (
             <div className="model-info">

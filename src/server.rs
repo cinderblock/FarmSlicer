@@ -6,7 +6,8 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
@@ -21,7 +22,7 @@ use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
 use crate::overlay;
-use crate::placement::Placement;
+use crate::placement::{Placement, PlateLayout};
 use crate::printer::PrinterHub;
 use crate::printers_api;
 use crate::prints_api;
@@ -474,278 +475,465 @@ async fn update_job(
     Ok(Json(json!(state.db.get_job(&id))))
 }
 
-/// Download the job's source model, when the server kept it.
-async fn download_model(
+/// `GET /api/jobs/{id}`: one job, with its models, inputs and plate.
+async fn get_job(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Json<Value>, ApiError> {
     let (job, _, _) = visible_job(&state, &user, &id)?;
-    if !model_available(&job) {
-        return Err(api_err(StatusCode::NOT_FOUND, "the model of this job was not kept"));
-    }
-    let data = std::fs::read(&job.model_path)
-        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let filename: String = job
-        .model_name
-        .chars()
-        .filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n'))
+    let models: Vec<Value> = state
+        .db
+        .job_models(&id)
+        .iter()
+        .map(|m| {
+            let mut v = json!(m);
+            v["stored"] = json!(m.stored());
+            v
+        })
         .collect();
+    let mut v = json!(job);
+    v["estimated_cost"] = json!(crate::cost::Prices::load(&state.db).job(&job));
+    v["models"] = json!(models);
+    v["inputs"] = job_inputs(&job).map_or(Value::Null, |i| json!(i));
+    v["plate"] = json!(job_plate(&job));
+    Ok(Json(v))
+}
+
+/// What a job was made from. Jobs from before `inputs_json` name their
+/// profiles in the merged config (`*_settings_id`).
+pub(crate) fn job_inputs(job: &Job) -> Option<JobInputs> {
+    if let Some(inputs) = job.inputs_json.as_deref().and_then(|j| serde_json::from_str(j).ok()) {
+        return Some(inputs);
+    }
+    let config: Value = serde_json::from_str(job.config_json.as_deref()?).ok()?;
+    let text = |key: &str| -> String {
+        match config.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(a)) => a.first().and_then(Value::as_str).unwrap_or_default().to_string(),
+            _ => String::new(),
+        }
+    };
+    let filaments = match config.get("filament_settings_id") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(String::from).collect(),
+        Some(Value::String(s)) => s.split(';').map(String::from).collect(),
+        _ => Vec::new(),
+    };
+    let machine = text("printer_settings_id");
+    if machine.is_empty() {
+        return None;
+    }
+    Some(JobInputs {
+        machine,
+        process: text("print_settings_id"),
+        filaments,
+        bed_type: text("curr_bed_type"),
+        printer_id: job.printer_id.clone(),
+        routing: job.routing.clone(),
+        color: String::new(),
+        group_id: job.group_id.clone(),
+        source: job.source.clone(),
+    })
+}
+
+/// A file name safe inside a Content-Disposition header.
+fn attachment_name(name: &str) -> String {
+    name.chars().filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n')).collect()
+}
+
+/// Send one stored model file.
+fn model_response(path: &str, name: &str) -> Result<axum::response::Response, ApiError> {
+    let data = std::fs::read(path).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{filename}\"")),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", attachment_name(name))),
         ],
         data,
-    ))
+    )
+        .into_response())
 }
 
+/// `GET /api/jobs/{id}/model`: the job's (first) source model.
+async fn download_model(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<axum::response::Response, ApiError> {
+    let (job, _, _) = visible_job(&state, &user, &id)?;
+    match state.db.job_models(&id).into_iter().find(|m| m.stored()) {
+        Some(m) => model_response(&m.path, &m.name),
+        None if model_available(&job) => model_response(&job.model_path, &job.model_name),
+        None => Err(api_err(StatusCode::NOT_FOUND, "the model of this job is not on the server")),
+    }
+}
+
+/// `GET /api/jobs/{id}/models/{idx}`: one of the job's source models.
+async fn download_job_model(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path((id, idx)): Path<(String, i64)>,
+) -> Result<axum::response::Response, ApiError> {
+    visible_job(&state, &user, &id)?;
+    match state.db.job_models(&id).into_iter().find(|m| m.idx == idx) {
+        Some(m) if m.stored() => model_response(&m.path, &m.name),
+        Some(_) => Err(api_err(StatusCode::NOT_FOUND, "this model stayed in the browser that sliced it")),
+        None => Err(api_err(StatusCode::NOT_FOUND, "no such model")),
+    }
+}
+
+/// Delete a job the caller may delete (its creator, whoever manages its
+/// group, admins), with its files. Refused while it's slicing (cancel
+/// first) or while a print still needs its package.
+fn delete_one_job(state: &AppState, user: &User, id: &str) -> Result<(), ApiError> {
+    let (job, tree, viewer) = visible_job(state, user, id)?;
+    let creator = job.user_id.as_deref() == Some(user.id.as_str());
+    let manager = job.group_id.as_deref().is_some_and(|g| viewer.can_manage(&tree, g));
+    if !creator && !manager && !viewer.admin && !auth::auth_disabled() {
+        return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator, its group's managers or an admin can delete it"));
+    }
+    if matches!(job.status.as_str(), "queued" | "slicing") {
+        return Err(api_err(StatusCode::CONFLICT, "the job is still slicing: cancel it first"));
+    }
+    if state.db.job_prints_in_progress(id) > 0 {
+        return Err(api_err(StatusCode::CONFLICT, "a print of this job is waiting or in progress"));
+    }
+    let files = state.db.delete_job(id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "job not found"))?;
+    for f in files {
+        // Only ever files the server made, under its data directory.
+        let path = std::path::Path::new(&f);
+        if path.starts_with(&state.data_dir) {
+            std::fs::remove_file(path).ok();
+        } else {
+            eprintln!("job {id}: not deleting {f}: outside the data directory");
+        }
+    }
+    println!("job {id}: deleted by {}", user.username);
+    Ok(())
+}
+
+/// `DELETE /api/jobs/{id}`.
+async fn delete_job(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    delete_one_job(&state, &user, &id).map(|()| StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct DeleteJobs {
+    ids: Vec<String>,
+}
+
+/// `POST /api/jobs/delete` `{"ids": [...]}`: delete several jobs; each one
+/// is checked like a single delete. Answers which went and why the others
+/// didn't.
+async fn delete_jobs(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(body): Json<DeleteJobs>,
+) -> Result<Json<Value>, ApiError> {
+    if body.ids.len() > 1000 {
+        return Err(api_err(StatusCode::BAD_REQUEST, "at most 1000 jobs at a time"));
+    }
+    let mut deleted = Vec::new();
+    let mut refused = Vec::new();
+    for id in body.ids {
+        match delete_one_job(&state, &user, &id) {
+            Ok(()) => deleted.push(id),
+            Err((_, Json(e))) => refused.push(json!({"id": id, "error": e["error"]})),
+        }
+    }
+    Ok(Json(json!({"deleted": deleted, "refused": refused})))
+}
+
+/// What a job was made from: the Slice page's choices, recorded so the job
+/// can be sliced again (`jobs.inputs_json`). Overrides live in
+/// `overrides_json`, the parts in `plate_json`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JobInputs {
+    pub machine: String,
+    pub process: String,
+    pub filaments: Vec<String>,
+    #[serde(default)]
+    pub bed_type: String,
+    #[serde(default)]
+    pub printer_id: Option<String>,
+    #[serde(default)]
+    pub routing: String,
+    #[serde(default)]
+    pub color: String,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    /// "server" or "browser".
+    #[serde(default)]
+    pub source: String,
+}
+
+/// The most a `proposed` blob (the page's defaults, for the
+/// defaults-changed report) may weigh.
+const MAX_PROPOSED_BYTES: usize = 64 * 1024;
+
+/// A model the browser kept ("keep on this device"): the server only knows
+/// its name, size and digest.
+#[derive(Deserialize)]
+struct LocalModel {
+    name: String,
+    #[serde(default)]
+    bytes: i64,
+    #[serde(default)]
+    sha256: Option<String>,
+}
+
+/// One of a new job's models.
+struct NewModel {
+    name: String,
+    /// '' = kept in the browser.
+    path: String,
+    bytes: i64,
+    sha256: Option<String>,
+}
+
+/// Files a request wrote; removed again unless the request succeeds.
+#[derive(Default)]
+struct Uploaded {
+    paths: Vec<std::path::PathBuf>,
+    keep: bool,
+}
+
+impl Drop for Uploaded {
+    fn drop(&mut self) {
+        if !self.keep {
+            for p in &self.paths {
+                std::fs::remove_file(p).ok();
+            }
+        }
+    }
+}
+
+/// A job's display name: its model, or the first of several.
+fn job_name(models: &[NewModel]) -> String {
+    match models {
+        [] => String::new(),
+        [one] => one.name.clone(),
+        [first, rest @ ..] => format!("{} + {} more", first.name, rest.len()),
+    }
+}
+
+/// A model file's extension as stored (lowercase; STL when it has none).
+fn model_extension(file_name: &str) -> String {
+    std::path::Path::new(file_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_else(|| "stl".into())
+}
+
+/// `POST /api/jobs` (multipart):
+/// - `model` (repeatable): the source models, in order. Every job keeps them
+///   so it can be sliced again.
+/// - `local_models`: browser jobs whose models stay in the browser, JSON
+///   `[{"name", "bytes", "sha256"}]` (`model_name`: one, from older pages).
+/// - `machine`, `process`, `filament`, `overrides`, `bed_type`, `color`,
+///   `printer_id`, `routing`, `group_id`, `source` ("server" | "browser").
+/// - `plate`: the parts (src/placement.rs `PlateLayout`); `placement`: one
+///   model's placement, from older pages.
+/// - `proposed`: what the page proposed before the user changed anything
+///   (JSON object; kept for the defaults-changed report).
 async fn create_job(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     mut multipart: Multipart,
-) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     let models_dir = state.data_dir.join("models");
     std::fs::create_dir_all(&models_dir).ok();
+    let bad = |e: &dyn std::fmt::Display| api_err(StatusCode::BAD_REQUEST, e.to_string());
 
-    let mut model_name = String::new();
-    let mut model_path = String::new();
-    let mut printer_id: Option<String> = None;
-    let mut routing = "auto".to_string();
-    let mut machine_profile = String::new();
-    let mut process_profile = String::new();
-    let mut filament_profile = String::new();
+    let mut uploaded = Uploaded::default();
+    let mut models: Vec<NewModel> = Vec::new();
+    let mut local_models: Vec<NewModel> = Vec::new();
+    let mut inputs = JobInputs {
+        routing: "auto".into(),
+        source: "server".into(),
+        ..Default::default()
+    };
     let mut overrides_str = String::new();
-    // "server" (default): the model is uploaded and sliced here.
-    // "browser": the client slices with the WebAssembly engine and only
-    // uploads the G-code (POST /api/jobs/{id}/result); the model never
-    // leaves the user's machine.
-    let mut source = "server".to_string();
-    let mut group_id: Option<String> = None;
-    let mut model_bytes: i64 = 0;
-    // The build plate (`curr_bed_type`); the profile default otherwise.
-    let mut bed_type = String::new();
-    // Where the user put the model (src/placement.rs); centred otherwise.
     let mut placement_str = String::new();
+    let mut plate_str = String::new();
+    let mut proposed_str = String::new();
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|e| bad(&e))? {
         let name = field.name().unwrap_or("").to_string();
+        if name == "model" {
+            let file_name = field.file_name().unwrap_or("model.stl").to_string();
+            let data = field.bytes().await.map_err(|e| bad(&e))?;
+            let dest = models_dir.join(format!("{}.{}", uuid::Uuid::new_v4(), model_extension(&file_name)));
+            std::fs::write(&dest, &data).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            uploaded.paths.push(dest.clone());
+            models.push(NewModel {
+                name: file_name,
+                path: dest.to_string_lossy().to_string(),
+                bytes: data.len() as i64,
+                sha256: Some(hex::encode(Sha256::digest(&data))),
+            });
+            continue;
+        }
+        let text = field.text().await.unwrap_or_default();
         match name.as_str() {
-            "model" => {
-                let file_name = field.file_name().unwrap_or("model.stl").to_string();
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
-
-                let id = uuid::Uuid::new_v4().to_string();
-                let ext = std::path::Path::new(&file_name)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("stl");
-                let dest = models_dir.join(format!("{id}.{ext}"));
-
-                std::fs::write(&dest, &data).map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": e.to_string()})),
-                    )
-                })?;
-
-                model_name = file_name;
-                model_path = dest.to_string_lossy().to_string();
-                model_bytes = data.len() as i64;
+            "group_id" if !text.is_empty() => inputs.group_id = Some(text),
+            "printer_id" if !text.is_empty() => inputs.printer_id = Some(text),
+            "routing" => inputs.routing = text,
+            "machine" => inputs.machine = text,
+            "process" => inputs.process = text,
+            "filament" if !text.is_empty() => inputs.filaments.push(text),
+            "color" => inputs.color = text.trim().to_string(),
+            "overrides" => overrides_str = text,
+            "bed_type" => inputs.bed_type = text.trim().to_string(),
+            "placement" => placement_str = text.trim().to_string(),
+            "plate" => plate_str = text.trim().to_string(),
+            "proposed" => proposed_str = text.trim().to_string(),
+            "source" => inputs.source = text,
+            "local_models" => {
+                let list: Vec<LocalModel> =
+                    serde_json::from_str(&text).map_err(|e| bad(&format!("local_models: {e}")))?;
+                local_models.extend(list.into_iter().map(|m| NewModel {
+                    name: m.name,
+                    path: String::new(),
+                    bytes: m.bytes.max(0),
+                    sha256: m.sha256.filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit())),
+                }));
             }
-            "group_id" => {
-                let val = field.text().await.unwrap_or_default();
-                if !val.is_empty() {
-                    group_id = Some(val);
-                }
-            }
-            "printer_id" => {
-                let val = field.text().await.unwrap_or_default();
-                if !val.is_empty() {
-                    printer_id = Some(val);
-                }
-            }
-            "routing" => {
-                routing = field.text().await.unwrap_or("auto".into());
-            }
-            "machine" => {
-                machine_profile = field.text().await.unwrap_or_default();
-            }
-            "process" => {
-                process_profile = field.text().await.unwrap_or_default();
-            }
-            "filament" => {
-                filament_profile = field.text().await.unwrap_or_default();
-            }
-            "overrides" => {
-                overrides_str = field.text().await.unwrap_or_default();
-            }
-            "bed_type" => {
-                bed_type = field.text().await.unwrap_or_default().trim().to_string();
-            }
-            "placement" => {
-                placement_str = field.text().await.unwrap_or_default().trim().to_string();
-            }
-            "source" => {
-                source = field.text().await.unwrap_or_default();
-            }
-            "model_name" => {
-                // Browser jobs send the file name only.
-                let val = field.text().await.unwrap_or_default();
-                if model_name.is_empty() {
-                    model_name = val;
-                }
-            }
+            // Browser jobs from older pages send the file name only.
+            "model_name" if !text.is_empty() => local_models.push(NewModel {
+                name: text,
+                path: String::new(),
+                bytes: 0,
+                sha256: None,
+            }),
             _ => {}
         }
     }
 
+    if !matches!(inputs.source.as_str(), "server" | "browser") {
+        return Err(bad(&"source must be 'server' or 'browser'"));
+    }
+    if !models.is_empty() && !local_models.is_empty() {
+        return Err(bad(&"send the models or name local ones, not both"));
+    }
+    if models.is_empty() {
+        if inputs.source == "server" {
+            return Err(bad(&"No model file provided"));
+        }
+        if local_models.is_empty() {
+            return Err(bad(&"model_name is required for browser jobs"));
+        }
+        models = local_models;
+    }
+
     // The group the job is charged to, and every quota on the way.
     let (tree, viewer) = groups_api::context(&state, &user);
-    let admission = match &group_id {
-        Some(g) if tree.get(g).is_none() || !viewer.can_charge(g) => Err(api_err(
-            StatusCode::FORBIDDEN,
-            "you are not an active member of that group",
-        )),
-        _ => quota::check(&state.db, &tree, &user, group_id.as_deref())
-            .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e)),
-    };
+    match &inputs.group_id {
+        Some(g) if tree.get(g).is_none() || !viewer.can_charge(g) => {
+            return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
+        }
+        _ => quota::check(&state.db, &tree, &user, inputs.group_id.as_deref())
+            .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e))?,
+    }
     // Overrides may only touch what the caller is allowed to (no G-code).
-    let checked = admission
-        .and_then(|()| {
-            config_policy::parse(&overrides_str)
-                .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
-                .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
-        })
-        .and_then(|overrides| {
-            let placement = if placement_str.is_empty() {
-                None
-            } else {
-                Some(Placement::parse(&placement_str).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?)
-            };
-            Ok((overrides, placement))
-        });
-    let (overrides, placement) = match checked {
-        Ok(o) => o,
-        Err(e) => {
-            if !model_path.is_empty() {
-                std::fs::remove_file(&model_path).ok();
-            }
-            return Err(e);
-        }
-    };
-    let keep_model = group_id
-        .as_deref()
-        .is_some_and(|g| tree.effective(g).keep_models);
-
-    if !matches!(source.as_str(), "server" | "browser") {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "source must be 'server' or 'browser'"})),
-        ));
-    }
-
-    if source == "server" && model_path.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "No model file provided"})),
-        ));
-    }
-    if source == "browser" && model_name.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "model_name is required for browser jobs"})),
-        ));
-    }
-
-    let config_json = if !machine_profile.is_empty()
-        && !process_profile.is_empty()
-        && !filament_profile.is_empty()
-    {
-        let mut config_str = state
-            .profile_store
-            .resolve_config(&machine_profile, &process_profile, &filament_profile)
-            .map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Profile error: {e}")})),
-                )
-            })?;
-
-        // Merge per-job overrides on top of resolved config
-        if !overrides.is_empty() {
-            if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
-                for (k, v) in overrides {
-                    config.insert(k, v);
-                }
-                config_str = serde_json::to_string(&Value::Object(config)).unwrap();
-            }
-        }
-
-        if !bed_type.is_empty() {
-            if !crate::printing::BED_TYPES.contains(&bed_type.as_str()) {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("unknown build plate {bed_type:?}")})),
-                ));
-            }
-            if let Ok(mut config) = serde_json::from_str::<serde_json::Map<String, Value>>(&config_str) {
-                config.insert("curr_bed_type".into(), json!(bed_type));
-                config_str = serde_json::to_string(&Value::Object(config)).unwrap();
-            }
-        }
-
-        config_str
+    let overrides = config_policy::parse(&overrides_str)
+        .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
+        .map_err(|e| bad(&e))?;
+    let plate = if !plate_str.is_empty() {
+        PlateLayout::parse(&plate_str, models.len()).map_err(|e| bad(&e))?
+    } else if models.len() > 1 {
+        return Err(bad(&"several models need a plate saying where each goes"));
+    } else if placement_str.is_empty() {
+        PlateLayout::single(None)
     } else {
-        "{}".to_string()
+        PlateLayout::single(Some(Placement::parse(&placement_str).map_err(|e| bad(&e))?))
     };
-
-    let overrides_json = if overrides_str.is_empty() {
+    if plate.objects.len() > 1 {
+        return Err(bad(&"several parts on one plate aren't supported yet"));
+    }
+    let proposed = if proposed_str.is_empty() {
         None
+    } else if proposed_str.len() > MAX_PROPOSED_BYTES
+        || !serde_json::from_str::<Value>(&proposed_str).is_ok_and(|v| v.is_object())
+    {
+        return Err(bad(&"proposed must be a JSON object (64 KiB at most)"));
     } else {
-        Some(overrides_str)
+        Some(proposed_str)
+    };
+    if inputs.filaments.len() > 1 {
+        return Err(bad(&"several filaments per job aren't supported yet"));
+    }
+    if !inputs.bed_type.is_empty() && !crate::printing::BED_TYPES.contains(&inputs.bed_type.as_str()) {
+        return Err(bad(&format!("unknown build plate {:?}", inputs.bed_type)));
+    }
+
+    let config_json = match inputs.filaments.first() {
+        Some(filament) if !inputs.machine.is_empty() && !inputs.process.is_empty() => {
+            let config_str = state
+                .profile_store
+                .resolve_config(&inputs.machine, &inputs.process, filament)
+                .map_err(|e| bad(&format!("Profile error: {e}")))?;
+            let mut config: serde_json::Map<String, Value> = serde_json::from_str(&config_str)
+                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            // Per-job overrides on top of the resolved profiles.
+            config.extend(overrides);
+            if !inputs.bed_type.is_empty() {
+                config.insert("curr_bed_type".into(), json!(inputs.bed_type));
+            }
+            serde_json::to_string(&Value::Object(config)).unwrap()
+        }
+        _ => "{}".to_string(),
     };
 
-    let mut job = state.db.create_job(
-        &model_name,
-        &model_path,
-        printer_id.as_deref(),
-        &routing,
+    let overrides_json = (!overrides_str.is_empty()).then_some(overrides_str);
+    let first_stored = models.iter().find(|m| !m.path.is_empty()).map(|m| m.path.clone()).unwrap_or_default();
+    let stored_bytes: i64 = models.iter().filter(|m| !m.path.is_empty()).map(|m| m.bytes).sum();
+    let job = state.db.create_job(
+        &job_name(&models),
+        &first_stored,
+        inputs.printer_id.as_deref(),
+        &inputs.routing,
         Some(&config_json),
         overrides_json.as_deref(),
-        &source,
+        &inputs.source,
         Some(&user.id),
-        group_id.as_deref(),
-        model_bytes,
-        placement.as_ref().map(Placement::to_json).as_deref(),
+        inputs.group_id.as_deref(),
+        stored_bytes,
+        None,
     );
+    for (i, m) in models.iter().enumerate() {
+        state.db.add_job_model(&job.id, i as i64, &m.name, &m.path, m.bytes, m.sha256.as_deref());
+    }
+    state.db.set_job_inputs(
+        &job.id,
+        &serde_json::to_string(&inputs).unwrap(),
+        proposed.as_deref(),
+        Some(&plate.to_json()),
+    );
+    uploaded.keep = true;
+    let job_id = job.id.clone();
 
-    if source == "browser" {
-        // The client owns the slicing; the job just tracks it. When the
-        // group keeps models, the client uploads the model with the result.
-        state.db.update_job_status(&job.id, "slicing", 0);
-        state.db.update_job_progress(&job.id, 0, "Slicing in browser");
-        job.status = "slicing".to_string();
-        job.progress_message = Some("Slicing in browser".to_string());
+    if inputs.source == "browser" {
+        // The client owns the slicing; the job just tracks it.
+        state.db.update_job_status(&job_id, "slicing", 0);
+        state.db.update_job_progress(&job_id, 0, "Slicing in browser");
+        let job = state.db.get_job(&job_id).expect("job just created");
         let mut body = json!(job);
-        body["keep_model"] = json!(keep_model);
         body["slice_options"] = browser_slice_options(&state, &job, &config_json);
         return Ok((StatusCode::CREATED, Json(body)));
     }
 
-    let job_id = job.id.clone();
+    let job = state.db.get_job(&job_id).expect("job just created");
     let state_clone = state.clone();
-    let model_path_clone = model_path.clone();
     tokio::task::spawn_blocking(move || {
-        run_slice(&state_clone, &job_id, &model_path_clone, &config_json);
+        run_slice(&state_clone, &job_id, &first_stored, &config_json);
     });
 
     Ok((StatusCode::CREATED, Json(json!(job))))
@@ -864,9 +1052,20 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
     options
 }
 
-/// The job's placement; stored ones were checked when the job was created.
+/// The job's parts; stored plates were checked when the job was created.
+/// Jobs from before plates have one model, maybe placed.
+pub(crate) fn job_plate(job: &Job) -> PlateLayout {
+    job.plate_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_else(|| {
+            PlateLayout::single(job.placement_json.as_deref().and_then(|j| serde_json::from_str(j).ok()))
+        })
+}
+
+/// The placement of a single-part job.
 fn job_placement(job: &Job) -> Option<Placement> {
-    job.placement_json.as_deref().and_then(|j| serde_json::from_str(j).ok())
+    job_plate(job).objects.into_iter().next().and_then(|o| o.placement)
 }
 
 /// Read a freshly written package, attach it to the job (sendable now) and
@@ -1018,8 +1217,8 @@ async fn update_job_progress(
 }
 
 /// The browser engine finished: receive the G-code and the statistics it
-/// computed (and the model, when the job's group keeps models), and file
-/// them exactly like a server-sliced job.
+/// computed, and file them exactly like a server-sliced job. (The models
+/// came with the job, unless they stayed in the browser.)
 async fn upload_job_result(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -1031,10 +1230,6 @@ async fn upload_job_result(
     let Ok(job) = own_job(&state, &user, &id) else {
         return Err(err(StatusCode::NOT_FOUND, "job not found"));
     };
-    let keep_model = job
-        .group_id
-        .as_deref()
-        .is_some_and(|g| Tree::load(&state.db).effective(g).keep_models);
     if job.source != "browser" {
         return Err(err(StatusCode::BAD_REQUEST, "not a browser job"));
     }
@@ -1044,7 +1239,6 @@ async fn upload_job_result(
 
     let mut gcode: Option<axum::body::Bytes> = None;
     let mut package: Option<axum::body::Bytes> = None;
-    let mut model: Option<(String, axum::body::Bytes)> = None;
     let mut print_time_sec = 0.0_f64;
     let mut filament_used_g = 0.0_f64;
     let mut warnings: Vec<String> = Vec::new();
@@ -1072,14 +1266,6 @@ async fn upload_job_result(
                         .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?,
                 );
             }
-            "model" if keep_model => {
-                let file_name = field.file_name().unwrap_or("model.stl").to_string();
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                model = Some((file_name, data));
-            }
             "print_time_sec" => {
                 print_time_sec = field.text().await.ok().and_then(|t| t.parse().ok()).unwrap_or(0.0);
             }
@@ -1105,21 +1291,6 @@ async fn upload_job_result(
     let output_path = gcode_output_path(&state, &id);
     std::fs::write(&output_path, &gcode)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-
-    if let Some((file_name, data)) = model.filter(|(_, d)| !d.is_empty()) {
-        let models_dir = state.data_dir.join("models");
-        std::fs::create_dir_all(&models_dir).ok();
-        let ext = std::path::Path::new(&file_name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("stl");
-        let dest = models_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
-        std::fs::write(&dest, &data)
-            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-        state
-            .db
-            .set_job_model(&id, &dest.to_string_lossy(), data.len() as i64);
-    }
 
     finish_job(&state, &id, &output_path, print_time_sec, filament_used_g, &warnings);
     // The client's numbers and G-code are whatever it sent: check them
@@ -1273,8 +1444,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/status", get(server_status))
         .route("/api/prices", get(get_prices))
         .route("/api/jobs", get(list_jobs).post(create_job))
-        .route("/api/jobs/{id}", axum::routing::put(update_job))
+        .route("/api/jobs/delete", post(delete_jobs))
+        .route("/api/jobs/{id}", get(get_job).put(update_job).delete(delete_job))
         .route("/api/jobs/{id}/model", get(download_model))
+        .route("/api/jobs/{id}/models/{idx}", get(download_job_model))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/jobs/{id}/progress", post(update_job_progress))
         .route("/api/jobs/{id}/result", post(upload_job_result))

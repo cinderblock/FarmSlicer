@@ -6,6 +6,12 @@
 //! row-major 3x3 matrix applied to the model as loaded; `offset` is where the
 //! rotated model's bounding-box centre goes relative to the bed centre (mm).
 //! The model always rests on the bed. No placement = centred, as loaded.
+//!
+//! A plate (`PlateLayout`, the job's `plate` field) holds one or more parts:
+//! `{"objects": [{"model": 0, "placement": {...}}, ...]}`. `model` indexes
+//! the job's models in upload order; a model can be placed several times
+//! (copies). A lone part may go without a placement (centred); with several,
+//! every part says where it goes.
 
 use serde::{Deserialize, Serialize};
 
@@ -59,8 +65,69 @@ impl Placement {
         Ok(())
     }
 
+}
+
+/// Most parts one plate may hold (copies included).
+pub const MAX_OBJECTS: usize = 500;
+
+/// One part on the plate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlateObject {
+    /// Which of the job's models (0-based, upload order).
+    pub model: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
+}
+
+/// Every part on the plate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlateLayout {
+    pub objects: Vec<PlateObject>,
+}
+
+impl PlateLayout {
+    /// Parse and check a plate for a job with `models` source models.
+    pub fn parse(text: &str, models: usize) -> Result<Self, String> {
+        let plate: PlateLayout = serde_json::from_str(text).map_err(|e| format!("plate: {e}"))?;
+        plate.check(models)?;
+        Ok(plate)
+    }
+
+    /// One model, placed (or centred) the way jobs were before plates.
+    pub fn single(placement: Option<Placement>) -> Self {
+        PlateLayout {
+            objects: vec![PlateObject { model: 0, placement }],
+        }
+    }
+
+    fn check(&self, models: usize) -> Result<(), String> {
+        if self.objects.is_empty() {
+            return Err("plate: no parts".into());
+        }
+        if self.objects.len() > MAX_OBJECTS {
+            return Err(format!("plate: more than {MAX_OBJECTS} parts"));
+        }
+        for o in &self.objects {
+            if o.model >= models {
+                return Err(format!("plate: part of model {} but the job has {models} model(s)", o.model));
+            }
+            if let Some(p) = &o.placement {
+                p.check()?;
+            }
+        }
+        if (0..models).any(|m| !self.objects.iter().any(|o| o.model == m)) {
+            return Err("plate: every uploaded model must be on the plate".into());
+        }
+        if self.objects.len() > 1 && self.objects.iter().any(|o| o.placement.is_none()) {
+            return Err("plate: with several parts, each needs a placement".into());
+        }
+        Ok(())
+    }
+
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("placements serialize")
+        serde_json::to_string(self).expect("plates serialize")
     }
 }
 
@@ -92,6 +159,30 @@ mod tests {
             r#"not json"#,
         ] {
             assert!(Placement::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    const ID: &str = r#"{"rotation":[1,0,0,0,1,0,0,0,1],"offset":[0,0]}"#;
+
+    #[test]
+    fn plates() {
+        let two = format!(r#"{{"objects":[{{"model":0,"placement":{ID}}},{{"model":0,"placement":{ID}}},{{"model":1,"placement":{ID}}}]}}"#);
+        assert_eq!(PlateLayout::parse(&two, 2).unwrap().objects.len(), 3);
+        // A lone part may be centred.
+        assert!(PlateLayout::parse(r#"{"objects":[{"model":0}]}"#, 1).is_ok());
+        for (bad, models) in [
+            (r#"{"objects":[]}"#.to_string(), 1),
+            // No such model.
+            (format!(r#"{{"objects":[{{"model":1,"placement":{ID}}}]}}"#), 1),
+            // Model 1 uploaded but not placed.
+            (format!(r#"{{"objects":[{{"model":0,"placement":{ID}}}]}}"#), 2),
+            // Several parts, one without a placement.
+            (format!(r#"{{"objects":[{{"model":0}},{{"model":0,"placement":{ID}}}]}}"#), 1),
+            // A bad placement inside.
+            (r#"{"objects":[{"model":0,"placement":{"rotation":[2,0,0,0,1,0,0,0,1],"offset":[0,0]}}]}"#.to_string(), 1),
+            (r#"{"objects":[{"model":0,"scale":2}]}"#.to_string(), 1),
+        ] {
+            assert!(PlateLayout::parse(&bad, models).is_err(), "{bad}");
         }
     }
 }

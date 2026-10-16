@@ -39,7 +39,6 @@ r = await owner.post("/api/groups", {
   parent_id: league,
   settings: {
     season_start: "09-01",
-    keep_models: true,
     subgroups: {
       mode: "self_service",
       required: true,
@@ -175,25 +174,25 @@ const gcode = new Blob(["; test gcode\nG28\n"], { type: "text/plain" });
 const stl = new Blob(["solid cube\nendsolid cube\n"], { type: "model/stl" });
 
 async function browserJob(client, groupId, grams = 5) {
-  const fields = { source: "browser", model_name: "cube.stl" };
+  // Every job keeps its model: it goes up with the job.
+  const fields = { source: "browser", model: [stl, "cube.stl"] };
   if (groupId) fields.group_id = groupId;
   const created = await client.form("/api/jobs", fields);
   if (created.status !== 201) return created;
   const done = await client.form(`/api/jobs/${created.json.id}/result`, {
     gcode: [gcode, "x.gcode"],
-    model: [stl, "cube.stl"],
     print_time_sec: "600",
     filament_used_g: String(grams),
     warnings: "[]",
   });
-  return { status: done.status, json: { ...done.json, keep_model: created.json.keep_model } };
+  return done;
 }
 
 r = await kid2.form("/api/jobs", { source: "browser", model_name: "x.stl", group_id: programA });
 check(r.status === 403, "can't charge a group you're not in", json(r));
 
 r = await browserJob(kid1, team);
-check(r.status === 200 && r.json.status === "done" && r.json.keep_model === true, "team job sliced in the browser, model kept", json(r));
+check(r.status === 200 && r.json.status === "done" && r.json.model_count === 1 && r.json.local_models === 0, "team job sliced in the browser, model kept", json(r));
 const teamJob = r.json.id;
 r = await browserJob(kid1, null);
 check(r.status === 200, "personal job", json(r));
@@ -231,8 +230,8 @@ check(r.status === 200 && lib.season_start === "09-01" && lib.jobs.length === 2,
 check(lib.seasons.find((s) => s.current)?.label?.includes("–"), "season labels span two years for a fall start", JSON.stringify(lib.seasons));
 check(lib.jobs.every((j) => j.season === lib.current_season && j.slice_id), "jobs carry season and slice", JSON.stringify(lib.jobs));
 check(
-  lib.jobs.find((j) => j.id === teamJob)?.has_model === true && lib.jobs.find((j) => j.id === personalJob)?.has_model === false,
-  "only the job sliced for the team kept its model (personal jobs keep theirs local)",
+  lib.jobs.every((j) => j.has_model === true),
+  "every job kept its model, including one moved into the team later",
 );
 
 // ---- quotas ---------------------------------------------------------------------------

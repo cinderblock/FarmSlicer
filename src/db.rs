@@ -80,8 +80,37 @@ pub struct Job {
     /// presence means the job can be sent to a printer.
     pub package_json: Option<String>,
     /// Where the model was put on the bed (src/placement.rs, JSON); None =
-    /// centred as loaded.
+    /// centred as loaded. Jobs from before `plate_json` only.
     pub placement_json: Option<String>,
+    /// What the job was made from (`server::JobInputs`, JSON).
+    pub inputs_json: Option<String>,
+    /// What the Slice page proposed before the user changed anything (JSON).
+    pub proposed_json: Option<String>,
+    /// The parts on the plate (`placement::PlateLayout`, JSON).
+    pub plate_json: Option<String>,
+    /// How many source models the job has, and how many of them stayed in
+    /// the user's browser.
+    pub model_count: i64,
+    pub local_models: i64,
+}
+
+/// One of a job's source models (table `job_models`).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct JobModel {
+    pub idx: i64,
+    pub name: String,
+    /// '' = kept in the user's browser only.
+    #[serde(skip)]
+    pub path: String,
+    pub bytes: i64,
+    pub sha256: Option<String>,
+}
+
+impl JobModel {
+    /// Is the file on the server (not just in someone's browser)?
+    pub fn stored(&self) -> bool {
+        !self.path.is_empty() && Path::new(&self.path).exists()
+    }
 }
 
 /// A job sent to a printer.
@@ -536,6 +565,34 @@ impl Db {
             "CREATE INDEX IF NOT EXISTS jobs_group ON jobs(group_id);
              CREATE INDEX IF NOT EXISTS jobs_user ON jobs(user_id);"
         ).ok();
+        // A job's source models, in the order they were given (a plate can
+        // hold several). `path` = '' when the model stayed in the user's
+        // browser ("keep on this device"); `sha256` lets that browser find
+        // it again.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS job_models (
+                job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+                idx INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL DEFAULT '',
+                bytes INTEGER NOT NULL DEFAULT 0,
+                sha256 TEXT,
+                PRIMARY KEY (job_id, idx)
+            );
+            -- Jobs from before job_models: their one kept model.
+            INSERT OR IGNORE INTO job_models (job_id, idx, name, path, bytes)
+                SELECT id, 0, model_name, model_path, 0 FROM jobs
+                WHERE model_path != '' AND id NOT IN (SELECT job_id FROM job_models);",
+        )
+        .expect("failed to create job_models");
+        // What the job was made from (profiles, plate, printer: re-slicing
+        // starts from it), what the Slice page proposed (the defaults-changed
+        // report compares the two), and where each part sits on the plate.
+        for col in &["inputs_json", "proposed_json", "plate_json"] {
+            if conn.prepare(&format!("SELECT {col} FROM jobs LIMIT 0")).is_err() {
+                conn.execute_batch(&format!("ALTER TABLE jobs ADD COLUMN {col} TEXT;")).ok();
+            }
+        }
 
         Db { conn: Mutex::new(conn) }
     }
@@ -1080,7 +1137,10 @@ impl Db {
                 j.progress_message, j.warnings, j.source,
                 j.created_at, j.updated_at,
                 j.user_id, u.username, j.group_id, g.name, j.stored_bytes,
-                j.package_path, j.package_json, j.placement_json
+                j.package_path, j.package_json, j.placement_json,
+                j.inputs_json, j.proposed_json, j.plate_json,
+                (SELECT COUNT(*) FROM job_models m WHERE m.job_id = j.id),
+                (SELECT COUNT(*) FROM job_models m WHERE m.job_id = j.id AND m.path = '')
          FROM jobs j
          LEFT JOIN printers p ON j.printer_id = p.id
          LEFT JOIN users u ON j.user_id = u.id
@@ -1115,6 +1175,11 @@ impl Db {
             package_path: row.get(24)?,
             package_json: row.get(25)?,
             placement_json: row.get(26)?,
+            inputs_json: row.get(27)?,
+            proposed_json: row.get(28)?,
+            plate_json: row.get(29)?,
+            model_count: row.get(30)?,
+            local_models: row.get(31)?,
         })
     }
 
@@ -1176,16 +1241,6 @@ impl Db {
             > 0
     }
 
-    /// Record a model file stored for the job (browser jobs that keep it).
-    pub fn set_job_model(&self, id: &str, model_path: &str, bytes: i64) {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE jobs SET model_path = ?2, stored_bytes = stored_bytes + ?3 WHERE id = ?1",
-            params![id, model_path, bytes],
-        )
-        .ok();
-    }
-
     pub fn add_job_stored_bytes(&self, id: &str, bytes: i64) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -1230,6 +1285,93 @@ impl Db {
             .unwrap();
         }
         self.get_job(&id).expect("job just inserted")
+    }
+
+    /// Record one of a job's source models (`path` '' = kept in the browser).
+    pub fn add_job_model(&self, job_id: &str, idx: i64, name: &str, path: &str, bytes: i64, sha256: Option<&str>) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO job_models (job_id, idx, name, path, bytes, sha256) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![job_id, idx, name, path, bytes, sha256],
+        )
+        .unwrap();
+    }
+
+    /// A job's source models, in order.
+    pub fn job_models(&self, job_id: &str) -> Vec<JobModel> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT idx, name, path, bytes, sha256 FROM job_models WHERE job_id = ?1 ORDER BY idx")
+            .unwrap();
+        stmt.query_map(params![job_id], |r| {
+            Ok(JobModel {
+                idx: r.get(0)?,
+                name: r.get(1)?,
+                path: r.get(2)?,
+                bytes: r.get(3)?,
+                sha256: r.get(4)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// What a job was made from, what was proposed, and its plate layout.
+    pub fn set_job_inputs(&self, id: &str, inputs: &str, proposed: Option<&str>, plate: Option<&str>) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET inputs_json = ?2, proposed_json = ?3, plate_json = ?4 WHERE id = ?1",
+            params![id, inputs, proposed, plate],
+        )
+        .ok();
+    }
+
+    /// Prints of the job that still need its package: waiting for approval
+    /// or on their way to (or on) a printer.
+    pub fn job_prints_in_progress(&self, job_id: &str) -> i64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM prints WHERE job_id = ?1 AND status IN ('pending_approval', {})",
+                active_print_sql()
+            ),
+            params![job_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// Delete a job and its slice records. Returns the files it had on disk
+    /// (models, G-code, package) for the caller to remove; None = no such
+    /// job. Prints and incidents keep their history (`job_id` → NULL).
+    pub fn delete_job(&self, id: &str) -> Option<Vec<String>> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().ok()?;
+        let (model_path, gcode_path, package_path): (String, Option<String>, Option<String>) = tx
+            .query_row(
+                "SELECT model_path, gcode_path, package_path FROM jobs WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .ok()?;
+        let mut files: Vec<String> = Vec::new();
+        {
+            let mut stmt = tx.prepare("SELECT path FROM job_models WHERE job_id = ?1").ok()?;
+            files.extend(stmt.query_map(params![id], |r| r.get(0)).ok()?.filter_map(|r| r.ok()));
+            let mut stmt = tx.prepare("SELECT gcode_path FROM slices WHERE job_id = ?1").ok()?;
+            files.extend(stmt.query_map(params![id], |r| r.get(0)).ok()?.filter_map(|r| r.ok()));
+        }
+        files.push(model_path);
+        files.extend(gcode_path);
+        files.extend(package_path);
+        tx.execute("DELETE FROM slices WHERE job_id = ?1", params![id]).ok()?;
+        tx.execute("DELETE FROM jobs WHERE id = ?1", params![id]).ok()?;
+        tx.commit().ok()?;
+        files.retain(|f| !f.is_empty());
+        files.sort();
+        files.dedup();
+        Some(files)
     }
 
     pub fn update_job_status(&self, id: &str, status: &str, progress: i32) {
@@ -1612,7 +1754,7 @@ impl Db {
     const SLICE_SELECT: &'static str =
         "SELECT s.id, s.job_id, s.model_name, s.gcode_path, s.print_time_sec, s.filament_used_g,
                 s.file_size, s.created_at, j.user_id, u.username, j.group_id, g.name,
-                COALESCE(j.model_path, '') != ''
+                EXISTS (SELECT 1 FROM job_models m WHERE m.job_id = j.id AND m.path != '')
          FROM slices s
          JOIN jobs j ON j.id = s.job_id
          LEFT JOIN users u ON j.user_id = u.id

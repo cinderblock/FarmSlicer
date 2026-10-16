@@ -25,9 +25,6 @@ pub struct GroupSettings {
     /// Members see each other's jobs charged to this group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_library: Option<bool>,
-    /// Browser-sliced jobs charged here upload the source model too.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keep_models: Option<bool>,
     /// Guest (credential-less) accounts may join through the join flow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_guests: Option<bool>,
@@ -217,7 +214,6 @@ pub fn parse_month_day(s: &str) -> Option<(u32, u32)> {
 pub struct Effective {
     pub season_start: String,
     pub shared_library: bool,
-    pub keep_models: bool,
     pub allow_guests: bool,
     pub allow_registration: bool,
     pub join_policy: String,
@@ -359,7 +355,6 @@ impl Tree {
         Effective {
             season_start: inherit!(season_start, self.site_season_start.clone()),
             shared_library: inherit!(shared_library, true),
-            keep_models: inherit!(keep_models, false),
             allow_guests: inherit!(allow_guests, false),
             allow_registration: inherit!(allow_registration, false),
             join_policy: inherit!(join_policy, "approval".to_string()),

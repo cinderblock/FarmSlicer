@@ -205,9 +205,8 @@ pages); nothing is set through environment variables.
   library splits its jobs by **season** (the `season_start` setting, e.g.
   `09-01` for a season that runs September to August).
 - **Settings** are inherited down the tree unless a group sets its own:
-  `season_start`, `shared_library` (default on), `keep_models` (browser-sliced
-  jobs upload their model too), `allow_registration` (the join flow may create
-  passkey accounts), `allow_guests`, `join_policy` (`open`, or `approval` by a
+  `season_start`, `shared_library` (default on), `allow_registration` (the
+  join flow may create passkey accounts), `allow_guests`, `join_policy` (`open`, or `approval` by a
   manager). Per group only: `listed` (a button on the sign-in page; admins
   only) and `subgroups` (how joiners pick a child: from a list, or
   self-service by typing an identifier that must match a pattern; the child
@@ -329,11 +328,13 @@ summary prints the `pin.json` to paste there.
 | `GET /api/discovery` | printers seen on the LAN, each with the protocol and address to add it with |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides (members: only the Slice page's settings; nobody: `post_process`) |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
-| `POST /api/jobs` (multipart) | `source=server`: upload `model` + profile names, slice here. `source=browser`: `model_name` + profile names, slice in the browser (the response's `keep_model` says whether to upload the model with the result). Optional `group_id`; optional `placement` (`{"rotation": [3x3 row-major], "offset": [dx, dy]}`: the rotation applied to the model as loaded, and its bounding-box centre relative to the bed centre in mm; without it the part is centred as loaded); 429 when a quota is used up |
+| `POST /api/jobs` (multipart) | `model` (repeatable) + profile names (`machine`, `process`, `filament`, `overrides`, `bed_type`, `color`, `printer_id`, `routing`). `source=server` slices here, `source=browser` in the browser. Every job keeps its models so it can be sliced again; a browser job may instead name models kept in the browser (`local_models`: `[{"name", "bytes", "sha256"}]`). Optional `group_id`; optional `plate` (`{"objects": [{"model": 0, "placement": {"rotation": [3x3 row-major], "offset": [dx, dy]}}]}`: per part, the rotation applied to the model as loaded and its bounding-box centre relative to the bed centre in mm; a lone part without a placement is centred as loaded; `placement` alone still works for one model); optional `proposed` (what the page defaulted to, JSON); 429 when a quota is used up |
+| `GET /api/jobs/{id}` | one job with its `models` (name, bytes, sha256, `stored`), `inputs` (what it was made from) and `plate` |
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
-| `GET /api/jobs/{id}/model` | the job's source model, when kept |
+| `DELETE /api/jobs/{id}`, `POST /api/jobs/delete` `{ids}` | delete jobs with their files (creator, group managers, admins); refused while slicing or while a print still needs the package. The bulk form answers `{deleted, refused: [{id, error}]}` |
+| `GET /api/jobs/{id}/model`, `GET /api/jobs/{id}/models/{idx}` | the job's (first, or idx-th) source model; 404 when it stayed in a browser |
 | `POST /api/jobs/{id}/progress` | browser engine progress tick |
-| `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `model`, optional `package`) | browser engine result upload (the `.gcode.3mf` makes the job sendable) |
+| `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `package`) | browser engine result upload (the `.gcode.3mf` makes the job sendable) |
 | `POST /api/jobs/{id}/fail`, `POST /api/jobs/{id}/cancel` | browser failure / cancel either kind |
 | `GET /api/slices?group=&mine=1`, `GET /api/slices/{id}/download` | slice library, G-code download |
 | `GET/POST /api/groups`, `GET/PUT/DELETE /api/groups/{id}` | groups (settings, quotas, moving) |

@@ -532,7 +532,6 @@ async fn me(
                 "path": tree.display_path(&m.group_id),
                 "role": m.role,
                 "status": m.status,
-                "keep_models": tree.effective(&m.group_id).keep_models,
             })
         })
         .collect();

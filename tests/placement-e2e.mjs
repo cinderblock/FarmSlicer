@@ -30,12 +30,13 @@ check(
   "the browser engine gets the placement",
   json(r),
 );
-check(JSON.parse(r.json?.placement_json ?? "null")?.offset?.[0] === -40, "the job records it", json(r));
+const placed = (job) => JSON.parse(job?.plate_json ?? "null")?.objects?.[0]?.placement;
+check(placed(r.json)?.offset?.[0] === -40, "the job records it", json(r));
 const browserJob = r.json?.id;
 
 r = await owner.form("/api/jobs", { source: "browser", model_name: "bracket.stl" });
 check(r.status === 201 && r.json?.slice_options?.placement === null, "no placement: centred as loaded", json(r));
-check(r.json?.placement_json === null, "and none recorded", json(r));
+check(r.json?.plate_json && placed(r.json) === undefined, "and none recorded", json(r));
 
 const stl = new Blob(["solid cube\nendsolid cube\n"], { type: "model/stl" });
 r = await owner.form("/api/jobs", { model: [stl, "cube.stl"], placement: JSON.stringify(placement) });
@@ -43,8 +44,8 @@ check(r.status === 201, "server job with a placement", json(r));
 const serverJob = r.json?.id;
 r = await owner.get("/api/jobs");
 const listed = r.json?.find((j) => j.id === serverJob);
-check(JSON.parse(listed?.placement_json ?? "null")?.rotation?.[5] === -1, "server job keeps its placement", JSON.stringify(listed));
-check(!!r.json?.find((j) => j.id === browserJob)?.placement_json, "listed jobs carry it");
+check(placed(listed)?.rotation?.[5] === -1, "server job keeps its placement", JSON.stringify(listed));
+check(!!placed(r.json?.find((j) => j.id === browserJob)), "listed jobs carry it");
 
 for (const [label, bad] of [
   ["a scaled matrix", { rotation: [2, 0, 0, 0, 1, 0, 0, 0, 1], offset: [0, 0] }],

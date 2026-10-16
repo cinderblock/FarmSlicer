@@ -518,9 +518,8 @@ type TriState = "inherit" | "on" | "off";
 const toTri = (v: boolean | undefined): TriState => (v === undefined ? "inherit" : v ? "on" : "off");
 const fromTri = (t: TriState): boolean | undefined => (t === "inherit" ? undefined : t === "on");
 
-const BOOL_SETTINGS: { key: "shared_library" | "keep_models" | "allow_registration" | "allow_guests"; label: string; help: string }[] = [
+const BOOL_SETTINGS: { key: "shared_library" | "allow_registration" | "allow_guests"; label: string; help: string }[] = [
   { key: "shared_library", label: "Shared library", help: "Members see each other's jobs in this group." },
-  { key: "keep_models", label: "Keep models", help: "Jobs sliced in a browser also upload the source model." },
   { key: "allow_registration", label: "New accounts", help: "The join flow may create passkey accounts." },
   { key: "allow_guests", label: "Guest accounts", help: "The join flow may create guest accounts (no passkey; limited)." },
 ];

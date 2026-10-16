@@ -33,7 +33,6 @@ export interface GroupSettings {
   /** Limits on prints without approval; inherited as a whole. */
   print_rules?: import("./printers").PrintRules;
   shared_library?: boolean;
-  keep_models?: boolean;
   allow_guests?: boolean;
   allow_registration?: boolean;
   join_policy?: "open" | "approval";
@@ -48,7 +47,6 @@ export interface EffectiveSettings {
   thumbnail_label: string;
   print_rules: import("./printers").PrintRules;
   shared_library: boolean;
-  keep_models: boolean;
   allow_guests: boolean;
   allow_registration: boolean;
   join_policy: "open" | "approval";
