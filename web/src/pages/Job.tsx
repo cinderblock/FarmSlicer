@@ -30,6 +30,10 @@ interface Job {
   config_json: string | null;
   overrides_json: string | null;
   estimated_cost: number | null;
+  /** Source models kept (on the server or in a browser): can be sliced again. */
+  model_count: number;
+  /** What the job was made from (profiles by name), when known. */
+  inputs: { machine: string; process: string; filaments: string[] } | null;
 }
 
 const SOURCES: Record<Job["source"], string> = {
@@ -128,12 +132,14 @@ export default function JobPage() {
   const technical = warnings.filter((w) => TECHNICAL_WARNING.test(w));
   const other = warnings.filter((w) => !support.includes(w) && !technical.includes(w));
   const overrides = parseObject(job.overrides_json);
-  const profiles = [
-    first(config?.printer_settings_id),
-    first(config?.print_settings_id),
-    first(config?.filament_settings_id),
-  ].filter((s): s is string => !!s);
+  const profiles = (
+    job.inputs
+      ? [job.inputs.machine, job.inputs.process, ...job.inputs.filaments]
+      : [first(config?.printer_settings_id), first(config?.print_settings_id), first(config?.filament_settings_id)]
+  ).filter((s): s is string => !!s);
   const done = job.status === "done";
+  const canReslice = job.model_count > 0 && job.source !== "upload" && !active;
+  const reslice = () => navigate(`/slice?from=${job.id}`);
   const verdict = packageVerdict(job.package_json);
   const time = plate?.print_time_sec ?? job.print_time_sec;
   const weight = plate?.weight_g ?? job.filament_used_g;
@@ -151,6 +157,15 @@ export default function JobPage() {
           {done && job.package_json && (
             <button className="btn-primary" onClick={() => setSending(true)}>
               Print…
+            </button>
+          )}
+          {canReslice && (
+            <button
+              className="btn-sm"
+              title="Open this job's models and settings on the Slice page, change what you like, and slice it as a new job"
+              onClick={reslice}
+            >
+              Re-slice
             </button>
           )}
           {done && (
@@ -219,7 +234,17 @@ export default function JobPage() {
               <li key={i}>{w}</li>
             ))}
           </ul>
-          <p>Turn supports on (or turn the part over) and slice it again, or the print will likely fail.</p>
+          <p>
+            Turn supports on (or turn the part over) and slice it again, or the print will likely fail.
+            {canReslice && (
+              <>
+                {" "}
+                <button className="btn-sm" onClick={reslice}>
+                  Re-slice…
+                </button>
+              </>
+            )}
+          </p>
         </div>
       )}
       {other.length > 0 && (
