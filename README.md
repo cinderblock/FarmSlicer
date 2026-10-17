@@ -8,6 +8,9 @@ can run in the user's browser.
 
 - **Backend:** Rust (axum + tokio), SQLite, libslic3r via a `cxx` bridge.
 - **Frontend:** React + TypeScript + Three.js (Vite), served by the backend.
+- **On a phone:** every page works on a phone: the menu folds into a top bar,
+  lists become cards, and on the plate a finger turns the view (two pan and
+  zoom) and selects a part, which can then be dragged.
 - **Profiles:** OrcaSlicer's vendor profiles (machine / process / filament) with
   inheritance resolved server-side; per-job overrides and saved custom profiles.
 - **The plate:** the Slice page's 3D view shows the selected printer's bed

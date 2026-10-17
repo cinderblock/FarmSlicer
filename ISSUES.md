@@ -52,3 +52,12 @@ them: deleting the job (Jobs page) leaves the file in that browser. Why it
 matters: the store only grows. A model may be shared by several jobs, so a
 delete has to check the user's other jobs first (`GET /api/jobs` carries
 `local_models`, `GET /api/jobs/{id}` the digests).
+
+## The Jobs table is wider than a desktop window
+
+At 1280 px (sidebar shown) the Jobs table (`web/src/pages/Jobs.tsx`) is
+~64 px wider than the content area, so the Actions column is cut off and
+the content scrolls sideways; narrower desktop windows (800-1300 px) lose
+more. Below 800 px it is a card list (`data-table cards`) and fits. Why it
+matters: Print / Re-slice / Delete are the cut-off column. Eleven columns;
+it needs fewer (combine some) or the card layout up to a wider breakpoint.

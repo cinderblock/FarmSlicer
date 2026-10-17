@@ -424,6 +424,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   change: it renders the protocol's fields and capabilities.
 - Rust 2024 edition; `NDEBUG` must be defined for the C++ (Eigen 5.x).
 - JS/TS uses **Bun** (`bun.lock`; no `package-lock.json`).
+- Phones (`plans/mobile.md`): below 800 px the sidebar is a drawer behind
+  `.topbar` (components/Layout.tsx). A list table is `data-table cards`, its
+  cells labelled with `data-label` (`cell-title`, `cell-select`,
+  `cell-actions` for those); other tables stay tables. Touch rules go under
+  `(max-width: 800px), (pointer: coarse)` (fields stay >= 16 px: iOS zooms
+  into smaller ones) or `(hover: none)`. Check a new page at 360 px wide.
 - Keep `cxx/slice_core.cpp` engine-agnostic; anything Rust- or Emscripten-specific
   goes in the respective bridge.
 - The submodule is pinned to an OrcaSlicer release tag; bumping it means
