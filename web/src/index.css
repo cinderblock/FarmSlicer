@@ -184,6 +184,30 @@ body {
   }
 }
 
+/* Touch screens and phones: fingers need bigger targets than a mouse. */
+@media (max-width: 800px), (pointer: coarse) {
+  /* iOS zooms the page into any field whose text is under 16 px when it is
+     focused, and doesn't zoom back. `!important` because many components
+     set their own smaller sizes. */
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+
+  .btn-sm {
+    min-height: 2.25rem;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.875rem;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+}
+
 .page h2 {
   margin-bottom: 1.5rem;
   font-weight: 600;
@@ -643,6 +667,52 @@ body {
 .placement-unit,
 .placement-size {
   color: var(--text-dim);
+}
+
+/* Phones: the placement panel spans the viewer and its fields share the
+   width. */
+@media (max-width: 800px) {
+  .placement-panel {
+    right: 0.5rem;
+  }
+
+  .placement-label {
+    width: 3.6rem;
+    flex-shrink: 0;
+  }
+
+  .placement-field {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .placement-field input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* One row per toolbar, scrolled sideways, so the plate keeps the room. */
+  .viewer-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .toolbar-sep {
+    flex-shrink: 0;
+  }
+}
+
+/* Touch screens: no keyboard to press the shortcuts on, fingers for
+   pointers. */
+@media (hover: none) {
+  .viewer-toolbar kbd {
+    display: none;
+  }
+
+  .viewer-toolbar button {
+    padding: 0.55rem 0.75rem;
+  }
 }
 
 /* Gizmo readouts (drag distance, angle) */
@@ -1579,6 +1649,19 @@ body {
 .discovered-card {
   border-style: dashed;
   border-color: var(--accent);
+}
+
+/* Phones: the farm's printers first, printers to set up after them. */
+@media (max-width: 800px) {
+  .page:has(> .printer-area) {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .page:has(> .printer-area) > .discovered-section {
+    order: 1;
+    margin: 0;
+  }
 }
 
 .discovered-card .printer-header h3 {

@@ -123,6 +123,10 @@ function PartView(props: GizmoProps & { tool: Tool; selected: boolean; onSelect:
             // The nearest part takes the click, not the ones behind it.
             if (e.intersections[0]?.object !== e.object) return;
             onSelect(part);
+            // On a touch screen the parts cover most of the view: a finger
+            // landing on one orbits the camera and selects it; only a part
+            // already selected is dragged.
+            if (e.pointerType === "touch" && !selected) return;
             if (selected && tool === "flat") return;
             bodyDown(e);
           }}
@@ -239,12 +243,22 @@ const TOOLS: { tool: Tool; label: string; key: string }[] = [
   { tool: "flat", label: "Lay on face", key: "F" },
 ];
 
-const TOOL_HINTS: Record<Tool, string> = {
+const MOUSE_HINTS: Record<Tool, string> = {
   none: "Click a part to select it · drag to move it",
   move: "Drag an arrow or the part · snaps to 1 mm, the bed's centre and edges · Shift: free",
   rotate: "Drag a ring · snaps to 15° · Shift: free",
   flat: "Click a face to put it on the plate",
 };
+
+/** Touch screens: no Shift, and a part is selected before it can be dragged. */
+const TOUCH_HINTS: Record<Tool, string> = {
+  none: "Tap a part to select it, then drag it · one finger turns the view, two pan and zoom",
+  move: "Drag an arrow or the part · snaps to 1 mm, the bed's centre and edges",
+  rotate: "Drag a ring · snaps to 15°",
+  flat: "Tap a face to put it on the plate",
+};
+
+const TOOL_HINTS = window.matchMedia("(hover: none)").matches ? TOUCH_HINTS : MOUSE_HINTS;
 
 const MODEL_TYPES = ".stl,.3mf";
 
