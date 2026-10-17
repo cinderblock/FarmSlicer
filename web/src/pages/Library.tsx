@@ -54,7 +54,7 @@ export default function LibraryPage() {
       ) : slices.length === 0 ? (
         <p className="empty-state">No slices yet. Completed slice jobs will appear here.</p>
       ) : (
-        <table className="data-table">
+        <table className="data-table cards">
           <thead>
             <tr>
               <th>Model</th>
@@ -70,14 +70,14 @@ export default function LibraryPage() {
           <tbody>
             {slices.map((s) => (
               <tr key={s.id}>
-                <td>{s.model_name}</td>
-                <td>{s.username ?? "—"}</td>
-                <td>{s.group_id ? <Link to={`/groups/${s.group_id}`}>{s.group_name}</Link> : "Personal"}</td>
-                <td>{localDate(s.created_at)}</td>
-                <td>{formatDuration(s.print_time_sec)}</td>
-                <td>{s.filament_used_g.toFixed(1)}g</td>
-                <td>{formatSize(s.file_size)}</td>
-                <td>
+                <td className="cell-title">{s.model_name}</td>
+                <td data-label="By">{s.username ?? "—"}</td>
+                <td data-label="Group">{s.group_id ? <Link to={`/groups/${s.group_id}`}>{s.group_name}</Link> : "Personal"}</td>
+                <td data-label="Date">{localDate(s.created_at)}</td>
+                <td data-label="Print time">{formatDuration(s.print_time_sec)}</td>
+                <td data-label="Filament">{s.filament_used_g.toFixed(1)}g</td>
+                <td data-label="Size">{formatSize(s.file_size)}</td>
+                <td className="cell-actions">
                   <a className="btn-sm" href={`/api/slices/${s.id}/download`} download>
                     G-code
                   </a>

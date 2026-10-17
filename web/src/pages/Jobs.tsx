@@ -230,7 +230,7 @@ export default function JobsPage() {
       {jobs.length === 0 ? (
         <p className="empty-state">No jobs yet. Start by slicing a model.</p>
       ) : (
-        <table className="data-table">
+        <table className="data-table cards">
           <thead>
             <tr>
               <th aria-label="Select" />
@@ -253,7 +253,7 @@ export default function JobsPage() {
               const warnings = [...support, ...other];
               return (
                 <tr key={job.id} className={selected.has(job.id) ? "selected" : undefined}>
-                  <td>
+                  <td className="cell-select">
                     {finished(job) && (
                       <input
                         type="checkbox"
@@ -263,7 +263,7 @@ export default function JobsPage() {
                       />
                     )}
                   </td>
-                  <td>
+                  <td className="cell-title">
                     <div className="job-name">
                       {hasThumbnail(job) && (
                         <img className="job-thumb" src={`/api/jobs/${job.id}/thumbnail`} alt="" loading="lazy" />
@@ -273,8 +273,8 @@ export default function JobsPage() {
                       </Link>
                     </div>
                   </td>
-                  <td>{job.username ?? "—"}</td>
-                  <td>
+                  <td data-label="By">{job.username ?? "—"}</td>
+                  <td data-label="Group">
                     {job.user_id === user?.id ? (
                       <select
                         value={job.group_id ?? ""}
@@ -295,12 +295,12 @@ export default function JobsPage() {
                       (job.group_name ?? "Personal")
                     )}
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <span className={`status-badge status-${job.status}`}>
                       {job.status}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Progress">
                     <div className="progress-bar">
                       <div
                         className="progress-fill"
@@ -311,7 +311,7 @@ export default function JobsPage() {
                       <span className="hint">{job.progress_message}</span>
                     )}
                   </td>
-                  <td>
+                  <td data-label="Sliced on">
                     <span className={`source-badge source-${job.source}`}>
                       {SOURCE_LABELS[job.source]?.[0] ?? job.source}
                     </span>
@@ -329,12 +329,12 @@ export default function JobsPage() {
                       </div>
                     )}
                   </td>
-                  <td>{job.printer_name ?? (job.routing === "auto" ? "Auto" : "—")}</td>
-                  <td>
+                  <td data-label="Printer">{job.printer_name ?? (job.routing === "auto" ? "Auto" : "—")}</td>
+                  <td data-label="Time">
                     {job.print_time_sec ? formatTime(job.print_time_sec) : "—"}
                   </td>
-                  <td>{job.status === "done" ? formatCost(job.estimated_cost, currency) : "—"}</td>
-                  <td>
+                  <td data-label="Cost">{job.status === "done" ? formatCost(job.estimated_cost, currency) : "—"}</td>
+                  <td className="cell-actions">
                     {job.status === "done" && job.package_json && (
                       <button className="btn-sm" onClick={() => setSending(job)}>
                         Print…

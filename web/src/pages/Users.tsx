@@ -161,7 +161,7 @@ export default function UsersPage() {
         </div>
       )}
 
-      <table className="data-table">
+      <table className="data-table cards">
         <thead>
           <tr>
             <th>Username</th>
@@ -180,12 +180,12 @@ export default function UsersPage() {
             const locked = u.role === "owner" && u.id !== me?.id;
             return (
               <tr key={u.id}>
-                <td>
+                <td className="cell-title">
                   {u.username}
                   {u.id === me?.id && <span className="hint"> (you)</span>}
                   {u.kind === "guest" && <span className="source-badge"> guest</span>}
                 </td>
-                <td>
+                <td data-label="Role">
                   {u.role === "owner" ? (
                     <span className="status-badge">owner</span>
                   ) : (
@@ -195,7 +195,7 @@ export default function UsersPage() {
                     </select>
                   )}
                 </td>
-                <td>
+                <td data-label="Passkeys">
                   {u.passkeys}
                   {u.passkeys === 0 && u.kind === "guest" && <span className="hint"> · signs in with codes</span>}
                   {u.passkeys === 0 && u.kind !== "guest" && (
@@ -205,7 +205,7 @@ export default function UsersPage() {
                     </span>
                   )}
                 </td>
-                <td>
+                <td data-label="Remote">
                   {u.kind === "guest" ? (
                     <span className="hint">no passkey</span>
                   ) : (
@@ -220,7 +220,7 @@ export default function UsersPage() {
                     </label>
                   )}
                 </td>
-                <td>
+                <td data-label="Groups">
                   {u.groups.length === 0
                     ? "—"
                     : u.groups.map((g, i) => (
@@ -232,7 +232,7 @@ export default function UsersPage() {
                         </span>
                       ))}
                 </td>
-                <td>
+                <td data-label="Limits">
                   {editing === u.id ? (
                     <div>
                       <QuotaRulesEditor rules={draft} onChange={setDraft} />
@@ -262,8 +262,8 @@ export default function UsersPage() {
                     </>
                   )}
                 </td>
-                <td>{u.last_login ?? "—"}</td>
-                <td>
+                <td data-label="Last login">{u.last_login ?? "—"}</td>
+                <td data-label="G-code incidents">
                   {u.gcode_incidents > 0 ? (
                     <button className="btn-sm" onClick={() => setIncidentsOf({ id: u.id, username: u.username })}>
                       {u.gcode_incidents}
@@ -272,7 +272,7 @@ export default function UsersPage() {
                     "—"
                   )}
                 </td>
-                <td>
+                <td className="cell-actions">
                   <button className="btn-sm" onClick={() => reissue(u)} disabled={locked}>
                     New invite link
                   </button>{" "}

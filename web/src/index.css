@@ -84,6 +84,106 @@ body {
   overflow-y: auto;
 }
 
+/* The top bar and the drawer's backdrop exist for narrow screens only. */
+.topbar,
+.sidebar-backdrop {
+  display: none;
+}
+
+/* Phones (and narrow windows): the sidebar becomes a drawer opened from a
+   top bar, and the content gets the whole width. */
+@media (max-width: 800px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: calc(3rem + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 0.5rem 0 calc(0.5rem + env(safe-area-inset-left));
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .topbar-menu {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    background: transparent;
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .topbar-menu .feedback-count {
+    position: absolute;
+    top: 0.1rem;
+    right: 0;
+    margin: 0;
+  }
+
+  .topbar-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(18rem, 85vw);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s 0.2s;
+  }
+
+  .menu-open .sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease;
+  }
+
+  .sidebar-header {
+    padding: 1rem;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .menu-open .sidebar-backdrop {
+    display: block;
+  }
+
+  body:has(.menu-open) {
+    overflow: hidden;
+  }
+
+  .content {
+    padding: 1rem calc(1rem + env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom))
+      calc(1rem + env(safe-area-inset-left));
+    overflow-y: visible;
+    min-width: 0;
+  }
+}
+
 .page h2 {
   margin-bottom: 1.5rem;
   font-weight: 600;
@@ -182,6 +282,111 @@ body {
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* A table that may be wider than a phone scrolls inside this, not the page. */
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* Narrow screens: a `cards` table shows each row as a card, each cell a line
+   labelled by its `data-label` (the column's heading). `cell-title` is the
+   card's heading, `cell-select` its checkbox (top right), `cell-actions` its
+   buttons; a cell without a label spans the card. */
+@media (max-width: 800px) {
+  .data-table.cards,
+  .data-table.cards tbody,
+  .data-table.cards tr,
+  .data-table.cards td {
+    display: block;
+  }
+
+  .data-table.cards thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .data-table.cards tr {
+    position: relative;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .data-table.cards td {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.3rem 0;
+    border: none;
+    overflow-wrap: anywhere;
+  }
+
+  /* The label hangs in the cell's left padding, so values that wrap line
+     up under the first one. */
+  .data-table.cards td[data-label] {
+    padding-left: 7rem;
+  }
+
+  .data-table.cards td::before {
+    content: attr(data-label);
+    flex: 0 0 6.5rem;
+    margin-left: -7rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+
+  .data-table.cards td:not([data-label])::before {
+    display: none;
+  }
+
+  .data-table.cards td > .progress-bar,
+  .data-table.cards td > select {
+    flex: 1 1 8rem;
+  }
+
+  .data-table.cards td.cell-title {
+    padding: 0 2.5rem 0.4rem 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+
+  .data-table.cards td.cell-select {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    padding: 0;
+  }
+
+  .data-table.cards td.cell-select input {
+    width: 1.4rem;
+    height: 1.4rem;
+  }
+
+  .data-table.cards td.cell-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .data-table.cards td.cell-actions:empty {
+    display: none;
+  }
+
+  .data-table.cards td.cell-actions details {
+    flex-basis: 100%;
+  }
 }
 
 /* Status */
@@ -899,8 +1104,18 @@ body {
 
 .upload-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+}
+
+.upload-row > button {
+  flex-shrink: 0;
+}
+
+/* Beside the button while there's room for it, under it on a phone. */
+.upload-row .hint {
+  flex: 1 1 16rem;
 }
 
 .source-upload { background: #2a2a1e; color: var(--warning); }

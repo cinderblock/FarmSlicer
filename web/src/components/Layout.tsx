@@ -45,9 +45,37 @@ export default function Layout() {
   }, [isAdmin]);
   const fresh = newCount(useJson<Counts>(isAdmin ? "/api/feedback/counts" : null, poll).data);
 
+  // Narrow screens: the sidebar is a drawer behind the top bar's menu button.
+  // It is open for the location it was opened at, so any navigation (a link,
+  // the back button) closes it.
+  const [menuAt, setMenuAt] = useState<string | null>(null);
+  const menuOpen = menuAt === location.key;
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuAt(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   return (
-    <div className="app">
-      <nav className="sidebar">
+    <div className={`app${menuOpen ? " menu-open" : ""}`}>
+      <header className="topbar">
+        <button
+          className="topbar-menu"
+          aria-label="Menu"
+          aria-expanded={menuOpen}
+          aria-controls="sidebar"
+          onClick={() => setMenuAt(menuOpen ? null : location.key)}
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          {fresh > 0 && <span className="feedback-count">{fresh}</span>}
+        </button>
+        <span className="topbar-title">FarmSlicer</span>
+      </header>
+      <div className="sidebar-backdrop" onClick={() => setMenuAt(null)} />
+      <nav className="sidebar" id="sidebar">
         <div className="sidebar-header">
           <h1>FarmSlicer</h1>
         </div>
@@ -75,7 +103,10 @@ export default function Layout() {
           <div className="sidebar-feedback">
             <button
               className="btn-sm"
-              onClick={() => setFeedback(prefillFor(location.pathname, location.search))}
+              onClick={() => {
+                setMenuAt(null);
+                setFeedback(prefillFor(location.pathname, location.search));
+              }}
               title="Report a problem or suggest something"
             >
               Send feedback

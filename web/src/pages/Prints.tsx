@@ -60,7 +60,7 @@ export default function PrintsPage() {
       {error && <p className="login-error">{error}</p>}
       {prints && prints.length === 0 && <p className="empty-state">Nothing has been printed yet.</p>}
       {prints && prints.length > 0 && (
-        <table className="data-table">
+        <table className="data-table cards">
           <thead>
             <tr>
               <th>Print</th>
@@ -77,7 +77,7 @@ export default function PrintsPage() {
           <tbody>
             {prints.map((p) => (
               <tr key={p.id}>
-                <td>
+                <td className="cell-title">
                   <div className="job-name">
                     {p.job_id && p.name && (
                       <img
@@ -92,9 +92,9 @@ export default function PrintsPage() {
                     {p.name && p.plate > 1 && <span className="hint"> · plate {p.plate}</span>}
                   </div>
                 </td>
-                <td>{p.printer_name}</td>
-                <td>{p.username ?? "—"}</td>
-                <td>
+                <td data-label="Printer">{p.printer_name}</td>
+                <td data-label="By">{p.username ?? "—"}</td>
+                <td data-label="Status">
                   <span className={`status-badge print-${p.status}`}>{STATUS_LABELS[p.status] ?? p.status}</span>
                   {p.status === "pending_approval" && p.safety_review && (
                     <div>
@@ -111,7 +111,7 @@ export default function PrintsPage() {
                   )}
                   {p.error && <div className="printer-error">{p.error}</div>}
                 </td>
-                <td>
+                <td data-label="Progress">
                   {ACTIVE_PRINT.includes(p.status) ? (
                     <>
                       <div className="progress-bar">
@@ -127,10 +127,10 @@ export default function PrintsPage() {
                     `${p.progress}%`
                   )}
                 </td>
-                <td>{formatCost(p.estimated_cost, currency)}</td>
-                <td>{localDateTime(p.created_at)}</td>
-                <td>{localDateTime(p.finished_at)}</td>
-                <td>
+                <td data-label="Cost">{formatCost(p.estimated_cost, currency)}</td>
+                <td data-label="Sent">{localDateTime(p.created_at)}</td>
+                <td data-label="Ended">{localDateTime(p.finished_at)}</td>
+                <td className="cell-actions">
                   {p.can_control && ["printing", "paused"].includes(p.status) && (
                     <PrintControls print={p} capabilities={capabilitiesOf(p)} onChange={() => setRev((r) => r + 1)} />
                   )}
