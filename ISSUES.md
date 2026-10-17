@@ -52,16 +52,3 @@ them: deleting the job (Jobs page) leaves the file in that browser. Why it
 matters: the store only grows. A model may be shared by several jobs, so a
 delete has to check the user's other jobs first (`GET /api/jobs` carries
 `local_models`, `GET /api/jobs/{id}` the digests).
-
-## Automatic error reports catch a beacon script that isn't ours
-
-Minutes after the feedback release went live, a user's browser reported
-`Error report (app, resource): script failed to load: /beacon.min.js/v4bc70e...`
-(server log). FarmSlicer serves no such script: it looks like an analytics
-beacon injected in front of the site, and the page's
-`Cross-Origin-Embedder-Policy: require-corp` (or a content blocker) stops
-it. Why it matters: it will show up as an error for every visitor and bury
-real ones on the Feedback page. Decide whether to stop the injection
-upstream (proxy/CDN side, not this repo) or have `web/src/errorReporting.ts`
-skip resources the app didn't ask for.
-

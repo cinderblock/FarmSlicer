@@ -3,9 +3,10 @@
 // (main.tsx). Server side: src/feedback_api.rs (`POST /api/feedback/errors`).
 //
 // What is caught:
-// - `window` errors (uncaught exceptions) and script/stylesheet load
-//   failures (`resource`; images aren't reported: offline printers' pictures
-//   fail all the time);
+// - `window` errors (uncaught exceptions) and the app's own script/stylesheet
+//   load failures (`resource`; images aren't reported: offline printers'
+//   pictures fail all the time; nor are other origins' scripts, see
+//   `resourceFailed`);
 // - unhandled promise rejections (`promise`);
 // - `console.error` (`console`). The wrapper calls the original console
 //   method first, every time, with the original arguments: nothing printed
@@ -308,12 +309,21 @@ function onWindowError(ev: Event) {
   // Resource load failures don't bubble: this listener is on the capture phase.
   const target = ev.target;
   if (target instanceof HTMLScriptElement && target.src) {
-    remember("resource", `script failed to load: ${target.src}`);
-    capture("resource", `script failed to load: ${new URL(target.src, location.href).pathname}`, undefined);
+    resourceFailed("script", target.src);
   } else if (target instanceof HTMLLinkElement && target.rel === "stylesheet" && target.href) {
-    remember("resource", `stylesheet failed to load: ${target.href}`);
-    capture("resource", `stylesheet failed to load: ${new URL(target.href, location.href).pathname}`, undefined);
+    resourceFailed("stylesheet", target.href);
   }
+}
+
+// The app loads only its own scripts and stylesheets. A cross-origin one was
+// put on the page by something else (a CDN's analytics beacon, an extension)
+// and is usually stopped by our Cross-Origin-Embedder-Policy: kept in the
+// ring buffer for manual feedback, not reported.
+function resourceFailed(kind: "script" | "stylesheet", src: string) {
+  remember("resource", `${kind} failed to load: ${src}`);
+  const url = new URL(src, location.href);
+  if (url.origin !== location.origin) return;
+  capture("resource", `${kind} failed to load: ${url.pathname}`, undefined);
 }
 
 function onRejection(ev: PromiseRejectionEvent) {
