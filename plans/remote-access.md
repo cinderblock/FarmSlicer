@@ -132,6 +132,9 @@ passkey only (asked 2026-10-15).
       `X-FarmSlicer-LAN: 1` is stripped (still remote), `/` 200,
       `/api/printers` 401, recover/join/setup 403, login start 200. LAN
       unchanged (join groups listed).
+- [x] Owner approved for remote access (2026-10-16, through the API as the
+      owner; their existing passkey stays, the old session predates
+      `sessions.method` so the first remote use needs a fresh sign-in)
 - [ ] An approved account signs in from outside (the maintainer's brother
       is the first: Users → Add user with Remote ticked → invite link)
 
