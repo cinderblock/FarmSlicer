@@ -128,16 +128,14 @@ multiple nozzles, to set a priority."
 ## Progress log
 
 - [x] Steps 1-9 (and 6b, the prime tower).
+- [x] Deployed 2026-10-17: FarmSlicer `3adb338`, image
+  `sha256:f40ff2f9...`, ops `1d4eb49`; healthy on buildhost.
 - [ ] An H2D print on hardware with something loaded on one side only
   (needs the user).
 
 ## Open questions for the user
 
-1. Push `master` and pin the new image in the ops repo? (master also
-   carries another thread's phone-layout commits.) Until then production
-   H2D multi-filament jobs keep the prime tower at x 15, which the right
-   nozzle can't reach.
-2. When convenient: an H2D print with a filament loaded on one side only,
+1. When convenient: an H2D print with a filament loaded on one side only,
    to see the choice and the AMS mapping on hardware.
 
 ## Things not to do
