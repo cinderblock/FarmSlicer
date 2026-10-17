@@ -40,7 +40,7 @@ desktop layout worse.
 5. [x] Verified at 360, 402, 768 and 1280 px; tsc, build, eslint (touched
    files), web tests (35 pass).
 6. [x] Docs: README "On a phone", CLAUDE.md conventions.
-7. [ ] **Try it on a real phone after the next deploy** (the maintainer):
+7. [ ] **Try it on a real phone** (the maintainer; live since 2026-10-17):
    everything above was checked in a desktop browser at phone sizes, which
    reports a mouse, so the touch-only parts are unverified on hardware.
 
@@ -94,12 +94,16 @@ lines by its hint; `btn-sm` is 26 px tall (touch targets); inputs below
 - [x] Touch targets, Printers order, Slice viewer (`41bcf2f`)
 - [x] Profiles filters (`ab0f68e`)
 - [x] Tabs, small tables, dialogs, sign-in pages (`bbccdc6`)
-- [ ] Real-phone check after deploy (step 7)
+- [x] Deployed: FarmSlicer `3adb338` on sentinel 2026-10-17 (ops `1d4eb49`),
+  with the error-report fix (`46bf0d7`) and pages' `Cache-Control:
+  no-cache, no-transform` (`e8f7403`): through Cloudflare the page no
+  longer carries the analytics beacon. Excluding the host on Cloudflare's
+  side failed (one Web Analytics rule per site on this account).
+- [ ] Real-phone check (step 7)
 
 ## Open questions for the user
 
-1. Deploying: these commits are local on master; CI builds the image when
-   they are pushed, then the ops pin. Push when you're ready (not done).
+None.
 
 ## Things not to do
 
