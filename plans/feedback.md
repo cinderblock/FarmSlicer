@@ -87,7 +87,8 @@ are dropped.
 - Browser (`web/src/errorReporting.ts`): `window` errors, the app's own
   `script`/stylesheet load failures (images aren't: offline printers'
   pictures; nor are other origins' scripts: the first report in production
-  was a CDN's injected analytics beacon blocked by our COEP),
+  was a CDN's injected analytics beacon blocked by our COEP; pages now
+  carry `Cache-Control: no-transform`, so it isn't injected at all),
   unhandled rejections, `console.error`, React errors (error boundaries,
   with the component stack), `/api` calls answering 5xx or failing on the
   network (not 4xx; not `/api/feedback` itself; not aborts). `console.warn`

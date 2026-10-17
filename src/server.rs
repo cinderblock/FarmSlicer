@@ -1671,4 +1671,42 @@ pub fn router(state: Arc<AppState>) -> Router {
             header::HeaderName::from_static("cross-origin-embedder-policy"),
             header::HeaderValue::from_static("require-corp"),
         ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            html_cache_control,
+        ))
+}
+
+/// `Cache-Control` for the app's pages. `no-transform` keeps a proxy from
+/// rewriting them: Cloudflare's Web Analytics injects a beacon script from
+/// its own origin, which require-corp blocks on every page load. `no-cache`
+/// because index.html names the build's hashed bundles, so it is fetched
+/// again after a deploy.
+fn html_cache_control(res: &axum::response::Response) -> Option<header::HeaderValue> {
+    let html = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/html"));
+    html.then(|| header::HeaderValue::from_static("no-cache, no-transform"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pages_are_not_transformed() {
+        let res = |ty: &str| {
+            let mut r = axum::response::Response::new(axum::body::Body::empty());
+            r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_str(ty).unwrap());
+            r
+        };
+        assert_eq!(
+            html_cache_control(&res("text/html; charset=utf-8")).unwrap(),
+            "no-cache, no-transform"
+        );
+        assert!(html_cache_control(&res("application/javascript")).is_none());
+        assert!(html_cache_control(&res("application/json")).is_none());
+    }
 }

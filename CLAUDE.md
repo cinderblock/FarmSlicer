@@ -349,7 +349,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `/api/jobs/{id}/result`, which files them like a server slice.
 - SPA fallback serves `dist/web/index.html`; every response carries
   `Cross-Origin-Opener-Policy: same-origin` and
-  `Cross-Origin-Embedder-Policy: require-corp`.
+  `Cross-Origin-Embedder-Policy: require-corp`; pages (`text/html`) also
+  `Cache-Control: no-cache, no-transform`, which keeps a proxy from
+  injecting scripts (Cloudflare's Web Analytics beacon, which COEP blocks).
 - Accounts (`src/auth.rs` policy + WebAuthn RP, `src/auth_api.rs` handlers,
   `plans/auth.md`): **passkeys only, no passwords**, no configured secrets.
   Ceremonies are start/finish pairs with a server-held `flow_id` (5 min, in
