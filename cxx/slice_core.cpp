@@ -230,6 +230,130 @@ void load_config(Slic3r::DynamicPrintConfig& config, const std::string& json,
     config.normalize_fdm();
 }
 
+const char* nozzle_side(int extruder) { return extruder == 0 ? "left" : "right"; }
+
+// The part of the bed every nozzle reaches: `printable_area`, cut down to
+// each nozzle's `extruder_printable_area` on printers with several (the
+// H2D's: x 25-325 of 350).
+Slic3r::BoundingBoxf reachable_area(const Slic3r::DynamicPrintConfig& config)
+{
+    using namespace Slic3r;
+    BoundingBoxf area;
+    if (const auto* bed = config.option<ConfigOptionPoints>("printable_area"))
+        for (const Vec2d& p : bed->values) area.merge(p);
+    if (const auto* nozzles = config.option<ConfigOptionPointsGroups>("extruder_printable_area"))
+        for (const Vec2ds& points : nozzles->values) {
+            if (points.empty()) continue;
+            const BoundingBoxf reach(points);
+            area.min = area.min.cwiseMax(reach.min);
+            area.max = area.max.cwiseMin(reach.max);
+        }
+    return area;
+}
+
+void set_wipe_tower_position(Slic3r::DynamicPrintConfig& config, double x, double y)
+{
+    using namespace Slic3r;
+    config.option<ConfigOptionFloats>("wipe_tower_x", true)->values = {x};
+    config.option<ConfigOptionFloats>("wipe_tower_y", true)->values = {y};
+}
+
+// Where the desktop app puts the prime tower on a new plate
+// (PartPlateList::set_default_wipe_tower_pos_for_plate): x 165 (0 on
+// bed-slingers), y 250, then inside the area every nozzle reaches
+// (fit_wipe_tower, once its size is known). Only on printers with several
+// nozzles, where the profiles' x 15 is out of one nozzle's reach; others
+// keep the profile's position.
+void place_wipe_tower(Slic3r::DynamicPrintConfig& config)
+{
+    using namespace Slic3r;
+    const auto* nozzles = config.option<ConfigOptionPointsGroups>("extruder_printable_area");
+    if (!nozzles || nozzles->values.size() < 2) return;
+    const auto* structure = config.option<ConfigOptionEnum<PrinterStructure>>("printer_structure");
+    set_wipe_tower_position(config, structure && structure->value == psI3 ? 0.0 : 165.0, 250.0);
+}
+
+// Move a prime tower (its first layer, brim and cone included) that pokes
+// out of the area every nozzle reaches back inside it, a margin from the
+// edge, as the desktop app clamps it. Returns whether it moved (then
+// process again: only the wipe tower and the G-code depend on it).
+bool fit_wipe_tower(const Slic3r::Print& print, Slic3r::DynamicPrintConfig& config)
+{
+    using namespace Slic3r;
+    const Points corners = print.first_layer_wipe_tower_corners();
+    if (corners.empty()) return false;
+    BoundingBoxf tower;
+    for (const Point& p : corners) tower.merge(Vec2d(unscale<double>(p.x()), unscale<double>(p.y())));
+    const BoundingBoxf area = reachable_area(config);
+    if (!area.defined) return false;
+    auto shift = [](double lo, double hi, double area_lo, double area_hi) {
+        if (hi + WIPE_TOWER_MARGIN > area_hi) return area_hi - WIPE_TOWER_MARGIN - hi;
+        if (lo - WIPE_TOWER_MARGIN < area_lo) return area_lo + WIPE_TOWER_MARGIN - lo;
+        return 0.0;
+    };
+    const double dx = shift(tower.min.x(), tower.max.x(), area.min.x(), area.max.x());
+    const double dy = shift(tower.min.y(), tower.max.y(), area.min.y(), area.max.y());
+    if (std::abs(dx) < 1e-3 && std::abs(dy) < 1e-3) return false;
+    set_wipe_tower_position(config, print.config().wipe_tower_x.get_at(0) + dx, print.config().wipe_tower_y.get_at(0) + dy);
+    return true;
+}
+
+// On dual-nozzle printers each nozzle misses part of the build volume (the
+// H2D's: a strip of the bed each, `extruder_printable_area`, and the top
+// few millimetres, `extruder_printable_height`). The G-code check that
+// runs with the export looks at every move of every copy and records, per
+// filament, the nozzles that can't print it (`limit_filament_maps`).
+//
+// With a Manual filament map (FarmSlicer chose each filament's nozzle, see
+// src/nozzles.rs) libslic3r takes the map as given, so move a filament its
+// nozzle can't reach to the other one when that one can. Returns whether
+// the map changed (then slice again: only the wipe tower and the G-code
+// depend on it).
+bool move_unreachable_filaments(const Slic3r::Print& print, const Slic3r::GCodeProcessorResult& result,
+                                Slic3r::DynamicPrintConfig& config, std::vector<std::string>& warnings)
+{
+    using namespace Slic3r;
+    if (print.config().filament_map_mode.value != fmmManual || print.config().nozzle_diameter.size() != 2)
+        return false;
+    std::vector<int> fmap = print.config().filament_map.values;
+    bool changed = false;
+    for (size_t f = 0; f < fmap.size() && f < result.limit_filament_maps.size(); ++f) {
+        const int limits = result.limit_filament_maps[f];
+        const int e = fmap[f] - 1;
+        if (e < 0 || e > 1 || !(limits >> e & 1)) continue;
+        const int other = 1 - e;
+        if (limits >> other & 1) continue; // neither can: check_nozzle_reach refuses the slice
+        fmap[f] = other + 1;
+        changed = true;
+        warnings.push_back("filament " + std::to_string(f + 1) + " prints from the " + nozzle_side(other) +
+                           " nozzle instead: the " + nozzle_side(e) + " one can't reach all of it");
+    }
+    if (changed) config.option<ConfigOptionInts>("filament_map", true)->values = fmap;
+    return changed;
+}
+
+// Refuse G-code a nozzle can't print: part of it lies where the nozzle
+// that prints it can't reach (Bambu Studio won't send such a plate either).
+void check_nozzle_reach(const Slic3r::GCodeProcessorResult& result)
+{
+    const auto& check = result.gcode_check_result;
+    if (!(check.error_code & 0b11)) return;
+    std::set<std::pair<int, int>> seen; // (nozzle, filament)
+    std::string msg;
+    for (const auto* infos : {&check.print_area_error_infos, &check.print_height_error_infos})
+        for (const auto& [extruder, list] : *infos)
+            for (const auto& [filament, object] : list) {
+                (void)object;
+                if (!seen.insert({extruder, filament}).second) continue;
+                msg += msg.empty() ? "" : "; ";
+                msg += "the " + std::string(nozzle_side(extruder)) + " nozzle can't reach all of filament " +
+                       std::to_string(filament + 1);
+            }
+    throw std::runtime_error("the plate can't be printed as sliced: " +
+                             (msg.empty() ? std::string("a nozzle can't reach part of it") : msg) +
+                             " (each nozzle misses part of the bed and the top of the build volume)");
+}
+
 /// The bed's centre from `printable_area` (origin when there is none).
 Slic3r::Vec2d bed_center(const Slic3r::DynamicPrintConfig& config)
 {
@@ -425,6 +549,7 @@ Outcome slice_models(const std::vector<ModelInput>& models,
             });
         }
 
+        place_wipe_tower(config);
         print.apply(model, config);
         Model::setPrintSpeedTable(config, print.config());
         if (print.empty())
@@ -439,6 +564,10 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 
         report(cb, 5, "Slicing");
         print.process();
+        if (fit_wipe_tower(print, config)) {
+            print.apply(model, config);
+            print.process();
+        }
         if (std::string conflict = print.get_conflict_string(); !conflict.empty())
             out.warnings.push_back(conflict);
 
@@ -467,6 +596,17 @@ Outcome slice_models(const std::vector<ModelInput>& models,
         report(cb, 90, "Exporting G-code");
         GCodeProcessorResult gcode_result;
         std::string written = print.export_gcode(output_path, &gcode_result, thumbnails);
+        if (move_unreachable_filaments(print, gcode_result, config, out.warnings)) {
+            print.apply(model, config);
+            print.process();
+            if (fit_wipe_tower(print, config)) {
+                print.apply(model, config);
+                print.process();
+            }
+            gcode_result = GCodeProcessorResult();
+            written = print.export_gcode(output_path, &gcode_result, thumbnails);
+        }
+        check_nozzle_reach(gcode_result);
         if (written.empty()) written = output_path;
         if (!std::filesystem::exists(written))
             throw std::runtime_error("G-code export produced no file");
