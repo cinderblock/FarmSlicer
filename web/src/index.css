@@ -802,6 +802,28 @@ body {
   .settings-panel {
     overflow-y: visible;
   }
+
+  /* The last slice's preview stacks its panels under the view
+     (.gcode-preview below), taller than the plate's row: the row grows. */
+  .slice-layout:has(.slice-result-preview) {
+    grid-template-rows: auto auto;
+  }
+
+  .slice-result {
+    height: auto;
+  }
+
+  .slice-result-preview {
+    flex: none;
+  }
+}
+
+/* Phones: a taller viewer (its toolbars and placement panel take a lot of
+   it), leaving a strip to scroll the page by: the canvas takes every swipe. */
+@media (max-width: 800px) {
+  .slice-layout {
+    grid-template-rows: minmax(360px, 75svh) auto;
+  }
 }
 
 .settings-panel h3 {
@@ -3251,6 +3273,15 @@ a.btn-sm {
   height: calc(100vh - 16rem);
   min-height: 520px;
   margin-bottom: 1rem;
+}
+
+/* Narrow windows stack the preview's panels under the view (.gcode-preview
+   above): the box grows with them instead of letting them spill out. */
+@media (max-width: 1000px) {
+  .job-preview {
+    height: auto;
+    min-height: 0;
+  }
 }
 
 .job-technical {
