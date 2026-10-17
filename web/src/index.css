@@ -308,6 +308,20 @@ body {
   letter-spacing: 0.05em;
 }
 
+/* Phones: tables that stay tables get tighter cells, and fields in them fit
+   their column. */
+@media (max-width: 800px) {
+  .data-table:not(.cards) th,
+  .data-table:not(.cards) td {
+    padding: 0.5rem 0.4rem;
+  }
+
+  .data-table:not(.cards) td input:not([type="checkbox"], [type="radio"]) {
+    width: 100%;
+    min-width: 4.5rem;
+  }
+}
+
 /* A table that may be wider than a phone scrolls inside this, not the page. */
 .table-scroll {
   overflow-x: auto;
@@ -1424,6 +1438,8 @@ body {
   padding: 4vh 1rem;
   z-index: 100;
   overflow-y: auto;
+  /* Scrolling a long dialog doesn't scroll the page behind it. */
+  overscroll-behavior: contain;
 }
 
 .modal {
@@ -1435,6 +1451,16 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+@media (max-width: 800px) {
+  .modal-backdrop {
+    padding: calc(0.75rem + env(safe-area-inset-top)) 0.5rem calc(0.75rem + env(safe-area-inset-bottom));
+  }
+
+  .modal {
+    padding: 1rem;
+  }
 }
 
 .modal-header {
@@ -1688,6 +1714,9 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  /* A phone's visible height, not the one behind its browser bars. */
+  min-height: 100dvh;
+  padding: 1rem;
   background: var(--bg);
 }
 
@@ -1699,6 +1728,12 @@ body {
   width: 100%;
   max-width: 360px;
   text-align: center;
+}
+
+@media (max-width: 800px) {
+  .login-card {
+    padding: 1.75rem 1.25rem;
+  }
 }
 
 .login-card h1 {
@@ -1993,6 +2028,25 @@ body {
 .profile-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+/* Phones: more tabs than width, so the row scrolls sideways. The rule
+   under it is a shadow, the active tab's border drawn over it (a scrolling
+   box would clip the border's usual -2px overlap). */
+@media (max-width: 800px) {
+  .profile-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: none;
+    box-shadow: inset 0 -2px var(--border);
+  }
+
+  .profile-tab {
+    flex-shrink: 0;
+    margin-bottom: 0;
+    padding: 0.6rem 0.9rem;
+    white-space: nowrap;
+  }
 }
 
 /* Browse section filters */
