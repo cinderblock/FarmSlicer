@@ -49,9 +49,9 @@ multiple nozzles, to set a priority."
 - The priority is a per-printer setting, offered only on printers with two
   nozzles (`printers.nozzle_priority`: `''` = default, `support-right`,
   `support-left`, `slicer` = leave it to libslic3r as before).
-- Default: supports right, parts left. The user's sentence said "right"
-  twice; read as "support right, material left" (separating them is the
-  point of two nozzles). **To confirm with the user** (open question 1).
+- Default: supports right, parts left. Confirmed by the user (2026-10-16):
+  "on our printers, yes. others should be able to select their own
+  preferences" - which the per-printer setting already gives every farm.
 
 ## Plan / steps
 
@@ -133,14 +133,11 @@ multiple nozzles, to set a priority."
 
 ## Open questions for the user
 
-1. Default priority: supports on the **right** nozzle, parts on the
-   **left**? (The request said "right" for both.) Recommendation: yes;
-   it's a per-printer setting either way.
-2. Push `master` and pin the new image in the ops repo? (master also
+1. Push `master` and pin the new image in the ops repo? (master also
    carries another thread's phone-layout commits.) Until then production
    H2D multi-filament jobs keep the prime tower at x 15, which the right
    nozzle can't reach.
-3. When convenient: an H2D print with a filament loaded on one side only,
+2. When convenient: an H2D print with a filament loaded on one side only,
    to see the choice and the AMS mapping on hardware.
 
 ## Things not to do
