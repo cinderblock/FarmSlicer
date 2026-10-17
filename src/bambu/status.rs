@@ -128,11 +128,18 @@ pub fn summarize(
         .map(|units| units.iter().filter_map(|u| ams_unit(u, dual)).collect())
         .unwrap_or_default();
 
+    // External spools on dual-nozzle printers: one holder per nozzle, 255
+    // the main (right) one's, 254 the deputy's (left).
+    let external_nozzle = |t: &Value| match int(&t["id"]) {
+        Some(255) if dual => Some(2),
+        Some(254) if dual => Some(1),
+        _ => None,
+    };
     let mut external = Vec::new();
     if let Some(slots) = r["vir_slot"].as_array() {
-        external.extend(slots.iter().filter_map(|t| tray(t, None)));
+        external.extend(slots.iter().filter_map(|t| tray(t, None, external_nozzle(t))));
     } else if r["vt_tray"].is_object() {
-        external.extend(tray(&r["vt_tray"], None));
+        external.extend(tray(&r["vt_tray"], None, external_nozzle(&r["vt_tray"])));
     }
 
     let hms = r["hms"]
@@ -204,19 +211,20 @@ fn ams_nozzle(info: &str) -> Option<i64> {
 
 fn ams_unit(u: &Value, dual: bool) -> Option<AmsUnit> {
     let id = int(&u["id"])?;
+    let nozzle = if dual { u["info"].as_str().and_then(ams_nozzle) } else { None };
     let trays = u["tray"]
         .as_array()
-        .map(|ts| ts.iter().filter_map(|t| tray(t, Some(id))).collect())
+        .map(|ts| ts.iter().filter_map(|t| tray(t, Some(id), nozzle)).collect())
         .unwrap_or_default();
     Some(AmsUnit {
         id,
         humidity: int(&u["humidity"]),
-        nozzle: if dual { u["info"].as_str().and_then(ams_nozzle) } else { None },
+        nozzle,
         trays,
     })
 }
 
-fn tray(t: &Value, unit: Option<i64>) -> Option<Tray> {
+fn tray(t: &Value, unit: Option<i64>, nozzle: Option<i64>) -> Option<Tray> {
     let index = int(&t["id"])?;
     let slot = match unit {
         // AMS-HT units are numbered from 128 and hold one tray.
@@ -236,6 +244,7 @@ fn tray(t: &Value, unit: Option<i64>) -> Option<Tray> {
         remain: int(&t["remain"]).filter(|&r| r >= 0),
         nozzle_temp_min: int(&t["nozzle_temp_min"]),
         nozzle_temp_max: int(&t["nozzle_temp_max"]),
+        nozzle,
     })
 }
 
@@ -301,13 +310,20 @@ mod tests {
         assert_eq!(ams_nozzle("junk"), None);
         let report = json!({
             "device": {"extruder": {"info": [{"temp": 0}, {"temp": 0}]}},
-            "ams": {"ams": [{"id": "0", "info": "0103", "tray": []}, {"id": "1", "info": "0003", "tray": []}]}
+            "ams": {"ams": [{"id": "0", "info": "0103", "tray": [{"id": "0", "tray_type": "PLA"}]},
+                            {"id": "1", "info": "0003", "tray": []}]},
+            "vir_slot": [{"id": "254", "tray_type": "TPU"}, {"id": "255", "tray_type": "PETG"}]
         });
         let s = summarize(true, None, None, &report);
         assert_eq!(s.ams.iter().map(|u| u.nozzle).collect::<Vec<_>>(), vec![Some(1), Some(2)]);
+        // Trays feed their unit's nozzle; external spools their holder's.
+        assert_eq!(s.ams[0].trays[0].nozzle, Some(1));
+        assert_eq!(s.external.iter().map(|t| (t.slot, t.nozzle)).collect::<Vec<_>>(), vec![(254, Some(1)), (255, Some(2))]);
         // One nozzle: the field means nothing.
-        let single = json!({"nozzle_temper": 20, "ams": {"ams": [{"id": "0", "info": "0103", "tray": []}]}});
-        assert_eq!(summarize(true, None, None, &single).ams[0].nozzle, None);
+        let single = json!({"nozzle_temper": 20, "ams": {"ams": [{"id": "0", "info": "0103", "tray": [{"id": "0"}]}]},
+                            "vt_tray": {"id": "254", "tray_type": "TPU"}});
+        let s = summarize(true, None, None, &single);
+        assert_eq!((s.ams[0].nozzle, s.ams[0].trays[0].nozzle, s.external[0].nozzle), (None, None, None));
     }
 
     #[test]

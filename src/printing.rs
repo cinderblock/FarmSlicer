@@ -182,7 +182,7 @@ fn rgb(hex: &str) -> Option<(f64, f64, f64)> {
 }
 
 /// Perceptual-ish distance ("redmean").
-fn color_distance(a: &str, b: &str) -> f64 {
+pub(crate) fn color_distance(a: &str, b: &str) -> f64 {
     match (rgb(a), rgb(b)) {
         (Some((r1, g1, b1)), Some((r2, g2, b2))) => {
             let rm = (r1 + r2) / 2.0;
@@ -197,15 +197,9 @@ fn loaded_trays(status: &PrinterStatus) -> Vec<&Tray> {
     status.loaded_trays()
 }
 
-/// The nozzle a tray feeds, where the printer has two (its AMS unit's).
-fn tray_nozzle(status: &PrinterStatus, tray: &Tray) -> Option<i64> {
-    let unit = tray.unit?;
-    status.ams.iter().find(|u| u.id == unit).and_then(|u| u.nozzle)
-}
-
 /// Can `tray` feed filament `f`'s nozzle? Unknown either way counts as yes.
-fn same_nozzle(status: &PrinterStatus, f: &FilamentUse, tray: &Tray) -> bool {
-    match (f.nozzle, tray_nozzle(status, tray)) {
+fn same_nozzle(f: &FilamentUse, tray: &Tray) -> bool {
+    match (f.nozzle, tray.nozzle) {
         (Some(want), Some(have)) => want == have,
         _ => true,
     }
@@ -253,7 +247,7 @@ pub fn suggest_mapping(plate: &Plate, status: Option<&PrinterStatus>) -> Vec<i64
         // Same material, and on dual-nozzle printers an AMS that feeds the
         // nozzle the slicer gave the filament.
         let candidates = trays.iter().filter(|t| {
-            t.material.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(&f.material)) && same_nozzle(status, f, t)
+            t.material.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(&f.material)) && same_nozzle(f, t)
         });
         let best = candidates
             .map(|t| {
@@ -307,11 +301,11 @@ pub fn check_mapping(plate: &Plate, mapping: &[i64], status: Option<&PrinterStat
                     t.material.as_deref().unwrap_or("?")
                 ))
             }
-            Some(t) if status.is_some_and(|s| !same_nozzle(s, f, t)) => problems.push(format!(
+            Some(t) if !same_nozzle(f, t) => problems.push(format!(
                 "filament {} prints from the {} nozzle but slot {slot} feeds the {} one",
                 f.id,
                 nozzle_name(f.nozzle.unwrap_or(1)),
-                nozzle_name(status.and_then(|s| tray_nozzle(s, t)).unwrap_or(2))
+                nozzle_name(t.nozzle.unwrap_or(2))
             )),
             Some(_) => {}
         }
@@ -617,6 +611,7 @@ mod tests {
             remain: None,
             nozzle_temp_min: None,
             nozzle_temp_max: None,
+            nozzle: None,
         }
     }
 
@@ -673,9 +668,15 @@ mod tests {
     #[test]
     fn dual_nozzle_mapping_keeps_each_filament_on_its_nozzle() {
         // An H2D: AMS 0 feeds the left nozzle, AMS 1 the right one.
-        let mut s = status_with(vec![tray(0, "PLA", "#FF0000"), tray(1, "PLA-S", "#FFFFFF")]);
+        let on = |nozzle, t: Tray| Tray { nozzle: Some(nozzle), ..t };
+        let mut s = status_with(vec![on(1, tray(0, "PLA", "#FF0000")), on(1, tray(1, "PLA-S", "#FFFFFF"))]);
         s.ams[0].nozzle = Some(1);
-        s.ams.push(AmsUnit { id: 1, humidity: None, nozzle: Some(2), trays: vec![tray(4, "PLA", "#FF0000"), tray(5, "PLA-S", "#FFFFFF")] });
+        s.ams.push(AmsUnit {
+            id: 1,
+            humidity: None,
+            nozzle: Some(2),
+            trays: vec![on(2, tray(4, "PLA", "#FF0000")), on(2, tray(5, "PLA-S", "#FFFFFF"))],
+        });
         // The slicer put the part's PLA on the right nozzle, the support
         // interface on the left.
         let mut p = plate(vec![(1, "PLA", "#FF0000"), (2, "PLA-S", "#FFFFFF")]);

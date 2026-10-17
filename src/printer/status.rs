@@ -49,6 +49,10 @@ pub struct Tray {
     pub remain: Option<i64>,
     pub nozzle_temp_min: Option<i64>,
     pub nozzle_temp_max: Option<i64>,
+    /// Which nozzle the tray feeds on dual-nozzle printers, numbered like
+    /// the slicer's filament map: 1 left, 2 right (its AMS unit's; an
+    /// external spool's holder). `None` on single-nozzle printers.
+    pub nozzle: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
