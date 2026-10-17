@@ -26,6 +26,9 @@ pub struct Printer {
     pub area: String,
     /// The build plate installed (`curr_bed_type` names); "" = unknown.
     pub plate_type: String,
+    /// Dual-nozzle printers: which nozzle supports and parts prefer
+    /// (`nozzles::PRIORITY_VALUES`); "" = the default.
+    pub nozzle_priority: String,
 }
 
 /// A problem someone reported with a printer.
@@ -91,6 +94,9 @@ pub struct Job {
     pub proposed_json: Option<String>,
     /// The parts on the plate (`placement::PlateLayout`, JSON).
     pub plate_json: Option<String>,
+    /// Which nozzle each filament prints from and why, on dual-nozzle
+    /// printers (`nozzles::Plan`, JSON); None = the slicer chose.
+    pub nozzle_plan_json: Option<String>,
     /// How many source models the job has, and how many of them stayed in
     /// the user's browser.
     pub model_count: i64,
@@ -342,7 +348,7 @@ impl Db {
             .expect("failed to migrate printer protocols");
 
         // Migrations — add columns that may not exist in older databases
-        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code", "area", "plate_type"] {
+        for col in &["machine_profile", "nozzle_diameter", "serial_number", "access_code", "area", "plate_type", "nozzle_priority"] {
             if conn.prepare(&format!("SELECT {col} FROM printers LIMIT 0")).is_err() {
                 conn.execute_batch(
                     &format!("ALTER TABLE printers ADD COLUMN {col} TEXT NOT NULL DEFAULT '';")
@@ -634,7 +640,7 @@ impl Db {
         // What the job was made from (profiles, plate, printer: re-slicing
         // starts from it), what the Slice page proposed (the defaults-changed
         // report compares the two), and where each part sits on the plate.
-        for col in &["inputs_json", "proposed_json", "plate_json"] {
+        for col in &["inputs_json", "proposed_json", "plate_json", "nozzle_plan_json"] {
             if conn.prepare(&format!("SELECT {col} FROM jobs LIMIT 0")).is_err() {
                 conn.execute_batch(&format!("ALTER TABLE jobs ADD COLUMN {col} TEXT;")).ok();
             }
@@ -1060,7 +1066,7 @@ impl Db {
     pub fn list_printers(&self) -> Vec<Printer> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job, area, plate_type FROM printers ORDER BY name")
+            .prepare("SELECT id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, status, current_job, area, plate_type, nozzle_priority FROM printers ORDER BY name")
             .unwrap();
         stmt.query_map([], |row| {
             Ok(Printer {
@@ -1076,6 +1082,7 @@ impl Db {
                 current_job: row.get(9)?,
                 area: row.get(10)?,
                 plate_type: row.get(11)?,
+                nozzle_priority: row.get(12)?,
             })
         })
         .unwrap()
@@ -1094,12 +1101,13 @@ impl Db {
         access_code: &str,
         area: &str,
         plate_type: &str,
+        nozzle_priority: &str,
     ) -> Printer {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type],
+            "INSERT INTO printers (id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type, nozzle_priority) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type, nozzle_priority],
         )
         .unwrap();
         Printer {
@@ -1115,6 +1123,7 @@ impl Db {
             current_job: None,
             area: area.to_string(),
             plate_type: plate_type.to_string(),
+            nozzle_priority: nozzle_priority.to_string(),
         }
     }
 
@@ -1136,6 +1145,7 @@ impl Db {
         access_code: Option<&str>,
         area: Option<&str>,
         plate_type: Option<&str>,
+        nozzle_priority: Option<&str>,
     ) -> Option<Printer> {
         {
             let conn = self.conn.lock().unwrap();
@@ -1150,9 +1160,10 @@ impl Db {
                         serial_number = COALESCE(?7, serial_number),
                         access_code = COALESCE(?8, access_code),
                         area = COALESCE(?9, area),
-                        plate_type = COALESCE(?10, plate_type)
+                        plate_type = COALESCE(?10, plate_type),
+                        nozzle_priority = COALESCE(?11, nozzle_priority)
                      WHERE id = ?1",
-                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type],
+                    params![id, name, machine_profile, nozzle_diameter, protocol, address, serial_number, access_code, area, plate_type, nozzle_priority],
                 )
                 .unwrap();
             if n == 0 {
@@ -1184,7 +1195,7 @@ impl Db {
                 j.created_at, j.updated_at,
                 j.user_id, u.username, j.group_id, g.name, j.stored_bytes,
                 j.package_path, j.package_json, j.placement_json,
-                j.inputs_json, j.proposed_json, j.plate_json,
+                j.inputs_json, j.proposed_json, j.plate_json, j.nozzle_plan_json,
                 (SELECT COUNT(*) FROM job_models m WHERE m.job_id = j.id),
                 (SELECT COUNT(*) FROM job_models m WHERE m.job_id = j.id AND m.path = '')
          FROM jobs j
@@ -1224,8 +1235,9 @@ impl Db {
             inputs_json: row.get(27)?,
             proposed_json: row.get(28)?,
             plate_json: row.get(29)?,
-            model_count: row.get(30)?,
-            local_models: row.get(31)?,
+            nozzle_plan_json: row.get(30)?,
+            model_count: row.get(31)?,
+            local_models: row.get(32)?,
         })
     }
 
@@ -1371,6 +1383,11 @@ impl Db {
             params![id, inputs, proposed, plate],
         )
         .ok();
+    }
+
+    pub fn set_job_nozzle_plan(&self, id: &str, plan: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE jobs SET nozzle_plan_json = ?2 WHERE id = ?1", params![id, plan]).ok();
     }
 
     /// Prints of the job that still need its package: waiting for approval

@@ -30,7 +30,9 @@ fail=0
 for t in "${tests[@]}"; do
   run="$(mktemp -d)"
   # A test can ask for extra server environment with `// e2e-env: K=V ...`.
+  # `{ROOT}` in a value stands for the repository root.
   read -r -a extra_env <<<"$(sed -n 's|^// e2e-env: ||p' "$t")"
+  extra_env=("${extra_env[@]//\{ROOT\}/$ROOT}")
   (cd "$run" && exec env HOST=127.0.0.1 PORT="$PORT" FARMSLICER_ORIGINS="http://localhost:$PORT" "${extra_env[@]}" "$BIN") \
     >"$run/server.log" 2>&1 &
   pid=$!

@@ -1,0 +1,12 @@
+{
+ "type": "filament",
+ "name": "Bambu PET-CF @BBL H2D",
+ "instantiation": "true",
+ "filament_id": "GFT01",
+ "filament_type": [
+  "PET-CF"
+ ],
+ "filament_printable": [
+  "1"
+ ]
+}

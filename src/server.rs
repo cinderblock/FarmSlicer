@@ -21,6 +21,7 @@ use crate::discovery;
 use crate::groups::{Tree, Viewer};
 use crate::groups_api;
 use crate::join_api;
+use crate::nozzles;
 use crate::overlay;
 use crate::placement::{Placement, PlateLayout};
 use crate::printer::PrinterHub;
@@ -113,6 +114,7 @@ async fn list_machine_models(State(state): State<Arc<AppState>>) -> Json<Value> 
                 "nozzle_diameters": m.nozzle_diameters,
                 "variants": m.variants,
                 "model_id": m.model_id,
+                "nozzles": m.nozzles,
             })
         })
         .collect();
@@ -510,6 +512,7 @@ async fn get_job(
     v["models"] = json!(models);
     v["inputs"] = job_inputs(&job).map_or(Value::Null, |i| json!(i));
     v["plate"] = json!(job_plate(&job));
+    v["nozzle_plan"] = job.nozzle_plan_json.as_deref().and_then(|p| serde_json::from_str(p).ok()).unwrap_or(Value::Null);
     Ok(Json(v))
 }
 
@@ -890,23 +893,12 @@ async fn create_job(
         return Err(bad(&format!("unknown build plate {:?}", inputs.bed_type)));
     }
 
-    let config_json = match inputs.filaments.first() {
+    let (config_json, nozzle_plan) = match inputs.filaments.first() {
         Some(_) if !inputs.machine.is_empty() && !inputs.process.is_empty() => {
-            let filaments: Vec<&str> = inputs.filaments.iter().map(String::as_str).collect();
-            let config_str = state
-                .profile_store
-                .resolve_config(&inputs.machine, &inputs.process, &filaments)
-                .map_err(|e| bad(&format!("Profile error: {e}")))?;
-            let mut config: serde_json::Map<String, Value> = serde_json::from_str(&config_str)
-                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            // Per-job overrides on top of the resolved profiles.
-            config.extend(overrides);
-            if !inputs.bed_type.is_empty() {
-                config.insert("curr_bed_type".into(), json!(inputs.bed_type));
-            }
-            serde_json::to_string(&Value::Object(config)).unwrap()
+            let (config, plan) = job_config(&state, &inputs, overrides).map_err(|e| bad(&e))?;
+            (serde_json::to_string(&Value::Object(config)).unwrap(), plan)
         }
-        _ => "{}".to_string(),
+        _ => ("{}".to_string(), None),
     };
 
     let overrides_json = (!overrides_str.is_empty()).then_some(overrides_str);
@@ -934,6 +926,9 @@ async fn create_job(
         proposed.as_deref(),
         Some(&plate.to_json()),
     );
+    if let Some(plan) = &nozzle_plan {
+        state.db.set_job_nozzle_plan(&job.id, &serde_json::to_string(plan).unwrap());
+    }
     uploaded.keep = true;
     let job_id = job.id.clone();
 
@@ -954,6 +949,122 @@ async fn create_job(
     });
 
     Ok((StatusCode::CREATED, Json(json!(job))))
+}
+
+/// The config a job slices with: its profiles resolved, the overrides on
+/// top, its build plate, and on dual-nozzle printers each filament's
+/// nozzle (src/nozzles.rs; unless the overrides name a filament map).
+fn job_config(
+    state: &AppState,
+    inputs: &JobInputs,
+    overrides: serde_json::Map<String, Value>,
+) -> Result<(serde_json::Map<String, Value>, Option<nozzles::Plan>), String> {
+    let filaments: Vec<&str> = inputs.filaments.iter().map(String::as_str).collect();
+    let config_str = state
+        .profile_store
+        .resolve_config(&inputs.machine, &inputs.process, &filaments)
+        .map_err(|e| format!("Profile error: {e}"))?;
+    let mut config: serde_json::Map<String, Value> = serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
+    let map_given = overrides.contains_key("filament_map") || overrides.contains_key("filament_map_mode");
+    config.extend(overrides);
+    if !inputs.bed_type.is_empty() {
+        config.insert("curr_bed_type".into(), json!(inputs.bed_type));
+    }
+    let plan = if map_given { None } else { plan_nozzles(state, inputs, &config) };
+    if let Some(plan) = &plan {
+        config.insert("filament_map_mode".into(), json!("Manual"));
+        config.insert("filament_map".into(), json!(plan.map().iter().map(i64::to_string).collect::<Vec<_>>()));
+    }
+    Ok((config, plan))
+}
+
+/// Each filament's nozzle on a dual-nozzle printer (src/nozzles.rs), from
+/// the printers the job may go to: the one picked, else every printer
+/// whose model and nozzle make the job's machine profile. Their priority
+/// when they agree on one, else the default.
+fn plan_nozzles(state: &AppState, inputs: &JobInputs, config: &serde_json::Map<String, Value>) -> Option<nozzles::Plan> {
+    if !state.profile_store.maps_filaments_to_nozzles(&inputs.machine) {
+        return None;
+    }
+    let printers = state.db.list_printers();
+    let targets: Vec<&crate::db::Printer> = match inputs.printer_id.as_deref() {
+        Some(id) => printers.iter().filter(|p| p.id == id).collect(),
+        None => printers
+            .iter()
+            .filter(|p| {
+                state.profile_store.resolve_machine_variant(&p.machine_profile, &p.nozzle_diameter).as_deref()
+                    == Some(inputs.machine.as_str())
+            })
+            .collect(),
+    };
+    let mut priorities = targets.iter().filter_map(|p| nozzles::Priority::parse(&p.nozzle_priority));
+    let priority = match priorities.next() {
+        Some(first) if priorities.all(|p| p == first) => first,
+        _ => nozzles::Priority::SupportRight,
+    };
+    let statuses: Vec<_> = targets.iter().filter_map(|p| state.printers.status(&p.id)).collect();
+
+    // Supports: 0 = the part's filament, N = filament N (parts print with 1).
+    let filament_at = |key: &str| -> i64 {
+        match config.get(key) {
+            Some(Value::String(s)) => s.trim().parse().unwrap_or(0),
+            Some(v) => v.as_i64().unwrap_or(0),
+            None => 0,
+        }
+    };
+    let (base, interface) = (filament_at("support_filament"), filament_at("support_interface_filament"));
+    let colours = config.get("filament_colour").and_then(Value::as_array);
+    let filaments: Vec<nozzles::Filament> = inputs
+        .filaments
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let info = state.profile_store.filament_info(name);
+            let n = i as i64 + 1;
+            nozzles::Filament {
+                material: info.as_ref().map(|f| f.tray_material.clone()).unwrap_or_default(),
+                colour: colours.and_then(|c| c.get(i)).and_then(Value::as_str).map(String::from),
+                support: n != 1 && (n == base || n == interface || info.as_ref().is_some_and(|f| f.support)),
+                printable: info.as_ref().map_or(3, |f| f.printable),
+            }
+        })
+        .collect();
+    nozzles::plan(&filaments, &statuses, priority)
+}
+
+/// What the Slice page shows before slicing: the nozzle each filament
+/// would get (`plan`: null where the slicer chooses).
+#[derive(Deserialize)]
+struct NozzlePlanQuery {
+    machine: String,
+    process: String,
+    filaments: Vec<String>,
+    #[serde(default)]
+    overrides: serde_json::Map<String, Value>,
+    #[serde(default)]
+    printer_id: Option<String>,
+}
+
+async fn nozzle_plan(
+    State(state): State<Arc<AppState>>,
+    Json(q): Json<NozzlePlanQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let bad = |e: &str| api_err(StatusCode::BAD_REQUEST, e);
+    if q.filaments.is_empty() || q.filaments.len() > MAX_FILAMENTS {
+        return Err(bad(&format!("1 to {MAX_FILAMENTS} filaments")));
+    }
+    if !state.profile_store.maps_filaments_to_nozzles(&q.machine) {
+        return Ok(Json(json!({"plan": null})));
+    }
+    let inputs = JobInputs {
+        machine: q.machine,
+        process: q.process,
+        filaments: q.filaments,
+        printer_id: q.printer_id.filter(|id| !id.is_empty()),
+        ..Default::default()
+    };
+    let (_, plan) = job_config(&state, &inputs, q.overrides).map_err(|e| bad(&e))?;
+    Ok(Json(json!({"plan": plan})))
 }
 
 fn gcode_output_path(state: &AppState, job_id: &str) -> String {
@@ -1504,6 +1615,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/profiles/processes", get(list_processes))
         .route("/api/profiles/filaments", get(list_filaments))
         .route("/api/profiles/resolve", get(resolve_profiles))
+        .route("/api/nozzle-plan", post(nozzle_plan))
         .route("/api/profiles/resolve-single", get(resolve_single_profile))
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())

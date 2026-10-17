@@ -33,6 +33,18 @@ can run in the user's browser.
   supports). The view paints what hangs over nothing (amber where supports
   will hold it, red where it would print in the air) and says how much
   there is, before slicing.
+- **Two nozzles (H2D):** FarmSlicer picks each filament's nozzle instead of
+  leaving it to the slicer. First what a nozzle can print at all (the H2D
+  prints PET-CF from the left nozzle only), then what's loaded: a filament found on only
+  one side's AMS (on the printer picked, or on more of the printers the job
+  may go to) prints from that side. The rest follow the printer's **nozzle
+  priority** (Printers page): supports on the right and parts on the left
+  by default, or the other way round, or "let the slicer choose" (least
+  purging, as before). Parts and supports are kept on different nozzles.
+  The Slice page shows the choice and why before slicing, the job page what
+  the job got. If a part sits where its nozzle can't reach (each nozzle
+  misses a strip of the bed), slicing moves that filament to the other
+  nozzle, and refuses the plate when neither can print it.
 - **Job history:** every job keeps its source models, profiles, plate and
   overrides. **Re-slice** opens a job's parts and settings on the Slice page
   to change and slice as a new job. A browser slice can keep its models on
@@ -357,7 +369,8 @@ summary prints the `pin.json` to paste there.
 | `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue; a machine's filaments say what each is (`material`, `support`, `soluble`, `tray_material` as printers name it, `price_per_kg`) |
 | `GET /api/profiles/resolve?machine=&process=&filament=` | merged config JSON (what the engines slice with) |
 | `GET /api/profiles/resolve-single?name=` | one profile with inheritance resolved |
-| `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set` |
+| `POST /api/nozzle-plan` | `{machine, process, filaments, overrides, printer_id}` → `{plan}`: on dual-nozzle printers the nozzle each filament would get and why (`null` elsewhere, or when the printer leaves it to the slicer) |
+| `GET/POST /api/printers`, `PATCH/DELETE /api/printers/{id}` | printers (changes: admins). The access code is write-only: responses carry `access_code_set`. `nozzle_priority` (dual-nozzle printers): `support-right` (default, also `""`), `support-left`, `slicer` |
 | `GET /api/printers/status`, `GET /api/printers/events` | live status of connected printers; the same as server-sent `status` events |
 | `GET /api/printer-protocols` | the protocols FarmSlicer speaks, what each can do (`capabilities`) and its connection fields |
 | `GET /api/printers/{id}/report` | the driver's raw view of the printer: Bambu's merged MQTT report, Klipper's objects, ... (admins) |

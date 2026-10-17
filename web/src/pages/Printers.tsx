@@ -2,13 +2,15 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
 import { localDateTime, useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
-import { BED_TYPES, useActivePrints, usePrinterStatuses, type Printer, type Protocol } from "../printers";
+import { BED_TYPES, NOZZLE_PRIORITIES, useActivePrints, usePrinterStatuses, type Printer, type Protocol } from "../printers";
 
 interface MachineModel {
   name: string;
   vendor: string;
   vendor_display: string;
   nozzle_diameters: string[];
+  /** How many nozzles (2 on the H2D). */
+  nozzles: number;
 }
 
 /** A printer seen on the LAN (src/discovery/). */
@@ -61,6 +63,7 @@ interface Draft {
   accessCodeSet: boolean;
   area: string;
   plateType: string;
+  nozzlePriority: string;
 }
 
 const EMPTY: Draft = {
@@ -76,6 +79,7 @@ const EMPTY: Draft = {
   accessCodeSet: false,
   area: "",
   plateType: "Textured PEI Plate",
+  nozzlePriority: "",
 };
 
 function defaultNozzle(m: MachineModel | undefined): string {
@@ -161,6 +165,7 @@ export default function PrintersPage() {
       accessCodeSet: p.access_code_set,
       area: p.area,
       plateType: p.plate_type,
+      nozzlePriority: p.nozzle_priority,
     });
   };
 
@@ -175,6 +180,7 @@ export default function PrintersPage() {
       serial_number: draft.serial,
       area: draft.area,
       plate_type: draft.plateType,
+      nozzle_priority: draft.nozzlePriority,
     };
     // Write-only: an empty field on edit keeps the stored code.
     if (draft.accessCode || !draft.id) body.access_code = draft.accessCode;
@@ -359,6 +365,29 @@ export default function PrintersPage() {
               </select>
               <span className="hint">What's on the printer now; slicing defaults to it, sending checks it.</span>
             </label>
+
+            {(() => {
+              const m = models.find((x) => x.name === draft.model);
+              return m && m.vendor === "BBL" && m.nozzles === 2 ? (
+                <label>
+                  Nozzle priority
+                  <select
+                    value={draft.nozzlePriority || "support-right"}
+                    onChange={(e) => set({ nozzlePriority: e.target.value })}
+                  >
+                    {NOZZLE_PRIORITIES.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="hint">
+                    Slicing puts a filament loaded on only one side's AMS on that side's nozzle first; this decides
+                    the rest.
+                  </span>
+                </label>
+              ) : null;
+            })()}
 
             <label>
               Area

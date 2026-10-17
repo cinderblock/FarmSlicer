@@ -7,8 +7,9 @@ import { formatDuration, localDateTime, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
 import GcodeCheckDetails, { GcodeChip } from "../components/GcodeCheck";
 import GcodePreview from "../components/preview/GcodePreview";
+import NozzlePlanView from "../components/NozzlePlanView";
 import type { BedShape } from "../components/ModelViewer";
-import { formatCost, packageVerdict, type Plate, type Prices } from "../printers";
+import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
 
 interface Job {
@@ -35,6 +36,8 @@ interface Job {
   model_count: number;
   /** What the job was made from (profiles by name), when known. */
   inputs: { machine: string; process: string; filaments: string[] } | null;
+  /** Dual-nozzle printers: which nozzle each filament was given, and why; null = the slicer chose. */
+  nozzle_plan: NozzlePlan | null;
 }
 
 const SOURCES: Record<Job["source"], string> = {
@@ -210,6 +213,10 @@ export default function JobPage() {
           </div>
         )}
       </dl>
+
+      {job.nozzle_plan && job.inputs && (
+        <NozzlePlanView plan={job.nozzle_plan} filaments={job.inputs.filaments} title="Nozzles (when sliced)" />
+      )}
 
       {support.length > 0 && (
         <div className="job-alert job-alert-support" role="alert">

@@ -1,0 +1,11 @@
+{
+ "type": "machine",
+ "name": "Bambu Lab H2D 0.4 nozzle",
+ "instantiation": "true",
+ "printer_model": "Bambu Lab H2D",
+ "printer_variant": "0.4",
+ "nozzle_diameter": [
+  "0.4",
+  "0.4"
+ ]
+}

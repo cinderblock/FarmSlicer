@@ -15,6 +15,7 @@ mod groups_api;
 mod incidents;
 mod join_api;
 mod moonraker;
+mod nozzles;
 mod octoprint;
 mod overlay;
 mod package;

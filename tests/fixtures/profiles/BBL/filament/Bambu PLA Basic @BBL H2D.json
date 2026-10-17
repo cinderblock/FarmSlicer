@@ -1,0 +1,9 @@
+{
+ "type": "filament",
+ "name": "Bambu PLA Basic @BBL H2D",
+ "instantiation": "true",
+ "filament_id": "GFA00",
+ "filament_type": [
+  "PLA"
+ ]
+}

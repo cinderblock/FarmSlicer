@@ -986,6 +986,34 @@ body {
   color: var(--warning);
 }
 
+/* Dual-nozzle printers: which nozzle prints each filament, and why. */
+.nozzle-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.75rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  font-size: 0.85rem;
+}
+
+.nozzle-plan-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.nozzle-plan-row {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.nozzle-side {
+  font-weight: 600;
+}
+
 /* Slicing a job again: where the page's settings came from. */
 .reslice-note {
   padding: 0.5rem 0.65rem;

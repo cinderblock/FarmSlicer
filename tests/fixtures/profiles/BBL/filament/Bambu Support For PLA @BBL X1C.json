@@ -1,0 +1,12 @@
+{
+ "type": "filament",
+ "name": "Bambu Support For PLA @BBL X1C",
+ "instantiation": "true",
+ "filament_id": "GFS02",
+ "filament_type": [
+  "PLA"
+ ],
+ "filament_is_support": [
+  "1"
+ ]
+}

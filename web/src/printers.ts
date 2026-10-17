@@ -56,7 +56,27 @@ export interface Printer {
   area: string;
   /** Installed build plate (libslic3r `curr_bed_type` name); "" = unknown. */
   plate_type: string;
+  /** Dual-nozzle printers: where supports and parts go (src/nozzles.rs); "" = the default. */
+  nozzle_priority: string;
 }
+
+/** `printers.nozzle_priority` choices ("" = the first). */
+export const NOZZLE_PRIORITIES: [string, string][] = [
+  ["support-right", "Supports on the right nozzle, parts on the left"],
+  ["support-left", "Supports on the left nozzle, parts on the right"],
+  ["slicer", "Let the slicer choose (least purging; ignores the AMS)"],
+];
+
+/** Which nozzle each filament prints from on a dual-nozzle printer (src/nozzles.rs `Plan`). */
+export interface NozzlePlan {
+  priority: string;
+  /** How many printers' AMS were consulted. */
+  printers: number;
+  /** Filament 1, 2, ... */
+  filaments: { nozzle: number; basis: "printable" | "loaded" | "priority"; why: string }[];
+}
+
+export const nozzleSide = (n: number) => (n === 1 ? "Left" : "Right");
 
 /** Build plates: libslic3r name → what people call it. */
 export const BED_TYPES: [string, string][] = [
@@ -109,6 +129,8 @@ export interface Tray {
   remain: number | null;
   nozzle_temp_min: number | null;
   nozzle_temp_max: number | null;
+  /** Dual-nozzle printers: the nozzle it feeds (1 left, 2 right). */
+  nozzle: number | null;
 }
 
 export interface AmsUnit {

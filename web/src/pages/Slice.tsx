@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router";
 import ModelViewer, { type BedShape, type PlateState, type SupportCheck } from "../components/ModelViewer";
 import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
+import NozzlePlanView from "../components/NozzlePlanView";
 import SliceResult from "../components/SliceResult";
 import OverridesPanel from "../components/OverridesPanel";
 import {
@@ -13,7 +14,7 @@ import {
 } from "../engine/client";
 import type { EngineManifest, PlateLayout, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
-import { BED_TYPES, loadedTrays, type PrinterStatus } from "../printers";
+import { BED_TYPES, loadedTrays, type NozzlePlan, type PrinterStatus } from "../printers";
 import {
   defaultSupportMaterials,
   materialsFromJob,
@@ -94,7 +95,10 @@ interface Printer {
 
 interface MachineModel {
   name: string;
+  vendor: string;
   vendor_display: string;
+  /** How many nozzles (2 on the H2D). */
+  nozzles: number;
   nozzle_diameters: string[];
   /** Nozzle size → the machine profile slicing uses for it. */
   variants: Record<string, string>;
@@ -505,6 +509,52 @@ export default function SlicePage() {
   const resolvedMachine = selectedPrinter
     ? printerProfile(selectedPrinter, machineModels)
     : (modelInfo?.variants[nozzle] ?? "");
+
+  // Dual-nozzle printers: the nozzle each filament will print from, as the
+  // server will decide it when the job is created (what the printers have
+  // loaded, then their priority). Asked again when the inputs change and
+  // every half minute (the AMS changes under us).
+  const dualNozzle = modelInfo?.vendor === "BBL" && modelInfo.nozzles === 2;
+  const nozzlePlanBody = useMemo(
+    () =>
+      dualNozzle && resolvedMachine && process && filament
+        ? JSON.stringify({
+            machine: resolvedMachine,
+            process,
+            filaments: supportPlan.filaments,
+            overrides: jobOverrides,
+            printer_id: printerId || null,
+          })
+        : null,
+    [dualNozzle, resolvedMachine, process, filament, supportPlan, jobOverrides, printerId],
+  );
+  // The answer for the inputs it was asked with: shown only while they hold.
+  const [nozzleAnswer, setNozzleAnswer] = useState<{ body: string; plan: NozzlePlan | null } | null>(null);
+  const nozzlePlan = nozzleAnswer && nozzleAnswer.body === nozzlePlanBody ? nozzleAnswer.plan : null;
+  const [nozzleTick, setNozzleTick] = useState(0);
+  useEffect(() => {
+    if (!nozzlePlanBody) return;
+    const timer = setInterval(() => setNozzleTick((t) => t + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [nozzlePlanBody]);
+  useEffect(() => {
+    if (!nozzlePlanBody) return;
+    let stale = false;
+    const timer = setTimeout(() => {
+      fetch("/api/nozzle-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: nozzlePlanBody })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { plan: NozzlePlan | null } | null) => {
+          if (!stale) setNozzleAnswer({ body: nozzlePlanBody, plan: d?.plan ?? null });
+        })
+        .catch(() => {
+          if (!stale) setNozzleAnswer({ body: nozzlePlanBody, plan: null });
+        });
+    }, 300);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [nozzlePlanBody, nozzleTick]);
 
   // Material types available for the current filament list
   const materialTypes = useMemo(() => {
@@ -1077,6 +1127,8 @@ export default function SlicePage() {
             check={supportCheck}
             disabled={!resolvedMachine || slicing}
           />
+
+          {nozzlePlan && <NozzlePlanView plan={nozzlePlan} filaments={supportPlan.filaments} />}
 
           <OverridesPanel
             resolvedConfig={resolvedConfig}

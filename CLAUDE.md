@@ -109,6 +109,14 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   printers' name ("PLA-S")
 - `src/reports_api.rs` — `GET /api/reports/defaults` (admins): proposed vs
   made-with per setting (`web/src/pages/Reports.tsx`)
+- `src/nozzles.rs` — each filament's nozzle on dual-nozzle printers (pure,
+  unit-tested): `filament_printable`, then what the target printers have
+  loaded per side (`Tray.nozzle`), then the printer's `nozzle_priority`,
+  keeping parts and supports apart. `server::job_config` builds every job's
+  config (profiles, overrides, plate type, then the plan as a Manual
+  `filament_map` unless the overrides name one; `jobs.nozzle_plan_json`);
+  `POST /api/nozzle-plan` is the Slice page's preview of the same
+  (`components/NozzlePlanView.tsx`). Plan: `plans/nozzle-choice.md`
 - `src/progress.rs` — process-wide progress sink + cancellation flags (libslic3r
   calls back without user data, so jobs are looked up by id)
 - `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, &models, config_json,
@@ -234,7 +242,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   objects, rotated, centred on its offset and dropped onto the bed by
   itself) → a `BuildVolume` check naming the part that doesn't fit →
   Print::apply/validate/process/export_gcode → stats, the package (with
-  libslic3r's filament-to-nozzle map). The `Print` lives in zeroed memory
+  libslic3r's filament-to-nozzle map). On multi-nozzle printers the prime
+  tower goes where the desktop app puts it (x 165, y 250, then inside the
+  area every nozzle reaches: `place_wipe_tower`, `fit_wipe_tower`). With a Manual map, a filament the
+  export's G-code check says its nozzle can't reach moves to the other
+  nozzle and the plate is sliced again (layers kept); G-code a nozzle can't
+  reach is refused (`check_nozzle_reach`, any mode). The `Print` lives in zeroed memory
   (`ZeroedPrint`; `issues/libslic3r-fake-wipe-tower.md`). Shared by the
   cxx bridge and the wasm bridge; no Rust or Emscripten includes allowed.
 - `src/placement.rs` — `Placement` (a row-major rotation applied to the
@@ -306,7 +319,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `tests/` — API end-to-end tests (`run-e2e.sh`, `lib.mjs`, `*-e2e.mjs`:
   one per printer protocol, plus job history (models, plates, delete, the
   defaults report), G-code preview, feedback, placement, ...). `run-e2e.sh` prints no summary of its own:
-  check its exit code, not the last suite's "ALL PASSED"
+  check its exit code, not the last suite's "ALL PASSED". `{ROOT}` in an
+  `e2e-env` value is the repo root; `tests/fixtures/profiles/` is a tiny
+  profile tree (H2D, X1C) for tests that need profiles
+  (`ORCA_RESOURCES_DIR={ROOT}/tests/fixtures`)
 - `plans/` — living plans
 
 ## Architecture
@@ -402,8 +418,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   stand-in prime tower when a multi-filament config prints one filament;
   worked around in slice_core (`ZeroedPrint`).
 - Dual-nozzle (H2D) AMS mapping by nozzle is unverified on hardware (the
-  `info` bits follow Bambu's own device code); see
-  `issues/untested-printers.md`.
+  `info` bits follow Bambu's own device code), and so is the nozzle choice
+  (`src/nozzles.rs`) and the external spool holders' sides (`vir_slot` 255
+  right, 254 left); see `issues/untested-printers.md`.
 - A support base in another filament than the part's changes filament on
   every layer with supports (a small PLA-CF part: 43 min with its own base,
   3 h with a PLA one on an X1C); the Slice page defaults to the part's.

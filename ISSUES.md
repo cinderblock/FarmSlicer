@@ -44,6 +44,18 @@ full (non-guest) user can rename, rewrite or delete profiles someone else
 made, including the farm's tuned ones. Why it matters: the maintainer keeps
 the farm's tuned profiles there (plans/printer-control.md).
 
+## The Slice page doesn't show the prime tower
+
+Multi-filament jobs print a prime tower; the Slice page's 3D view
+(`web/src/components/viewer/`) doesn't draw it, and Arrange / Fill /
+Duplicate don't keep clear of it. On dual-nozzle printers slice_core now
+puts it at x 165, y 250 (back, middle; `place_wipe_tower` in
+`cxx/slice_core.cpp`), elsewhere at the profile's x 15, y 220. A part
+placed there collides with it: libslic3r only warns ("conflict" in the
+job's warnings). Why it matters: Fill plate on an H2D with supports in a
+support material can put copies where the tower goes. The tower's size
+is only known after slicing (`Print::first_layer_wipe_tower_corners`).
+
 ## Models kept in a browser are never removed from it
 
 "Keep the model on this device only" stores browser-sliced models in

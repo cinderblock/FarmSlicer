@@ -44,6 +44,8 @@ pub struct MachineModel {
     /// The vendor's id for the model, which sliced files and printers report
     /// (Bambu: "BL-P001" = X1 Carbon, "C12" = P1S, "N1" = A1 mini, ...).
     pub model_id: Option<String>,
+    /// How many nozzles (extruders) it has: 2 on the H2D.
+    pub nozzles: usize,
 }
 
 pub struct ProfileStore {
@@ -74,6 +76,9 @@ pub struct FilamentInfo {
     /// for support materials, as libslic3r's `get_filament_type` and the
     /// AMS report them (and `filament_prices` lists them).
     pub tray_material: String,
+    /// Which nozzles of a dual-nozzle printer may print it
+    /// (`filament_printable`): bit 0 the left, bit 1 the right; 3 = either.
+    pub printable: u8,
 }
 
 impl ProfileStore {
@@ -198,6 +203,7 @@ impl ProfileStore {
                     vendor,
                     vendor_display,
                     nozzle_diameters: nozzles,
+                    nozzles: 1,
                 }
             })
             .collect();
@@ -215,7 +221,7 @@ impl ProfileStore {
             filaments.len()
         );
 
-        Self {
+        let mut store = Self {
             profiles_dir: profiles_dir.to_path_buf(),
             machines,
             processes,
@@ -223,7 +229,24 @@ impl ProfileStore {
             by_name,
             machine_models,
             filament_info: Mutex::new(HashMap::new()),
+        };
+        // Nozzle count per model: one entry per extruder in `nozzle_diameter`
+        // (every variant of a model has the same count).
+        let counts: Vec<usize> = store
+            .machine_models
+            .iter()
+            .map(|m| {
+                let config = m.variants.values().next().and_then(|v| store.resolve_inheritance(v).ok());
+                match config.as_ref().and_then(|c| c.get("nozzle_diameter")) {
+                    Some(Value::Array(a)) => a.len().max(1),
+                    _ => 1,
+                }
+            })
+            .collect();
+        for (m, n) in store.machine_models.iter_mut().zip(counts) {
+            m.nozzles = n;
         }
+        store
     }
 
     /// What a filament is (resolved once per name, then remembered).
@@ -249,7 +272,8 @@ impl ProfileStore {
         } else {
             material.clone()
         };
-        let info = FilamentInfo { material, support, soluble, tray_material };
+        let printable = first("filament_printable").parse().ok().filter(|&p: &u8| p & 3 != 0).unwrap_or(3);
+        let info = FilamentInfo { material, support, soluble, tray_material, printable };
         self.filament_info.lock().unwrap().insert(name.to_string(), info.clone());
         Some(info)
     }
@@ -284,6 +308,20 @@ impl ProfileStore {
 
     pub fn instantiable_machines(&self) -> Vec<&ProfileEntry> {
         self.machines.iter().filter(|m| m.instantiable).collect()
+    }
+
+    /// The model an instantiable machine profile belongs to.
+    pub fn model_of_machine(&self, machine: &str) -> Option<&MachineModel> {
+        let model = self.machines.iter().find(|m| m.name == machine)?.printer_model.as_deref()?;
+        self.machine_model(model)
+    }
+
+    /// Does slicing for `machine` decide which of two nozzles prints each
+    /// filament (libslic3r's `filament_map`, Bambu's dual-nozzle printers)?
+    /// Other vendors' multi-extruder printers print filament N with
+    /// extruder N.
+    pub fn maps_filaments_to_nozzles(&self, machine: &str) -> bool {
+        self.model_of_machine(machine).is_some_and(|m| m.vendor == "BBL" && m.nozzles == 2)
     }
 
     /// Resolve a base model name + nozzle variant into the full instantiable profile name.
@@ -830,6 +868,37 @@ mod tests {
         assert_eq!(two["filament_colour"], json!(["#808080", "#FFFFFF"]));
         assert!(one.get("filament_colour").is_none());
         assert!(store.resolve_config("Acme H2 0.4 nozzle", "0.20mm @Acme H2", &[]).is_err());
+    }
+
+    #[test]
+    fn nozzle_counts_and_printable_filaments() {
+        let root = std::env::temp_dir().join(format!("farmslicer-profiles-{}", uuid::Uuid::new_v4()));
+        let machine = |name: &str, model: &str, nozzles: Value| {
+            json!({"type": "machine", "name": name, "instantiation": "true", "printer_model": model,
+                   "printer_variant": "0.4", "nozzle_diameter": nozzles})
+        };
+        write(&root, "BBL/machine/Bambu Lab H9 0.4 nozzle.json", machine("Bambu Lab H9 0.4 nozzle", "Bambu Lab H9", json!(["0.4", "0.4"])));
+        write(&root, "BBL/machine/Bambu Lab X9 0.4 nozzle.json", machine("Bambu Lab X9 0.4 nozzle", "Bambu Lab X9", json!(["0.4"])));
+        write(&root, "Acme/machine/Acme IDEX 0.4 nozzle.json", machine("Acme IDEX 0.4 nozzle", "Acme IDEX", json!(["0.4", "0.4"])));
+        write(&root, "BBL/filament/Bambu PET-CF @BBL H9.json", json!({
+            "type": "filament", "name": "Bambu PET-CF @BBL H9", "instantiation": "true",
+            "filament_type": ["PET-CF"], "filament_printable": ["2"]
+        }));
+        write(&root, "BBL/filament/Bambu PLA @BBL H9.json", json!({
+            "type": "filament", "name": "Bambu PLA @BBL H9", "instantiation": "true", "filament_type": ["PLA"]
+        }));
+        let store = ProfileStore::load(&root);
+        assert_eq!(store.machine_model("Bambu Lab H9").map(|m| m.nozzles), Some(2));
+        assert_eq!(store.machine_model("Bambu Lab X9").map(|m| m.nozzles), Some(1));
+        assert!(store.maps_filaments_to_nozzles("Bambu Lab H9 0.4 nozzle"));
+        assert!(!store.maps_filaments_to_nozzles("Bambu Lab X9 0.4 nozzle"));
+        // Other vendors' dual-extruder printers print filament N with extruder N.
+        assert!(!store.maps_filaments_to_nozzles("Acme IDEX 0.4 nozzle"));
+        assert!(!store.maps_filaments_to_nozzles("No such printer"));
+        // Right nozzle only; unset = either.
+        assert_eq!(store.filament_info("Bambu PET-CF @BBL H9").map(|f| f.printable), Some(2));
+        assert_eq!(store.filament_info("Bambu PLA @BBL H9").map(|f| f.printable), Some(3));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
