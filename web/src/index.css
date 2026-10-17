@@ -2157,6 +2157,12 @@ body {
   font-weight: 600;
 }
 
+/* A card's own heading sits at the top of the card. */
+.page .card > h3,
+.page .printer-header h3 {
+  margin: 0;
+}
+
 .page h4 {
   margin: 1.25rem 0 0.5rem;
   font-weight: 500;
