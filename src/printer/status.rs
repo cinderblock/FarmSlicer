@@ -70,6 +70,8 @@ pub struct AmsUnit {
 pub struct HmsCode {
     pub attr: i64,
     pub code: i64,
+    /// What it means, in the printer maker's words, when known.
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
@@ -103,6 +105,8 @@ pub struct PrinterStatus {
     pub message: Option<String>,
     /// Bambu `print_error`, when non-zero.
     pub print_error: Option<i64>,
+    /// What `print_error` means, in the printer maker's words, when known.
+    pub print_error_message: Option<String>,
     /// Bambu HMS codes.
     pub hms: Vec<HmsCode>,
     pub nozzles: Vec<Temperature>,

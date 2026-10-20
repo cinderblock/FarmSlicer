@@ -1148,6 +1148,12 @@ body {
   color: inherit;
 }
 
+.printer-error-code {
+  font-size: 0.75rem;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
 .printer-job {
   display: flex;
   flex-direction: column;

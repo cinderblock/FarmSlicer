@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::status;
+use super::{hms, status};
 use crate::printer::tls;
 use crate::db;
 use crate::printer::hub::StatusSink;
@@ -234,11 +234,12 @@ fn pushall() -> Vec<u8> {
 
 impl Shared {
     fn update(&self, change: impl FnOnce(&mut State)) {
-        let summary = {
+        let mut summary = {
             let mut state = self.state.lock().unwrap();
             change(&mut state);
             status::summarize(state.online, state.error.clone(), state.updated_at.clone(), &state.report)
         };
+        hms::describe(&mut summary, &self.config.serial);
         self.sink.publish(summary);
     }
 

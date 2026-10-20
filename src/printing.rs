@@ -515,7 +515,13 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
             "failed",
             None,
             Some(match (status.print_error, &status.message) {
-                (Some(code), _) => format!("printer error {:04X}_{:04X}", (code >> 16) & 0xFFFF, code & 0xFFFF),
+                (Some(code), _) => {
+                    let code = format!("printer error {:04X}_{:04X}", (code >> 16) & 0xFFFF, code & 0xFFFF);
+                    match &status.print_error_message {
+                        Some(text) => format!("{code}: {text}"),
+                        None => code,
+                    }
+                }
                 (None, Some(message)) => format!("the printer reported the print as failed: {message}"),
                 (None, None) => "the printer reported the print as failed".to_string(),
             }),

@@ -193,6 +193,7 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
         job_file: filename.map(String::from),
         message,
         print_error: None,
+        print_error_message: None,
         hms: Vec::new(),
         nozzles: extruders.iter().filter_map(|(_, v)| temperature(v)).collect(),
         bed: o.get("heater_bed").and_then(temperature),

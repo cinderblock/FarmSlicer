@@ -219,14 +219,20 @@ export default function PrinterCard({
 
           {status.message && <p className="printer-error">{status.message}</p>}
           {status.print_error != null && (
-            <p className="printer-error">Print error {printErrorCode(status.print_error)}</p>
+            <p className="printer-error">
+              {status.print_error_message ?? "Print error"}{" "}
+              <span className="printer-error-code">{printErrorCode(status.print_error)}</span>
+            </p>
           )}
           {status.hms.map((h) => (
             <p key={`${h.attr}-${h.code}`} className="printer-error">
+              {h.message && <>{h.message} </>}
               <a
+                className="printer-error-code"
                 href={`https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/${hmsCode(h)}`}
                 target="_blank"
                 rel="noreferrer"
+                title="Bambu's help page for this code"
               >
                 HMS {hmsCode(h)}
               </a>

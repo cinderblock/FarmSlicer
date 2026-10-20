@@ -147,7 +147,7 @@ pub fn summarize(
         .map(|codes| {
             codes
                 .iter()
-                .filter_map(|h| Some(HmsCode { attr: int(&h["attr"])?, code: int(&h["code"])? }))
+                .filter_map(|h| Some(HmsCode { attr: int(&h["attr"])?, code: int(&h["code"])?, message: None }))
                 .collect()
         })
         .unwrap_or_default();
@@ -171,6 +171,7 @@ pub fn summarize(
         job_file: text(&r["gcode_file"]),
         message: None,
         print_error,
+        print_error_message: None,
         hms,
         nozzles,
         bed,

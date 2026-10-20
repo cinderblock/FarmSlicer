@@ -2,6 +2,7 @@
 //! uploads over FTPS.
 
 pub mod ftps;
+pub mod hms;
 pub mod link;
 pub mod models;
 pub mod send;

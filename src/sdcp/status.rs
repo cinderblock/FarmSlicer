@@ -153,6 +153,7 @@ pub fn summarize(connected: bool, error: Option<String>, updated_at: Option<Stri
         job_file: filename.map(String::from),
         message,
         print_error: None,
+        print_error_message: None,
         hms: Vec::new(),
         nozzles: temperature(status, "TempOfNozzle", "TempTargetNozzle").into_iter().collect(),
         bed: temperature(status, "TempOfHotbed", "TempTargetHotbed"),

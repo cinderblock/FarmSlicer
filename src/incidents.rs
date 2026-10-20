@@ -148,27 +148,31 @@ static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// Errors the printer raises while it prints custom G-code (HMS codes, a
 /// print error), once per code per print.
 pub fn printer_errors(state: &AppState, print: &PrintRecord, status: &PrinterStatus) {
-    let mut codes: Vec<String> = status
+    let mut codes: Vec<(String, Option<&str>)> = status
         .hms
         .iter()
-        .map(|h| hms_code(h.attr, h.code))
+        .map(|h| (hms_code(h.attr, h.code), h.message.as_deref()))
         .collect();
     if let Some(e) = status.print_error.filter(|e| *e != 0) {
-        codes.push(format!("{:04X}_{:04X}", (e >> 16) & 0xFFFF, e & 0xFFFF));
+        codes.push((format!("{:04X}_{:04X}", (e >> 16) & 0xFFFF, e & 0xFFFF), status.print_error_message.as_deref()));
     }
     if codes.is_empty() {
         return;
     }
-    let fresh: Vec<String> = {
+    let fresh: Vec<(String, Option<&str>)> = {
         let mut seen = SEEN.lock().unwrap();
         let seen = seen.get_or_insert_with(HashSet::new);
-        codes.into_iter().filter(|c| seen.insert(format!("{}:{c}", print.id))).collect()
+        codes.into_iter().filter(|(c, _)| seen.insert(format!("{}:{c}", print.id))).collect()
     };
     if fresh.is_empty() {
         return;
     }
     let Some((job, reason)) = custom_job(state, print) else { return };
-    for code in fresh {
+    for (code, text) in fresh {
+        let error = match text {
+            Some(text) => format!("{code} ({text})"),
+            None => code.clone(),
+        };
         log(
             state,
             &NewIncident {
@@ -181,7 +185,7 @@ pub fn printer_errors(state: &AppState, print: &PrintRecord, status: &PrinterSta
                 source: &job.source,
                 kind: "printer_error",
                 severity: "error",
-                summary: &format!("the printer raised error {code} while printing it ({reason})"),
+                summary: &format!("the printer raised error {error} while printing it ({reason})"),
                 dedupe: &format!("error:{}:{code}", print.id),
             },
         );

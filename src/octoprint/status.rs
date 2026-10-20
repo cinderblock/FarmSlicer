@@ -111,6 +111,7 @@ pub(super) fn summarize(snap: &Snapshot) -> PrinterStatus {
         job_file: path.map(String::from),
         message,
         print_error: None,
+        print_error_message: None,
         hms: Vec::new(),
         nozzles: nozzles.into_iter().map(|(_, t)| t).collect(),
         bed: temperature(&s.temps["bed"]),

@@ -162,7 +162,10 @@ export interface PrinterStatus {
   /** The printer's own error or notice text. */
   message: string | null;
   print_error: number | null;
-  hms: { attr: number; code: number }[];
+  /** What `print_error` means, in the printer maker's words. */
+  print_error_message: string | null;
+  /** HMS codes, each with its text when known. */
+  hms: { attr: number; code: number; message: string | null }[];
   nozzles: Temperature[];
   bed: Temperature | null;
   chamber: number | null;

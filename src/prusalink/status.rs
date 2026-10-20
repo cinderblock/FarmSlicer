@@ -88,6 +88,7 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
         job_file: file.map(String::from),
         message,
         print_error: None,
+        print_error_message: None,
         hms: Vec::new(),
         nozzles: temp("temp_nozzle", "target_nozzle").into_iter().collect(),
         bed: temp("temp_bed", "target_bed"),

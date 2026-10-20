@@ -136,7 +136,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   - `src/bambu/` — MQTT/TLS (`link.rs`: request/response by `sequence_id`,
     delta reports merged in `status.rs`), `ftps.rs` (implicit FTPS; the data
     channel must resume the control channel's TLS session), `send.rs`
-    (`project_file`, AMS mapping fields), `models.rs`
+    (`project_file`, AMS mapping fields), `models.rs`, `hms.rs` (HMS
+    codes' and `print_error`'s texts per device type = serial prefix, from
+    `data/hms.json`; regenerate with `node src/bambu/data/harvest-hms.mjs`)
   - `src/moonraker/` — Klipper: WebSocket JSON-RPC, objects subscribed and
     merged, HTTP upload then `printer.print.start` (refused while paused:
     Klipper would replace the job)
