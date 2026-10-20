@@ -56,7 +56,7 @@ What exists today (2026-10-20, master `22c7a71`):
 One chain, each layer pointing at the one above it:
 
 ```
-Project (demand)              owner: user or group; optional client and external ref
+Project (demand)              owner: user or group; opaque client_ref + external_ref
   └─ Item                     a part (model + settings/material) × quantity wanted
        └─ Unit counts         wanted / good / failed / in flight, computed (not stored per copy)
 Plate (bridge)                a sliced job plate holding k copies of one or more items
@@ -86,8 +86,8 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
 ## Integration surface (draft)
 
 - REST under `/api/projects` (create with items and quantities, read
-  progress, cancel). Authenticated with API keys, scoped to one group or
-  client, so ordering software can only see its own projects.
+  progress, cancel). Authenticated with API keys, scoped to one group (and
+  optionally one `client_ref`), so ordering software can only see its own projects.
   `external_ref` + `Idempotency-Key` stop retries from creating duplicate
   orders.
 - Webhooks (per group / site): `project.completed`, `item.failed`,
@@ -95,6 +95,8 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
   with a delivery log in the UI.
 - Fulfillment states after "printed": `ready` → `shipped` (or picked up),
   set by an operator or through the API.
+- Usage: `GET /api/usage?client_ref=&project=&from=&to=` (grams per
+  filament incl. failures, printer hours, good/failed copies, estimates).
 - Remote access: API keys are LAN-only today (`auth::authenticate`).
   Outside ordering software needs a separate, scoped kind of credential;
   that's a security decision for later, not a default.
@@ -106,30 +108,30 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
   allow paid client work.
 - It needs an integration option on both the ordering and fulfillment
   sides.
+- **Mixing projects on one plate is a setting**, not hard-coded (runtime
+  configuration: pool, with a site default). Default: mixing within a
+  group allowed, across clients off.
+- **Plates are made both ways**: the system proposes plates from items
+  (auto-plate), and the operator can open, edit or build them by hand
+  (plate tabs).
+- **Sending modes, per printer**: manual "send next" (default); auto-send
+  to an idle printer after someone confirms the bed is clear; and an opt-in
+  **YOLO** mode that sends the next plate as soon as the printer is idle,
+  with no confirmation (for auto-ejecting/belt printers or an operator who
+  accepts the risk). YOLO must be explicit and visible on the printer card.
+- **No customer accounts or client records.** FarmSlicer doesn't manage the
+  farm's customers. A project carries an opaque client reference
+  (`client_ref`) and the ordering tool's own order id (`external_ref`),
+  set by whoever creates it. Customer identity, quotes and billing live in
+  external tools.
+- **Usage APIs make billing easy for external tools**: per project /
+  `client_ref` / period, report material used (grams per filament,
+  including failed attempts), printer time, good and failed copies, and
+  cost estimates (`cost.rs`). FarmSlicer reports usage; it never invoices.
 
 ## Open questions for the user
 
-1. **Plates mixing projects:** can one plate hold parts from different
-   projects or clients (same material, same printer type) to fill the bed?
-   It's more efficient, but a failure then hits several clients and costs
-   are harder to split. *Recommendation:* allowed within a group, off by
-   default across clients, as a pool setting.
-2. **Who makes plates from items:** does the operator plate items by hand
-   (in the Slice page, plates as tabs) or does the system auto-plate
-   ("40 of A" → Fill → N plates, sliced on the server)? *Recommendation:*
-   both; auto-plate creates a proposal that the operator can open and edit.
-3. **Sending:** manual "send next", or auto-send to an idle printer after an
-   operator confirms the bed is clear? *Recommendation:* manual first,
-   auto-send as a per-printer opt-in (needs a "bed cleared" step in the UI).
-4. **Clients:** is a paying client a *group* (fits today's model: quotas,
-   visibility) or a separate client record that the operator manages
-   without the client having an account? *Recommendation:* a client is a
-   group, and an account for it is optional (ordering software uses its
-   API key).
-5. **Pricing / billing:** in scope (quotes from `cost.rs` estimates,
-   invoicing), or out of scope and left to the integration?
-   *Recommendation:* show estimates only; billing belongs to the
-   integrating software.
+(1–5 answered 2026-10-20; folded into the decisions above.)
 
 ## Plan / steps (draft order, revise once questions are answered)
 
@@ -142,8 +144,9 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
    rollup; reprint proposals.
 4. Queue view: farm / pool / printer views, priority, "send next".
 5. Printer pools and operator assignment.
-6. Integration: scoped API keys, webhooks, fulfillment states, API docs.
-7. Optional: auto-plating, auto-send.
+6. Integration: scoped API keys, webhooks, fulfillment states, usage API
+   for external billing, API docs.
+7. Auto-plating; auto-send (bed-clear confirmation) and YOLO send modes.
 
 ## Findings / gotchas
 
@@ -152,11 +155,13 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
 ## Progress log
 
 - [x] Surveyed what exists (2026-10-20).
-- [ ] User answers to the open questions.
+- [x] User answers to the open questions (2026-10-20).
 - [ ] Step 1 onward.
 
 ## Things not to do
 
 - Don't name a real deployment's clients or teams in the code or docs (the
   repo is public; see CLAUDE.md, "Nothing deployment-specific").
+- Don't build customer accounts, client records or invoicing; report
+  usage and let external tools bill.
 - Don't put plate layout in `config_json` (`plans/part-placement.md`).
