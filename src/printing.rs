@@ -576,6 +576,9 @@ fn apply(state: &AppState, status: &PrinterStatus) {
                 crate::incidents::print_failed(state, &print, error.as_deref().unwrap_or("the print failed"));
             }
             if state.db.update_print(&print.id, new_status, progress, error.as_deref()) && new_status != print.status {
+                if matches!(new_status, "finished" | "failed" | "cancelled") {
+                    crate::outcomes::record_automatic(state, &print, new_status, error.as_deref());
+                }
                 println!(
                     "Print {} ({} on {}): {} -> {new_status}{}",
                     print.id,
@@ -680,6 +683,7 @@ mod tests {
             gcode_md5: "X".into(),
             bed_type: None,
             check: None,
+            objects: Vec::new(),
         }
     }
 
@@ -760,6 +764,10 @@ mod tests {
             started_at: None,
             finished_at: None,
             updated_at: String::new(),
+            outcome: None,
+            outcome_by: None,
+            outcome_at: None,
+            outcome_note: None,
         }
     }
 

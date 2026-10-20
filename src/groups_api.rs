@@ -665,6 +665,7 @@ fn settings_json(state: &AppState) -> Value {
         "guide_notes": state.db.get_setting("guide_notes").unwrap_or_default(),
         "uploads": groups::site_uploads(&state.db),
         "gcode_limits": crate::gcode::site_limits(&state.db),
+        "finished_outcome": crate::outcomes::finished_outcome(state),
     })
 }
 
@@ -702,6 +703,10 @@ struct UpdateSettings {
     /// What the G-code check tolerates (src/gcode/check.rs `Limits`).
     #[serde(default)]
     gcode_limits: Option<crate::gcode::Limits>,
+    /// Finished prints: `ask` someone how they came out, or count every
+    /// copy `good` (src/outcomes.rs).
+    #[serde(default)]
+    finished_outcome: Option<String>,
 }
 
 async fn update_settings(
@@ -750,6 +755,12 @@ async fn update_settings(
     if let Some(u) = &body.uploads {
         groups::validate_uploads(u).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
         state.db.set_setting("uploads", Some(u));
+    }
+    if let Some(v) = &body.finished_outcome {
+        if v != "ask" && v != "good" {
+            return Err(err(StatusCode::BAD_REQUEST, "finished_outcome: ask | good"));
+        }
+        state.db.set_setting("finished_outcome", Some(v));
     }
     if let Some(l) = &body.gcode_limits {
         l.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;

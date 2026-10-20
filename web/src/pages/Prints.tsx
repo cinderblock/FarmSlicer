@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { apiJson } from "../auth";
 import { errorText, localDateTime, useJson } from "../api";
+import OutcomeDialog from "../components/OutcomeDialog";
 import PrintControls from "../components/PrintControls";
-import { ACTIVE_PRINT, formatCost, type Prices, type Printer, type PrintRecord } from "../printers";
+import { ACTIVE_PRINT, formatCost, outcomeText, type Prices, type Printer, type PrintRecord } from "../printers";
 
 const STATUS_LABELS: Record<PrintRecord["status"], string> = {
   pending_approval: "Waiting for approval",
@@ -19,7 +20,9 @@ const STATUS_LABELS: Record<PrintRecord["status"], string> = {
 /** Prints sent from FarmSlicer, newest first. */
 export default function PrintsPage() {
   const [rev, setRev] = useState(0);
-  const prints = useJson<PrintRecord[]>("/api/prints?limit=200", rev).data;
+  const [uncheckedOnly, setUncheckedOnly] = useState(false);
+  const prints = useJson<PrintRecord[]>(uncheckedOnly ? "/api/prints?unchecked=1&limit=200" : "/api/prints?limit=200", rev).data;
+  const [recording, setRecording] = useState<PrintRecord | null>(null);
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
   const printers = useJson<Printer[]>("/api/printers").data;
   const capabilitiesOf = (p: PrintRecord) => printers?.find((x) => x.id === p.printer_id)?.capabilities;
@@ -57,8 +60,24 @@ export default function PrintsPage() {
         Jobs sent to printers. Send one from the Jobs page; prints of jobs you can't see show only
         their printer and status.
       </p>
+      <label className="checkbox-label">
+        <input type="checkbox" checked={uncheckedOnly} onChange={(e) => setUncheckedOnly(e.target.checked)} />
+        Only finished prints nobody has checked yet
+      </label>
       {error && <p className="login-error">{error}</p>}
-      {prints && prints.length === 0 && <p className="empty-state">Nothing has been printed yet.</p>}
+      {prints && prints.length === 0 && (
+        <p className="empty-state">{uncheckedOnly ? "Every finished print has been checked." : "Nothing has been printed yet."}</p>
+      )}
+      {recording && (
+        <OutcomeDialog
+          print={recording}
+          onClose={() => setRecording(null)}
+          onSaved={() => {
+            setRecording(null);
+            setRev((r) => r + 1);
+          }}
+        />
+      )}
       {prints && prints.length > 0 && (
         <table className="data-table cards">
           <thead>
@@ -68,6 +87,7 @@ export default function PrintsPage() {
               <th>By</th>
               <th>Status</th>
               <th>Progress</th>
+              <th>Outcome</th>
               <th>Cost</th>
               <th>Sent</th>
               <th>Ended</th>
@@ -127,10 +147,24 @@ export default function PrintsPage() {
                     `${p.progress}%`
                   )}
                 </td>
+                <td data-label="Outcome">
+                  <span className={`outcome-badge outcome-${p.outcome ?? (p.status === "finished" ? "unchecked" : "none")}`}>
+                    {outcomeText(p)}
+                  </span>
+                  {p.outcome && p.lines?.some((l) => l.reason) && (
+                    <div className="hint">{[...new Set(p.lines.map((l) => l.reason).filter(Boolean))].join(", ").replace(/_/g, " ")}</div>
+                  )}
+                  {p.outcome_note && <div className="hint">{p.outcome_note}</div>}
+                </td>
                 <td data-label="Cost">{formatCost(p.estimated_cost, currency)}</td>
                 <td data-label="Sent">{localDateTime(p.created_at)}</td>
                 <td data-label="Ended">{localDateTime(p.finished_at)}</td>
                 <td className="cell-actions">
+                  {p.can_record_outcome && (
+                    <button className="btn-sm" onClick={() => setRecording(p)}>
+                      {p.outcome ? "Change outcome" : "How did it go?"}
+                    </button>
+                  )}
                   {p.can_control && ["printing", "paused"].includes(p.status) && (
                     <PrintControls print={p} capabilities={capabilitiesOf(p)} onChange={() => setRev((r) => r + 1)} />
                   )}

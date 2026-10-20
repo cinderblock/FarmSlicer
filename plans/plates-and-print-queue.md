@@ -343,7 +343,13 @@ Decisions here are mine unless marked; the user can overrule any of them.
   tabs, tests (e2e, `smoke.mjs --plates` in CI), docs.
 - [ ] Not on hardware yet: a real print of plate 2 of a multi-plate job
   (Bambu and a Klipper printer).
-- [ ] Step 2: print outcomes (good/bad copies per print).
+- [x] Step 2: print outcomes: lines per print (plate_json by model,
+  uploads' slice_info objects), `POST /api/prints/{id}/outcome`,
+  automatic failed records for prints that started, `finished_outcome`
+  setting, Prints page dialog, `tests/outcomes-e2e.mjs` (25 checks);
+  full e2e suite green. Plain uploaded G-code is one line of one copy
+  (its objects aren't read).
+- [ ] Step 3: projects and items (current).
 
 ## Things not to do
 

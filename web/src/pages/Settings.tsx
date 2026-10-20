@@ -16,6 +16,7 @@ interface SiteSettings {
   guide_notes: string;
   uploads: UploadPolicy;
   gcode_limits: GcodeLimits;
+  finished_outcome: "ask" | "good";
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -87,6 +88,22 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         <h3>Print rules</h3>
         <p className="hint">For personal jobs and for groups that set none.</p>
         <PrintRulesEditor rules={s.print_rules ?? {}} onChange={(r) => setS({ ...s, print_rules: r })} />
+
+        <h3>Prints and the queue</h3>
+        <label>
+          When a print finishes
+          <select
+            value={s.finished_outcome}
+            onChange={(e) => setS({ ...s, finished_outcome: e.target.value as SiteSettings["finished_outcome"] })}
+          >
+            <option value="ask">Ask someone how it came out (unchecked until then)</option>
+            <option value="good">Count every copy as good</option>
+          </select>
+          <span className="hint">
+            Prints the printer stops or fails are recorded as failed either way; anyone who may control a print
+            can correct its record on the Prints page.
+          </span>
+        </label>
 
         <h3>Sliced files and G-code checks</h3>
         <p className="hint">

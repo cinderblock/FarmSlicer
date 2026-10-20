@@ -495,6 +495,9 @@ struct PrintsQuery {
     /// Only requests waiting for approval, oldest first.
     #[serde(default, deserialize_with = "crate::query::flag")]
     pending: Option<bool>,
+    /// Only finished prints nobody has said the outcome of, oldest first.
+    #[serde(default, deserialize_with = "crate::query::flag")]
+    unchecked: Option<bool>,
     limit: Option<i64>,
 }
 
@@ -508,12 +511,15 @@ async fn list_prints(
 ) -> Json<Value> {
     let (tree, viewer) = groups_api::context(&state, &user);
     let prices = crate::cost::Prices::load(&state.db);
+    let limit = q.limit.unwrap_or(100).clamp(1, 1000);
     let list = if q.pending.unwrap_or(false) {
         state.db.pending_prints()
+    } else if q.unchecked.unwrap_or(false) {
+        state.db.unchecked_prints(limit)
     } else {
         state
             .db
-            .list_prints(q.printer.as_deref(), q.active.unwrap_or(false), q.limit.unwrap_or(100).clamp(1, 1000))
+            .list_prints(q.printer.as_deref(), q.active.unwrap_or(false), limit)
     };
     let prints: Vec<Value> = list
         .into_iter()
@@ -528,6 +534,7 @@ async fn list_prints(
                     .and_then(|pkg| pkg.plate(p.plate as u32).map(|pl| prices.plate(pl))));
                 v["can_control"] = json!(can_control_print(&tree, &viewer, &p));
                 v["can_approve"] = json!(p.status == "pending_approval" && can_approve_print(&tree, &viewer, &p));
+                add_outcome(&state, &tree, &viewer, &p, &mut v);
                 v
             } else {
                 json!({
@@ -555,7 +562,95 @@ async fn get_print(
     let mut v = json!(print);
     v["can_control"] = json!(can_control_print(&tree, &viewer, &print));
     v["can_approve"] = json!(print.status == "pending_approval" && can_approve_print(&tree, &viewer, &print));
+    add_outcome(&state, &tree, &viewer, &print, &mut v);
     Ok(Json(v))
+}
+
+// -- Outcomes --------------------------------------------------------------------
+
+/// Whoever may control a print may say how it came out; so may the
+/// operators of its printer (src/pools.rs).
+fn can_record_outcome(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
+    can_control_print(tree, viewer, print) || crate::pools::operates(state, viewer, print.printer_id.as_deref())
+}
+
+/// Did the print get far enough to hold copies to count?
+fn has_copies(print: &PrintRecord) -> bool {
+    match print.status.as_str() {
+        "finished" => true,
+        "failed" | "cancelled" => print.started_at.is_some(),
+        _ => false,
+    }
+}
+
+/// The print's lines (`good`/`failed` null until recorded) and whether the
+/// viewer may record its outcome.
+fn add_outcome(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord, v: &mut Value) {
+    let recorded = state.db.print_outcome_lines(&print.id);
+    v["lines"] = if recorded.is_empty() {
+        json!(crate::outcomes::print_lines(state, print)
+            .into_iter()
+            .map(|l| {
+                let mut j = json!(l);
+                j["good"] = Value::Null;
+                j["failed"] = Value::Null;
+                j["reason"] = Value::Null;
+                j
+            })
+            .collect::<Vec<_>>())
+    } else {
+        json!(recorded)
+    };
+    v["can_record_outcome"] = json!(has_copies(print) && can_record_outcome(state, tree, viewer, print));
+}
+
+/// `POST /api/prints/{id}/outcome`: how the print came out
+/// (src/outcomes.rs `OutcomeRequest`), replacing any earlier record.
+async fn record_outcome(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    Json(body): Json<crate::outcomes::OutcomeRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let (tree, viewer) = groups_api::context(&state, &user);
+    let print = state
+        .db
+        .get_print(&id)
+        .filter(|p| can_see_print(&state, &tree, &viewer, p) || crate::pools::operates(&state, &viewer, p.printer_id.as_deref()))
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
+    if !can_record_outcome(&state, &tree, &viewer, &print) {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "only whoever sent the print, its group's managers, the printer's operators or an admin can",
+        ));
+    }
+    if !has_copies(&print) {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            match print.status.as_str() {
+                "failed" | "cancelled" => "the print never started: there is nothing to count".to_string(),
+                s => format!("the print is {s}: say how it came out once it has ended"),
+            },
+        ));
+    }
+    let lines = crate::outcomes::print_lines(&state, &print);
+    let outcomes = crate::outcomes::resolve(&lines, &body).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+    let note = body.note.as_deref().map(|n| n.trim().chars().take(1000).collect::<String>()).filter(|n| !n.is_empty());
+    let summary = crate::outcomes::summary(&outcomes);
+    state.db.set_print_outcome(&id, summary, &user.username, note.as_deref(), &outcomes);
+    println!("Print {id}: {} says {summary}", user.username);
+    let print = state.db.get_print(&id).expect("print exists");
+    let mut v = json!(print);
+    add_outcome(&state, &tree, &viewer, &print, &mut v);
+    Ok(Json(v))
+}
+
+/// `GET /api/outcome-reasons`: why copies fail, with labels.
+async fn outcome_reasons() -> Json<Value> {
+    Json(json!(crate::outcomes::REASONS
+        .iter()
+        .map(|(id, label)| json!({"id": id, "label": label}))
+        .collect::<Vec<_>>()))
 }
 
 /// `POST /api/prints/{id}/approve`: send a print that was waiting for
@@ -808,6 +903,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/prints/{id}/control", post(control_print))
         .route("/api/prints/{id}/approve", post(approve_print))
         .route("/api/prints/{id}/reject", post(reject_print))
+        .route("/api/prints/{id}/outcome", post(record_outcome))
+        .route("/api/outcome-reasons", get(outcome_reasons))
         .route("/api/printers/{id}/control", post(control_printer))
         .route("/api/gcode-incidents", get(list_gcode_incidents))
 }

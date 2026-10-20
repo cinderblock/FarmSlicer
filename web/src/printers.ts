@@ -402,6 +402,42 @@ export interface PrintRecord {
   can_control: boolean;
   can_approve: boolean;
   estimated_cost?: number | null;
+  /** How it came out: null = nobody has said (src/outcomes.rs). */
+  outcome?: "good" | "partial" | "failed" | null;
+  /** Who said: a username, or "printer" / "auto" for automatic records. */
+  outcome_by?: string | null;
+  outcome_at?: string | null;
+  outcome_note?: string | null;
+  /** What it holds, one line per kind of part; counts null until recorded. */
+  lines?: OutcomeLine[];
+  can_record_outcome?: boolean;
+}
+
+export interface OutcomeLine {
+  line: number;
+  item_id: string | null;
+  model_idx: number | null;
+  name: string;
+  planned: number;
+  good: number | null;
+  failed: number | null;
+  reason: string | null;
+}
+
+export interface OutcomeReason {
+  id: string;
+  label: string;
+}
+
+/** "5/6 good", "Failed", "Unchecked"... for a print that has ended. */
+export function outcomeText(p: PrintRecord): string {
+  if (!p.outcome) return p.status === "finished" ? "Unchecked" : "—";
+  const lines = p.lines ?? [];
+  const planned = lines.reduce((n, l) => n + l.planned, 0);
+  const good = lines.reduce((n, l) => n + (l.good ?? 0), 0);
+  if (p.outcome === "good") return planned > 1 ? `All ${planned} good` : "Good";
+  if (p.outcome === "failed") return planned > 1 ? `All ${planned} failed` : "Failed";
+  return `${good}/${planned} good`;
 }
 
 export const ACTIVE_PRINT = ["uploading", "starting", "printing", "paused"];

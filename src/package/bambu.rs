@@ -116,6 +116,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
             gcode_md5: md5,
             bed_type: bed_type.clone(),
             check: None,
+            objects: meta.objects,
         });
     }
     Ok(Package { format: PackageFormat::Bambu3mf, plates })
@@ -185,6 +186,8 @@ struct PlateMeta {
     /// Per project filament (id - 1): the nozzle it prints from (1 left,
     /// 2 right on the H2D; all 1 on single-nozzle printers).
     filament_maps: Vec<i64>,
+    /// Objects printed on the plate (skipped ones left out), one per copy.
+    objects: Vec<String>,
 }
 
 fn attrs(e: &BytesStart<'_>) -> BTreeMap<String, String> {
@@ -242,6 +245,12 @@ fn parse_slice_info(xml: &str) -> BTreeMap<u32, PlateMeta> {
                                 meta.filament_maps = value.split_whitespace().filter_map(|n| n.parse().ok()).collect()
                             }
                             _ => {}
+                        }
+                    }
+                    "object" => {
+                        let skipped = a.get("skipped").is_some_and(|s| s == "true");
+                        if !skipped {
+                            meta.objects.push(a.get("name").cloned().unwrap_or_default());
                         }
                     }
                     "filament" => {
@@ -355,6 +364,7 @@ mod tests {
         assert_eq!(plate.filaments[1].material, "PETG");
         assert_eq!(thumbnail(&pkg.0, 2).as_deref(), Some(&b"\x89PNG"[..]));
         assert_eq!(plate.bed_type.as_deref(), Some("Textured PEI Plate"));
+        assert_eq!(plate.objects, vec!["Bracket & clip".to_string()]);
     }
 
     #[test]

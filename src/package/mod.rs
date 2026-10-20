@@ -87,6 +87,10 @@ pub struct Plate {
     /// What the G-code check found (src/gcode/), once it has run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<crate::gcode::PlateCheck>,
+    /// The objects on the plate, one name per copy, when the package says
+    /// (slice_info.config); empty for plain G-code.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

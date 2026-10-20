@@ -385,7 +385,8 @@ summary prints the `pin.json` to paste there.
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` or `.gcode` becomes a finished, sendable job (what it needs is read from the slicer's comments); its G-code is checked at once (each plate's `check` in `package_json`). 400 for ambiguous archives or G-code changed after slicing; 403 where uploads are denied |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability, its capabilities and (Bambu) a suggested AMS mapping, plus the plate's `gcode_check`, `blocked` and `needs_review` findings |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems, acknowledge_review}`: upload and start. 409 when the plate's G-code is blocked; findings that need review make a member's print wait for an admin, and an admin's send needs `acknowledge_review` |
-| `GET /api/prints?printer=&active=1&pending=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status; pause/resume/stop/speed as the printer allows (sender, group managers, admins) |
+| `GET /api/prints?printer=&active=1&pending=1&unchecked=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status (each print's `lines`: what it holds, one per kind of part, and `outcome`); pause/resume/stop/speed as the printer allows (sender, group managers, admins) |
+| `POST /api/prints/{id}/outcome`, `GET /api/outcome-reasons` | how an ended print came out: `{all: "good"\|"failed", reason, note}` or `{lines: [{line, good, failed, reason}]}`, every copy accounted for; prints the printer fails or stops are recorded failed automatically, finished ones stay unchecked unless the site setting `finished_outcome` is `good` |
 | `POST /api/prints/{id}/approve`, `POST /api/prints/{id}/reject` | decide a print that broke the print rules (admins, the group's managers) or whose G-code needs review (`safety_review`: admins only); the requester may withdraw |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}` or `{material}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament or a material, or cool it |
@@ -434,6 +435,7 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 printer/ (protocols, capabilities, status, the link hub),
                 bambu/, moonraker/, octoprint/, prusalink/, sdcp/ (drivers),
                 printing.rs + prints_api.rs (sending, tracking),
+                outcomes.rs + db/outcomes.rs (how prints came out),
                 preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,
                 discovery/ (SSDP, mDNS, SDCP), feedback.rs +

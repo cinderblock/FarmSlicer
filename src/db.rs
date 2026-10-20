@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 mod feedback;
+mod outcomes;
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
 
 pub struct Db {
@@ -157,6 +158,13 @@ pub struct PrintRecord {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub updated_at: String,
+    /// How it came out (src/outcomes.rs): None = not recorded, else
+    /// `good` | `partial` | `failed`; who said so ("printer" and "auto" for
+    /// automatic records), when, and their note.
+    pub outcome: Option<String>,
+    pub outcome_by: Option<String>,
+    pub outcome_at: Option<String>,
+    pub outcome_note: Option<String>,
 }
 
 /// Custom G-code that failed its check or a print (src/incidents.rs).
@@ -550,6 +558,7 @@ impl Db {
         if conn.prepare("SELECT safety_review FROM prints LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE prints ADD COLUMN safety_review INTEGER NOT NULL DEFAULT 0;").ok();
         }
+        outcomes::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (
@@ -1658,7 +1667,8 @@ impl Db {
         "SELECT p.id, p.job_id, p.plate, p.printer_id, p.printer_name, p.user_id, u.username,
                 p.group_id, p.file_name, p.name, p.ams_mapping, p.status, p.progress, p.error,
                 p.created_at, p.started_at, p.finished_at, p.updated_at,
-                p.options, p.approval_reason, p.decided_by, p.safety_review
+                p.options, p.approval_reason, p.decided_by, p.safety_review,
+                p.outcome, p.outcome_by, p.outcome_at, p.outcome_note
          FROM prints p LEFT JOIN users u ON p.user_id = u.id";
 
     fn print_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintRecord> {
@@ -1685,6 +1695,10 @@ impl Db {
             approval_reason: row.get(19)?,
             decided_by: row.get(20)?,
             safety_review: row.get(21)?,
+            outcome: row.get(22)?,
+            outcome_by: row.get(23)?,
+            outcome_at: row.get(24)?,
+            outcome_note: row.get(25)?,
         })
     }
 
@@ -1750,6 +1764,18 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         conn.query_row(&format!("{} WHERE p.id = ?1", Self::PRINT_SELECT), params![id], Self::print_from_row)
             .ok()
+    }
+
+    /// Finished prints nobody has said the outcome of, oldest first.
+    pub fn unchecked_prints(&self, limit: i64) -> Vec<PrintRecord> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!(
+                "{} WHERE p.status = 'finished' AND p.outcome IS NULL ORDER BY p.finished_at, p.rowid LIMIT ?1",
+                Self::PRINT_SELECT
+            ))
+            .unwrap();
+        stmt.query_map(params![limit], Self::print_from_row).unwrap().filter_map(|r| r.ok()).collect()
     }
 
     /// Newest first. `printer_id` narrows to one printer, `active` to prints

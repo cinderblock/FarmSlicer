@@ -92,7 +92,7 @@ export function useAuth(): AuthContextValue {
 /** JSON POST/PUT helper that surfaces the server's {error} message. */
 export async function apiJson<T = unknown>(
   url: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
 ): Promise<T> {
   const res = await fetch(url, {

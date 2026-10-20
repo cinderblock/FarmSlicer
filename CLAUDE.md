@@ -221,6 +221,16 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `src/overlay.rs` — thumbnail label (inherited group setting
   `thumbnail_label`, `{key}`/`{group}` template) and per-group logos
   (`data/logos/<group>.png`); `resources/fonts/` — the label font (OFL)
+- `src/outcomes.rs` — how prints came out: a print's *lines* (one per kind
+  of part: FarmSlicer jobs from `plate_json` by model, uploads from
+  slice_info's `<object>`s (`Plate.objects`), else one line of one copy),
+  checking a record (every copy good or failed, failed ones with a reason
+  from `REASONS`), automatic records when the printer fails/stops a print
+  that started (`record_automatic`, called from `printing::apply`) and,
+  with the site setting `finished_outcome=good`, when it finishes.
+  Storage `src/db/outcomes.rs` (`print_outcomes`, `prints.outcome*`);
+  `POST /api/prints/{id}/outcome`, the Prints page's `OutcomeDialog`.
+  Plan: `plans/plates-and-print-queue.md`
 - `src/printing.rs` — sending: compatibility (package format per protocol,
   model, nozzle), AMS mapping where the protocol maps filaments, dispatch to
   the driver's send, and `track()` moving prints along from printer

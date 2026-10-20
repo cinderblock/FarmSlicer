@@ -3495,3 +3495,35 @@ a.btn-sm {
   padding-left: 1.2rem;
   overflow-wrap: anywhere;
 }
+
+/* How prints came out (components/OutcomeDialog.tsx, Prints page) */
+.outcome-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.outcome-good { background: #1e3a2e; color: var(--success); }
+.outcome-partial { background: #3a331e; color: var(--warning); }
+.outcome-failed { background: #3a1e1e; color: var(--error); }
+.outcome-unchecked { border: 1px dashed var(--warning); color: var(--warning); }
+.outcome-none { color: var(--text-dim); }
+
+.page > .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.page > .checkbox-label input { width: auto; }
+
+.outcome-quick {
+  display: flex;
+  gap: 0.5rem;
+}
+.outcome-lines input[type="number"] {
+  width: 5rem;
+}
+.outcome-dialog textarea {
+  width: 100%;
+}

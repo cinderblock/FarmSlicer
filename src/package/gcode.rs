@@ -273,6 +273,7 @@ fn describe(head: &str, tail: &str, md5: String) -> Plate {
         gcode_md5: md5,
         bed_type: text("curr_bed_type"),
         check: None,
+        objects: Vec::new(),
     }
 }
 
