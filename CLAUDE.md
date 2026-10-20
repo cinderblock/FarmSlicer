@@ -165,6 +165,7 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `groups::PrintRules` (inherited `print_rules`, site setting default),
   checked in `prints_api::send_job` → `pending_approval` prints
 - `src/gcode/` — the G-code check: `lex.rs` (lines read like firmware;
+  word-named commands (`SYNC T5`) only when the data names them;
   `lex_other` for other makes' dialects: Klipper extended commands and
   macros, text arguments), `check.rs` (simulation, findings, time planner;
   `Declared::other_firmware` = universal checks without Bambu's allowlist),

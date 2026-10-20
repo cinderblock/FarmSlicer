@@ -566,7 +566,7 @@ impl<'a> Sim<'a> {
             return;
         }
         let data = self.ctx.data;
-        match lex::lex(text, |c| data.is_text(c), false) {
+        match lex::lex(text, |c| data.is_text(c), |n| data.is_named(n), false) {
             Lexed::Empty => {}
             Lexed::Unreadable(why) => self.block("unreadable", format!("has a line a printer may read differently ({why})")),
             Lexed::Command(c) => {
@@ -1300,6 +1300,15 @@ M1020 S1
         assert_eq!(run(&long).verdict, None);
         assert!(run(&format!("G1 X1 {}\n", "Y1 ".repeat(100))).blocked(), "long commands");
         assert!(run("G1 X1 Y\u{e9}\n").blocked(), "non-ASCII commands");
+    }
+
+    #[test]
+    fn bambus_named_commands() {
+        // Bambu Studio 02.08's H2D filament change waits with `SYNC T<s>`.
+        let c = run("SYNC T0\nSYNC T5\n");
+        assert_eq!(c.verdict, None, "{:?}", c.findings);
+        // A name Bambu's G-code never uses can't be read.
+        assert_eq!(codes(&run("FROB T5\n")), vec!["unreadable"]);
     }
 
     fn other(model: &str, materials: &[&str]) -> Declared {

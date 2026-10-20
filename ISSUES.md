@@ -73,3 +73,14 @@ the content scrolls sideways; narrower desktop windows (800-1300 px) lose
 more. Below 800 px it is a card list (`data-table cards`) and fits. Why it
 matters: Print / Re-slice / Delete are the cut-off column. Eleven columns;
 it needs fewer (combine some) or the card layout up to a wider breakpoint.
+
+## Bambu's X2D filament-change template has uncommented banner lines
+
+Bambu Studio 02.05.03.62 through 02.08.02.61 (`Bambu Lab X2D 0.4 nozzle
+template change_filament_gcode`) starts `change_filament_gcode` with
+`======== X2D filament_change gcode ==========` without a `;`, and some
+template has a bare `========== record data ==========` line (the harvester
+logs both: `FARMSLICER_REGEN_GCODE_DATA=1 BAMBUSTUDIO_PROFILES=...`).
+02.08.04.57's X2D template has the `;`. A multi-filament X2D plate from
+those releases would be blocked as "unreadable" by the G-code check. Why it
+matters: Bambu's own G-code must pass; no X2D in the farm yet.

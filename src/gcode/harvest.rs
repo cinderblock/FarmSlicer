@@ -15,18 +15,30 @@ const NEVER_TEXT: &[&str] = &[
     "M104", "M106", "M107", "M109", "M140", "M141", "M190", "M191", "M204", "M205", "M220", "M221", "M400", "M73",
 ];
 
+/// Bambu's templates name every command they use, words included (`SYNC`).
+fn any_name(_: &str) -> bool {
+    true
+}
+
 fn see_line(data: &mut Data, line: &str) {
     let probe = |_: &Code| true;
-    let Lexed::Command(c) = lex::lex(line, probe, true) else { return };
+    let c = match lex::lex(line, probe, any_name, true) {
+        Lexed::Command(c) => c,
+        Lexed::Empty => return,
+        Lexed::Unreadable(why) => {
+            eprintln!("harvest: skipped a template line ({why}): {line:?}");
+            return;
+        }
+    };
     let key = c.code.key();
     let is_text = data.text_commands.contains(&key)
         || (c.code.letter == b'M'
             && !NEVER_TEXT.contains(&key.as_str())
-            && matches!(lex::lex(line, |_| false, true), Lexed::Unreadable(_)));
+            && matches!(lex::lex(line, |_| false, any_name, true), Lexed::Unreadable(_)));
     if is_text {
         data.text_commands.insert(key.clone());
     }
-    let Lexed::Command(c) = lex::lex(line, |_| is_text, true) else { return };
+    let Lexed::Command(c) = lex::lex(line, |_| is_text, any_name, true) else { return };
     let rule = data.commands.entry(key).or_default();
     if c.code.letter == b'T' {
         if c.code.number == u32::MAX {
@@ -48,7 +60,11 @@ fn see_line(data: &mut Data, line: &str) {
     }
 }
 
-/// Profiles of one vendor directory by name, with `inherits` resolved.
+/// A template preset's own identity, not settings it gives its includer.
+const INCLUDE_META: &[&str] = &["name", "type", "from", "inherits", "include", "instantiation", "setting_id"];
+
+/// Profiles of one vendor directory by name, with `inherits` and `include`
+/// resolved.
 struct ProfileDir {
     by_name: HashMap<String, Map<String, Value>>,
 }
@@ -91,8 +107,23 @@ impl ProfileDir {
                 _ => break,
             }
         }
+        // Bambu Studio applies a preset's includes (template presets holding
+        // its G-code: "Bambu Lab H2D 0.4 nozzle template
+        // change_filament_gcode"), then its own keys.
         let mut out = Map::new();
         for o in chain.into_iter().rev() {
+            for name in strings(o.get("include")) {
+                match self.by_name.get(&name) {
+                    Some(inc) => {
+                        for (k, v) in inc {
+                            if !INCLUDE_META.contains(&k.as_str()) {
+                                out.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                    None => eprintln!("harvest: {name:?} (included by {:?}) not found", o.get("name")),
+                }
+            }
             for (k, v) in o {
                 out.insert(k.clone(), v.clone());
             }
@@ -153,7 +184,7 @@ impl Reach {
     }
 
     fn see(&mut self, data: &Data, line: &str) {
-        let Lexed::Command(c) = lex::lex(line, |c| data.is_text(c), true) else { return };
+        let Lexed::Command(c) = lex::lex(line, |c| data.is_text(c), |n| data.is_named(n), true) else { return };
         self.see_command(&c);
     }
 
@@ -230,7 +261,10 @@ fn other_line(line: &str) -> Option<lex::Command<'static>> {
     // Leaked per call would be wasteful; re-lex on an owned copy instead.
     let upper = line.to_ascii_uppercase();
     match lex::lex_other(&upper, true) {
-        lex::Other::Command(c) => Some(lex::Command { code: c.code, words: c.words, text: None }),
+        // `lex_other` reads no named commands (those are `Extended`).
+        lex::Other::Command(c) => {
+            Some(lex::Command { code: lex::Code { name: None, ..c.code }, words: c.words, text: None })
+        }
         _ => None,
     }
 }
@@ -333,7 +367,7 @@ fn harvest_vendor(vendor_dir: &Path, data: &mut Data, bambu: bool) {
             for line in template::lines(&t) {
                 let command = if bambu {
                     r.see(data, &line);
-                    match lex::lex(&line, |c| data.is_text(c), true) {
+                    match lex::lex(&line, |c| data.is_text(c), |n| data.is_named(n), true) {
                         Lexed::Command(c) => Some(lex::Command { code: c.code, words: c.words, text: None }),
                         _ => None,
                     }
@@ -493,7 +527,11 @@ mod tests {
         w("machine/common.json", serde_json::json!({"type": "machine", "name": "box common", "instantiation": "false",
             "printable_area": ["0x0", "200x0", "200x200", "0x200"], "printable_height": "180",
             "machine_end_gcode": "G1 X210 Y-2 F3000\nM104 S0"}));
+        // Newer Bambu Studio keeps templates in presets the machine includes.
+        w("machine/t.json", serde_json::json!({"type": "machine", "name": "Box 0.4 template change_filament_gcode",
+            "instantiation": "false", "change_filament_gcode": "SYNC T{ceil(flush_length / 125) * 5}\nM620.11 H0"}));
         w("machine/b.json", serde_json::json!({"type": "machine", "name": "Box 0.4", "inherits": "box common", "printer_model": "Box",
+            "include": ["Box 0.4 template change_filament_gcode"],
             "machine_start_gcode": "M1002 judge_flag x\nG90\nG1 X100 Y205 Z-0.5\nG91\nG1 X5\nM104 S[nozzle_temperature]\nM109 S250\nT[next_extruder]\nT1000"}));
         w("filament/p.json", serde_json::json!({"type": "filament", "name": "PLA x", "filament_type": ["PLA"],
             "nozzle_temperature_range_low": ["190"], "nozzle_temperature_range_high": ["240"], "hot_plate_temp": ["65"],
@@ -506,6 +544,8 @@ mod tests {
         assert!(d.commands["M104"].words["S"].any && d.commands["M104"].words["S"].allows(Arg::Num(0.0)));
         assert!(d.commands["M106"].words["P"].allows(Arg::Num(3.0)));
         assert!(d.commands["T"].any_tool && d.commands["T"].tools.contains(&1000));
+        assert!(d.commands["SYNC"].words["T"].any, "included template, named command");
+        assert!(d.commands.contains_key("M620.11"));
         let m = &d.models["BX1"];
         assert_eq!(m.bed, Some([0.0, 0.0, 200.0, 200.0]));
         assert_eq!(m.max_z, Some(180.0));

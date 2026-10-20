@@ -48,8 +48,8 @@ into the PTFE tube until it can not be pushed any farther."
       `bambu::link` with the configured serial; failure reasons
       (`printing.rs`) and incident summaries carry the text
 - [x] Printer card: text, code beside it
-- [x] Checks: web build + tests; on buildhost `cargo test`, clippy,
-      `tests/run-e2e.sh` (exit 0)
+- [x] Checks: web build + tests; on buildhost `cargo test` and
+      `tests/run-e2e.sh` (exit 0). Not clippy: it isn't installed there.
 - [ ] Deploy (ops pins the new image) and confirm on a real error
 
 ## Findings

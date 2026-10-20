@@ -282,6 +282,11 @@ impl Data {
         self.text_commands.contains(&code.key())
     }
 
+    /// Bambu's G-code uses a command by this name (`SYNC`).
+    pub fn is_named(&self, name: &str) -> bool {
+        self.commands.contains_key(name)
+    }
+
     /// A Bambu model by id, or (`other`) another make's printer by name.
     pub fn model(&self, id: &str, other: bool) -> Option<&ModelLimits> {
         if other { self.printers.get(id.trim()) } else { self.models.get(id) }
