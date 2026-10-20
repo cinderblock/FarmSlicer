@@ -215,8 +215,19 @@ pub fn uniform(lines: &[Line], good: bool, reason: &str) -> Vec<LineOutcome> {
 
 // -- From the database -------------------------------------------------------------
 
-/// The lines of plate `plate` (1-based) of `job`.
+/// The lines of plate `plate` (1-based) of `job`, with the project items
+/// their copies are for (`job_items`).
 pub fn job_plate_lines(state: &AppState, job: &Job, plate: u32) -> Vec<Line> {
+    let mut lines = plate_lines(state, job, plate);
+    let linked = state.db.job_plate_items(&job.id, plate as i64);
+    for l in &mut lines {
+        let key = crate::projects::part_key(l);
+        l.item_id = linked.iter().find(|j| j.part == key).map(|j| j.item_id.clone());
+    }
+    lines
+}
+
+fn plate_lines(state: &AppState, job: &Job, plate: u32) -> Vec<Line> {
     let fallback = crate::printing::display_name(&job.model_name);
     if job.source == "upload" {
         let objects = crate::printing::package_of(job)
@@ -272,6 +283,14 @@ pub fn record_automatic(state: &AppState, print: &PrintRecord, status: &str, err
     };
     let outcomes = uniform(&lines, good, reason);
     state.db.set_print_outcome(&now.id, summary(&outcomes), by, error, &outcomes);
+    after_record(state, &now.id);
+}
+
+/// What follows a new record: projects move along, webhooks hear of it.
+pub fn after_record(state: &AppState, print_id: &str) {
+    let Some(print) = state.db.get_print(print_id) else { return };
+    crate::projects::refresh_for_job(state, print.job_id.as_deref());
+    crate::events::print_outcome(state, &print);
 }
 
 #[cfg(test)]

@@ -6,6 +6,8 @@ import SlicePage from "./pages/Slice";
 import JobsPage from "./pages/Jobs";
 import JobPage from "./pages/Job";
 import PrintsPage from "./pages/Prints";
+import ProjectsPage from "./pages/Projects";
+import ProjectPage from "./pages/Project";
 import GuidePage from "./pages/Guide";
 import PrintersPage from "./pages/Printers";
 import LibraryPage from "./pages/Library";
@@ -80,6 +82,8 @@ function Gate() {
         <Route path="jobs" element={<JobsPage />} />
         <Route path="jobs/:id" element={<JobPage />} />
         <Route path="prints" element={<PrintsPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:id" element={<ProjectPage />} />
         <Route path="guide" element={<GuidePage />} />
         <Route path="printers" element={<PrintersPage />} />
         <Route path="profiles" element={<ProfilesPage />} />

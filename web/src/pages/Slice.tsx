@@ -14,6 +14,7 @@ import {
 } from "../engine/client";
 import type { EngineManifest, PlateLayout, SliceOptions } from "../engine/types";
 import { useJson } from "../api";
+import type { Project } from "../projects";
 import { BED_TYPES, loadedTrays, type NozzlePlan, type PrinterStatus } from "../printers";
 import {
   defaultSupportMaterials,
@@ -268,6 +269,11 @@ export default function SlicePage() {
   // A remembered group the user has since left falls back to personal.
   const groupId = chargeable.some((g) => g.id === groupChoice) ? groupChoice : "";
   const [keepLocal, setKeepLocal] = useState(() => localStorage.getItem(KEEP_LOCAL_KEY) === "1");
+  // The project the job's parts are for: "" none, "new", or a project id
+  // (?project=<id> picks one).
+  const [projectChoice, setProjectChoice] = useState(() => new URLSearchParams(window.location.search).get("project") ?? "");
+  const [newProjectName, setNewProjectName] = useState("");
+  const projects = useJson<Project[]>("/api/projects?status=open,on_hold").data?.filter((p) => p.can_edit);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
   );
@@ -730,6 +736,12 @@ export default function SlicePage() {
     formData.append("overrides", JSON.stringify(jobOverrides));
     if (groupId) formData.append("group_id", groupId);
     if (layout) formData.append("plates", JSON.stringify({ plates: layout.plates }));
+    // Every model becomes an item of the project, as many as are on the plates.
+    if (projectChoice === "new" && newProjectName.trim()) {
+      formData.append("project", JSON.stringify({ new: { name: newProjectName.trim() } }));
+    } else if (projectChoice && projectChoice !== "new") {
+      formData.append("project", JSON.stringify({ project_id: projectChoice }));
+    }
     // What the page would have sent untouched: the defaults-changed report
     // compares it with what the job was made from.
     formData.append(
@@ -745,7 +757,7 @@ export default function SlicePage() {
       }),
     );
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, projectChoice, newProjectName, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials]);
 
   const sliceOnServer = useCallback(async () => {
     if (modelFiles.length === 0) return;
@@ -754,6 +766,8 @@ export default function SlicePage() {
     const res = await fetch("/api/jobs", { method: "POST", body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    // A new project exists now: the next slice adds to it.
+    if (data.project_id) setProjectChoice(data.project_id);
     setResult({ ok: true, message: "Slicing on the server" });
     setSliced({ jobId: data.id });
     setView("preview");
@@ -780,8 +794,9 @@ export default function SlicePage() {
       for (const f of modelFiles) formData.append("model", f);
     }
     const res = await fetch("/api/jobs", { method: "POST", body: formData });
-    const job: JobRecord & { error?: string } = await res.json();
+    const job: JobRecord & { error?: string; project_id?: string | null } = await res.json();
     if (!res.ok) throw new Error(job.error ?? `HTTP ${res.status}`);
+    if (job.project_id) setProjectChoice(job.project_id);
     setBrowserJobId(job.id);
 
     let lastPost = 0;
@@ -1174,6 +1189,35 @@ export default function SlicePage() {
                 </option>
               ))}
             </select>
+          </label>
+
+          <label>
+            Project
+            <select value={projectChoice} onChange={(e) => setProjectChoice(e.target.value)} disabled={slicing}>
+              <option value="">None</option>
+              <option value="new">New project…</option>
+              {projects?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              {projectChoice && projectChoice !== "new" && projects && !projects.some((p) => p.id === projectChoice) && (
+                <option value={projectChoice}>(a project you can't add to)</option>
+              )}
+            </select>
+            {projectChoice === "new" && (
+              <input
+                placeholder="Project name"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                maxLength={200}
+                disabled={slicing}
+                aria-label="New project's name"
+              />
+            )}
+            {projectChoice && (
+              <span className="hint">Each model becomes one of the project's parts, as many as are on the plates.</span>
+            )}
           </label>
 
           <label>

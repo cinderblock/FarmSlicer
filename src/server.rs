@@ -790,6 +790,7 @@ async fn create_job(
     let mut placement_str = String::new();
     let mut plate_str = String::new();
     let mut proposed_str = String::new();
+    let mut project_str = String::new();
 
     while let Some(field) = multipart.next_field().await.map_err(|e| bad(&e))? {
         let name = field.name().unwrap_or("").to_string();
@@ -821,6 +822,7 @@ async fn create_job(
             "placement" => placement_str = text.trim().to_string(),
             "plate" | "plates" => plate_str = text.trim().to_string(),
             "proposed" => proposed_str = text.trim().to_string(),
+            "project" => project_str = text.trim().to_string(),
             "source" => inputs.source = text,
             "local_models" => {
                 let list: Vec<LocalModel> =
@@ -897,6 +899,13 @@ async fn create_job(
         return Err(bad(&format!("unknown build plate {:?}", inputs.bed_type)));
     }
 
+    let project = if project_str.is_empty() {
+        None
+    } else {
+        let p: JobProject = serde_json::from_str(&project_str).map_err(|e| bad(&format!("project: {e}")))?;
+        Some(p.check(&state, &tree, &viewer, &inputs, models.len()).map_err(|(c, e)| api_err(c, e))?)
+    };
+
     let (config_json, nozzle_plan) = match inputs.filaments.first() {
         Some(_) if !inputs.machine.is_empty() && !inputs.process.is_empty() => {
             let (config, plan) = job_config(&state, &inputs, overrides).map_err(|e| bad(&e))?;
@@ -935,6 +944,31 @@ async fn create_job(
     }
     uploaded.keep = true;
     let job_id = job.id.clone();
+    let mut project_id: Option<String> = None;
+    if let Some((project, items)) = project {
+        let project = match project {
+            Ok(p) => p,
+            Err(new) => {
+                let (p, _) = state.db.create_project(&crate::db::NewProject {
+                    name: &new.name,
+                    group_id: inputs.group_id.as_deref(),
+                    user_id: Some(&user.id),
+                    client_ref: new.client_ref.as_deref(),
+                    external_ref: new.external_ref.as_deref(),
+                    priority: new.priority.unwrap_or(0),
+                    due_at: new.due_at.as_deref(),
+                    notes: "",
+                });
+                p
+            }
+        };
+        let job = state.db.get_job(&job_id).expect("job just created");
+        if let Err(e) = crate::projects::link_job(&state, &project, &job, &items) {
+            // Checked above; a failure here is a bug, not the caller's.
+            eprintln!("job {job_id}: can't count it for project {}: {e}", project.id);
+        }
+        project_id = Some(project.id);
+    }
 
     if inputs.source == "browser" {
         // The client owns the slicing; the job just tracks it.
@@ -943,6 +977,7 @@ async fn create_job(
         let job = state.db.get_job(&job_id).expect("job just created");
         let mut body = json!(job);
         body["slice_options"] = browser_slice_options(&state, &job, &config_json);
+        body["project_id"] = json!(project_id);
         return Ok((StatusCode::CREATED, Json(body)));
     }
 
@@ -952,7 +987,116 @@ async fn create_job(
         run_slice(&state_clone, &job_id, &config_json);
     });
 
-    Ok((StatusCode::CREATED, Json(json!(job))))
+    let mut body = json!(job);
+    body["project_id"] = json!(project_id);
+    Ok((StatusCode::CREATED, Json(body)))
+}
+
+/// `POST /api/jobs`'s optional `project`: the project the job's plates are
+/// for (an existing one, or a new one charged to the job's group) and
+/// which parts count for which items (omitted: every model becomes an item,
+/// as many as it has copies).
+#[derive(Deserialize)]
+struct JobProject {
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    new: Option<NewJobProject>,
+    #[serde(default)]
+    items: Vec<crate::projects::LinkItem>,
+}
+
+#[derive(Deserialize)]
+struct NewJobProject {
+    name: String,
+    #[serde(default)]
+    client_ref: Option<String>,
+    #[serde(default)]
+    external_ref: Option<String>,
+    #[serde(default)]
+    due_at: Option<String>,
+    #[serde(default)]
+    priority: Option<i64>,
+}
+
+type JobProjectTarget = (Result<crate::db::Project, NewJobProject>, Vec<crate::projects::LinkItem>);
+
+impl JobProject {
+    /// Everything the link will need, checked before the job exists.
+    fn check(
+        self,
+        state: &AppState,
+        tree: &crate::groups::Tree,
+        viewer: &crate::groups::Viewer,
+        inputs: &JobInputs,
+        models: usize,
+    ) -> Result<JobProjectTarget, (StatusCode, String)> {
+        let bad = |e: String| (StatusCode::BAD_REQUEST, e);
+        let target = match (self.project_id, self.new) {
+            (Some(id), None) => {
+                let p = state
+                    .db
+                    .get_project(&id)
+                    .filter(|p| crate::projects::can_see(tree, viewer, p))
+                    .ok_or((StatusCode::NOT_FOUND, "project not found".to_string()))?;
+                if !crate::projects::can_edit(tree, viewer, &p) {
+                    return Err((StatusCode::FORBIDDEN, "you can't add to that project".into()));
+                }
+                if let Some(bad_item) = self.items.iter().filter_map(|i| i.item_id.as_ref()).find(|id| {
+                    !state.db.get_item(id).is_some_and(|i| i.project_id == p.id)
+                }) {
+                    return Err(bad(format!("project: no item {bad_item} in that project")));
+                }
+                Ok(p)
+            }
+            (None, Some(mut new)) => {
+                new.name = new.name.trim().chars().take(200).collect();
+                if new.name.is_empty() {
+                    return Err(bad("project: a new project needs a name".into()));
+                }
+                if self.items.iter().any(|i| i.item_id.is_some()) {
+                    return Err(bad("project: a new project has no items yet".into()));
+                }
+                new.due_at = new
+                    .due_at
+                    .as_deref()
+                    .filter(|d| !d.trim().is_empty())
+                    .map(crate::projects::parse_due)
+                    .transpose()
+                    .map_err(bad)?;
+                if new.priority.is_some_and(|p| !(-100..=100).contains(&p)) {
+                    return Err(bad("project: priority -100 to 100".into()));
+                }
+                let trim = |v: Option<String>| v.map(|s| s.trim().chars().take(200).collect::<String>()).filter(|s| !s.is_empty());
+                new.client_ref = trim(new.client_ref);
+                new.external_ref = trim(new.external_ref);
+                if let Some(ext) = &new.external_ref {
+                    if state.db.project_by_external_ref(inputs.group_id.as_deref(), ext).is_some() {
+                        return Err((StatusCode::CONFLICT, "project: a project with this external_ref exists; add to it by project_id".into()));
+                    }
+                }
+                Err(new)
+            }
+            _ => return Err(bad("project: give project_id or new".into())),
+        };
+        let mut seen = Vec::new();
+        for i in &self.items {
+            match i.model {
+                Some(m) if m >= 0 && (m as usize) < models => {
+                    if seen.contains(&m) {
+                        return Err(bad(format!("project: model {m} is given twice")));
+                    }
+                    seen.push(m);
+                }
+                None if models == 1 => {}
+                _ => return Err(bad("project: each item names one of the job's models (model: 0-based)".into())),
+            }
+            if i.quantity.is_some_and(|q| !(1..=crate::projects::MAX_QUANTITY).contains(&q)) {
+                return Err(bad(format!("project: quantity 1 to {}", crate::projects::MAX_QUANTITY)));
+            }
+        }
+        Ok((target, self.items))
+    }
 }
 
 /// The config a job slices with: its profiles resolved, the overrides on
@@ -1634,6 +1778,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())
         .merge(prints_api::routes())
+        .merge(crate::projects_api::routes())
         .merge(crate::preview_api::routes())
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())

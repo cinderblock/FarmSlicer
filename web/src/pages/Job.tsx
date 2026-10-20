@@ -8,6 +8,7 @@ import SendDialog from "../components/SendDialog";
 import GcodeCheckDetails, { GcodeChip } from "../components/GcodeCheck";
 import GcodePreview from "../components/preview/GcodePreview";
 import NozzlePlanView from "../components/NozzlePlanView";
+import JobProjects from "../components/JobProjects";
 import type { BedShape } from "../components/ModelViewer";
 import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
@@ -294,6 +295,8 @@ export default function JobPage() {
           {plate?.check && <GcodeCheckDetails check={plate.check} open={plate.check.findings.length > 0} />}
         </>
       )}
+
+      {done && <JobProjects jobId={job.id} />}
 
       {technical.length > 0 && (
         <details className="hint job-technical">

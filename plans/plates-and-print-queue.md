@@ -250,6 +250,11 @@ Decisions here are mine unless marked; the user can overrule any of them.
 - **Reprints:** an item with missing copies gets a proposal: queue an
   existing plate that carries it again (enough times), or (step 7) a new
   plate with only the missing copies.
+- *While building:* a part on a job plate counts for at most one item
+  (`job_items` keyed by job, plate, part = `model:N` | `object:<name>`),
+  or one print would count for two projects. An item made from a job
+  whose part already counts elsewhere is a recipe only (`linked: false`);
+  its copies need plates of their own (re-slice, or step 7).
 
 ### Step 4: the queue
 
@@ -349,7 +354,14 @@ Decisions here are mine unless marked; the user can overrule any of them.
   setting, Prints page dialog, `tests/outcomes-e2e.mjs` (25 checks);
   full e2e suite green. Plain uploaded G-code is one line of one copy
   (its objects aren't read).
-- [ ] Step 3: projects and items (current).
+- [x] Step 3: projects and items: `src/projects.rs` (+ db/projects.rs,
+  projects_api.rs), idempotent creation by `external_ref`, items from a
+  job's parts (`GET /api/jobs/{id}/parts`), progress rollup, open ⇄
+  printed by itself, fulfillment statuses, `project` field on
+  `POST /api/jobs`, Projects pages, Job page panel, Slice page field;
+  `tests/projects-e2e.mjs`; full e2e suite green. UI not yet checked in
+  a browser (do it with step 4).
+- [ ] Step 4: the queue (current).
 
 ## Things not to do
 

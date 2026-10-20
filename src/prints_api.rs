@@ -639,6 +639,7 @@ async fn record_outcome(
     let summary = crate::outcomes::summary(&outcomes);
     state.db.set_print_outcome(&id, summary, &user.username, note.as_deref(), &outcomes);
     println!("Print {id}: {} says {summary}", user.username);
+    crate::outcomes::after_record(&state, &id);
     let print = state.db.get_print(&id).expect("print exists");
     let mut v = json!(print);
     add_outcome(&state, &tree, &viewer, &print, &mut v);
