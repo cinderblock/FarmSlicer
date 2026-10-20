@@ -50,6 +50,8 @@ fn view(state: &AppState, p: &Printer, user: &User) -> Value {
         "area": p.area,
         "plate_type": p.plate_type,
         "nozzle_priority": p.nozzle_priority,
+        // How it takes the queue (src/dispatch.rs).
+        "dispatch": crate::dispatch::view(state, &p.id),
     })
 }
 

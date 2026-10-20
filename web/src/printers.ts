@@ -58,6 +58,17 @@ export interface Printer {
   plate_type: string;
   /** Dual-nozzle printers: where supports and parts go (src/nozzles.rs); "" = the default. */
   nozzle_priority: string;
+  /** How it takes the queue (src/dispatch.rs). */
+  dispatch?: DispatchState;
+}
+
+export interface DispatchState {
+  send_mode: "manual" | "confirm" | "yolo";
+  set_by: string | null;
+  set_at: string | null;
+  bed_clear_at: string | null;
+  /** "bed": someone has to say the bed is clear before the next plate. */
+  waiting_for: "bed" | null;
 }
 
 /** `printers.nozzle_priority` choices ("" = the first). */

@@ -146,7 +146,8 @@ async fn list_queue(
                 "busy": crate::prints_api::busy_reason(&state, p),
                 "next": next,
                 "operates": viewer.admin || crate::pools::operates(&state, &viewer, Some(&p.id)),
-                "send_mode": crate::dispatch::send_mode(p),
+                "send_mode": crate::dispatch::send_mode(&state, p),
+                "dispatch": crate::dispatch::view(&state, &p.id),
             })
         })
         .collect();

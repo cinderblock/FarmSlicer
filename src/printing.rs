@@ -581,6 +581,7 @@ fn apply(state: &AppState, status: &PrinterStatus) {
                 if matches!(new_status, "finished" | "failed" | "cancelled") {
                     crate::outcomes::record_automatic(state, &print, new_status, error.as_deref());
                     crate::queue::print_ended(state, &print, new_status);
+                    crate::dispatch::poke(state);
                 }
                 if new_status != "paused" && !(new_status == "printing" && print.status == "paused") {
                     crate::events::print_status(state, &print.id, new_status);

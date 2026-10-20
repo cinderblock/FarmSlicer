@@ -106,7 +106,19 @@ export default function PrinterCard({
   return (
     <div className="card printer-card">
       <div className="printer-header">
-        <h3>{printer.name}</h3>
+        <h3>
+          {printer.name}
+          {printer.dispatch?.send_mode === "yolo" && (
+            <span className="send-mode-yolo" title={`Sends the next queued plate by itself, without asking (set by ${printer.dispatch.set_by ?? "?"})`}>
+              YOLO
+            </span>
+          )}
+          {printer.dispatch?.send_mode === "confirm" && (
+            <span className="send-mode-confirm" title="Sends the next queued plate once someone says the bed is clear">
+              auto
+            </span>
+          )}
+        </h3>
         <span className="printer-state">
           {label}
           <span className={`status-dot status-${tone}`} />

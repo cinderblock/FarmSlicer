@@ -180,6 +180,7 @@ export interface QueuePrinter {
   /** The viewer may send the queue to it. */
   operates: boolean;
   send_mode: "manual" | "confirm" | "yolo";
+  dispatch: import("./printers").DispatchState;
 }
 
 export interface QueueView {

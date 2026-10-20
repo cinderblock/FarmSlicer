@@ -27,6 +27,8 @@ export default function OutcomeDialog({ print, onClose, onSaved }: Props) {
     })),
   );
   const [note, setNote] = useState(print.outcome_note ?? "");
+  // Recording an outcome usually means the parts are off the bed.
+  const [bedClear, setBedClear] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -48,6 +50,7 @@ export default function OutcomeDialog({ print, onClose, onSaved }: Props) {
         })),
         note,
       });
+      if (bedClear && print.printer_id) await apiJson(`/api/printers/${print.printer_id}/bed-clear`, "POST", {});
       onSaved(saved);
     } catch (e) {
       setError(errorText(e));
@@ -152,6 +155,12 @@ export default function OutcomeDialog({ print, onClose, onSaved }: Props) {
           Note (optional)
           <textarea rows={2} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />
         </label>
+        {print.printer_id && (
+          <label className="checkbox-label">
+            <input type="checkbox" checked={bedClear} onChange={(e) => setBedClear(e.target.checked)} />
+            The bed is clear: {print.printer_name} may take the next queued plate
+          </label>
+        )}
         {error && <p className="printer-error">{error}</p>}
         <div className="modal-actions">
           <button className="btn-sm" onClick={onClose}>

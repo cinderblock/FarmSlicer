@@ -269,8 +269,13 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `src/events.rs` — every event goes through `emit` → `webhooks::enqueue`
   (print status from `printing::apply` and the send task, outcomes from
   `outcomes::after_record`, item/project from `projects::refresh` via
-  `project_items.done_at`); `src/dispatch.rs` is filled in by step 7 of
-  `plans/plates-and-print-queue.md`
+  `project_items.done_at`)
+- `src/dispatch.rs` — send modes (`printer_dispatch`: manual | confirm |
+  yolo, `set_by`, `bed_clear_at`): `ready()` (pure, tested) decides,
+  `run` ticks every 15 s and on `poke` (queue changes, prints ending),
+  sends through `queue_api::send_entry` as the mode setter, skips refused
+  plates for 10 min (in memory). YOLO stops after a failed/stopped print
+  until the bed is cleared
 - `src/printing.rs` — sending: compatibility (package format per protocol,
   model, nozzle), AMS mapping where the protocol maps filaments, dispatch to
   the driver's send, and `track()` moving prints along from printer

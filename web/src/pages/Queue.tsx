@@ -46,6 +46,11 @@ export default function QueuePage() {
       reload();
     }
   };
+  const setMode = (printerId: string, name: string, mode: string) => {
+    if (mode === "yolo" && !window.confirm(`YOLO: ${name} will start the next plate as soon as it is free, with nobody checking the bed. Only for printers that clear their own bed (or when you accept the risk). After a failed print it waits for you.`)) return;
+    act(printerId, () => apiJson(`/api/printers/${printerId}/send-mode`, "POST", { mode, acknowledge: mode === "yolo" }));
+  };
+  const bedClear = (printerId: string) => act(printerId, () => apiJson(`/api/printers/${printerId}/bed-clear`, "POST", {}));
   const sendNext = (printerId: string) => act(printerId, () => apiJson(`/api/printers/${printerId}/send-next`, "POST", {}));
   const sendTo = (entry: QueueEntry, printerId: string) =>
     act(entry.id, () => apiJson(`/api/queue/${entry.id}/send`, "POST", { printer_id: printerId }));
@@ -77,8 +82,31 @@ export default function QueuePage() {
                 <div className="queue-printer-name">
                   {p.name}
                   {p.send_mode === "yolo" && <span className="send-mode-yolo" title="Sends the next plate by itself, without asking">YOLO</span>}
-                  {p.send_mode === "confirm" && <span className="hint"> · sends when the bed is cleared</span>}
                 </div>
+                {p.operates ? (
+                  <select
+                    className="send-mode-select"
+                    value={p.send_mode}
+                    aria-label={`How ${p.name} takes the queue`}
+                    onChange={(e) => setMode(p.printer_id, p.name, e.target.value)}
+                  >
+                    <option value="manual">Send by hand</option>
+                    <option value="confirm">Send when the bed is cleared</option>
+                    <option value="yolo">YOLO: send as soon as it's free</option>
+                  </select>
+                ) : (
+                  p.send_mode !== "manual" && <div className="hint">{p.send_mode === "yolo" ? "Sends by itself" : "Sends when the bed is cleared"}</div>
+                )}
+                {p.dispatch?.waiting_for === "bed" && (
+                  <div className="queue-bed">
+                    Waiting for the bed to be cleared
+                    {p.operates && (
+                      <button className="btn-sm" disabled={busyId === p.printer_id} onClick={() => bedClear(p.printer_id)}>
+                        Bed is clear
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="hint">{p.busy ?? "Free"}</div>
                 <div className="queue-printer-next">
                   {next ? <>Next: {next.visible ? `${next.name} · plate ${next.plate}` : "a plate you can't see"}</> : <span className="hint">Nothing in the queue fits</span>}

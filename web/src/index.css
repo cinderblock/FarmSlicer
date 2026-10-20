@@ -3746,3 +3746,30 @@ a.btn-sm {
 .webhook-main { flex: 1; min-width: 16rem; word-break: break-all; }
 .deliveries { margin-top: 0.5rem; font-size: 0.85rem; }
 .filters input[type="date"] { min-width: 9.5rem; }
+.send-mode-confirm {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #1e3a5f;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.send-mode-select {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.8rem;
+}
+.queue-bed {
+  color: var(--warning);
+  font-size: 0.85rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.outcome-dialog .checkbox-label { display: flex; gap: 0.5rem; align-items: center; }
+.outcome-dialog .checkbox-label input { width: auto; }

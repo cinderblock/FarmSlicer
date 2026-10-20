@@ -379,7 +379,11 @@ Decisions here are mine unless marked; the user can overrule any of them.
   items, projects), usage report, Integrations page;
   `tests/integration-e2e.mjs` with a signature-checking receiver; 19 e2e
   suites green; page checked in a browser.
-- [ ] Step 7: send modes and auto-plating (current).
+- [x] Step 7a: send modes: `src/dispatch.rs` (+ db/dispatch.rs),
+  confirm / YOLO (acknowledged; stops after a failure), bed-clear (Queue
+  page, outcome dialog), mode picker and badges; `tests/dispatch-e2e.mjs`;
+  20 e2e suites green; Queue and Printers pages checked in a browser.
+- [ ] Step 7b: auto-plating with libslic3r's arrange (current).
 
 - The queue's order needs result-column aliases (`held`, `due`,
   `project_priority`) in ORDER BY: a number inside an expression
@@ -394,6 +398,15 @@ Decisions here are mine unless marked; the user can overrule any of them.
 - The usage report splits a plate's print between the projects on it by
   copies: a plate with 3 of a project's brackets and 1 unassigned clip is
   0.75 of a print for the project, 0.25 unassigned.
+
+- YOLO after a failure: a plate must not land on a failed print's
+  remains, so YOLO goes on by itself only after a print that finished;
+  after a failed or stopped one it waits for someone to clear the bed
+  (my call while building; the user's decision said only "opt-in,
+  explicit and visible").
+- Dispatch tests must follow specific print ids: in YOLO a new print
+  starts the moment one finishes, so "wait for the newest print to
+  finish" waits through the next one too.
 
 ## Things not to do
 

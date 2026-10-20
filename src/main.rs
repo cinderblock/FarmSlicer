@@ -136,6 +136,7 @@ async fn main() {
     // Follow sent prints through their printers' reports.
     tokio::spawn(printing::track(state.clone()));
     tokio::spawn(webhooks::run(state.clone()));
+    tokio::spawn(dispatch::run(state.clone()));
     // Check stored packages the current G-code checker hasn't seen.
     safety::spawn_recheck(state.clone());
 
