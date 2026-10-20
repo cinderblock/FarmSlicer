@@ -384,6 +384,7 @@ pub fn spawn_send(state: Arc<AppState>, print: PrintRecord, package_path: String
             eprintln!("Print {} ({} on {}): {e}", print.id, print.name, print.printer_name);
             state.db.update_print(&print.id, "failed", None, Some(&e));
             crate::incidents::print_failed(&state, &print, &e);
+            crate::queue::print_ended(&state, &print, "failed");
         }
     });
 }
@@ -578,6 +579,7 @@ fn apply(state: &AppState, status: &PrinterStatus) {
             if state.db.update_print(&print.id, new_status, progress, error.as_deref()) && new_status != print.status {
                 if matches!(new_status, "finished" | "failed" | "cancelled") {
                     crate::outcomes::record_automatic(state, &print, new_status, error.as_deref());
+                    crate::queue::print_ended(state, &print, new_status);
                 }
                 println!(
                     "Print {} ({} on {}): {} -> {new_status}{}",
@@ -613,11 +615,13 @@ pub async fn track(state: Arc<AppState>) {
                     if print.status == "starting" && age_secs(&print.updated_at) > START_DEADLINE_SECS {
                         state.db.update_print(&print.id, "failed", None, Some("the printer never started this print"));
                         crate::incidents::print_failed(&state, &print, "the printer never started this print");
+                        crate::queue::print_ended(&state, &print, "failed");
                         eprintln!("Print {}: never started on {}; giving up", print.id, print.printer_name);
                     }
                     // A print whose upload task died with the process.
                     if print.status == "uploading" && age_secs(&print.updated_at) > 15 * 60 {
                         state.db.update_print(&print.id, "failed", None, Some("the upload was interrupted"));
+                        crate::queue::print_ended(&state, &print, "failed");
                     }
                 }
             }

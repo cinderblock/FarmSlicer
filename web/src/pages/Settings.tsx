@@ -17,6 +17,7 @@ interface SiteSettings {
   uploads: UploadPolicy;
   gcode_limits: GcodeLimits;
   finished_outcome: "ask" | "good";
+  requeue_failed: boolean;
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -104,6 +105,17 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
             can correct its record on the Prints page.
           </span>
         </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={s.requeue_failed}
+            onChange={(e) => setS({ ...s, requeue_failed: e.target.checked })}
+          />
+          Put a plate back in the queue when its print fails
+        </label>
+        <span className="hint">
+          Otherwise the project shows the copies as missing, and someone queues them again (Projects page).
+        </span>
 
         <h3>Sliced files and G-code checks</h3>
         <p className="hint">

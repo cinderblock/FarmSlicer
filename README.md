@@ -294,6 +294,35 @@ pages); nothing is set through environment variables.
   pool. Group quotas are set by admins or managers of a parent group, never
   by the group's own managers.
 
+### Projects, the queue and outcomes
+
+Two views of the same records: what people need printed (projects) and
+what the printers do next (the queue).
+
+- **Outcomes**: the printer only knows "finished" or "failed", so people
+  say how each print came out, per kind of part (3 brackets: 2 good, 1
+  failed: warping). Prints the printer fails or stops are recorded failed
+  on their own; finished ones wait on the Queue and Prints pages
+  ("unchecked") unless the site counts them good (`finished_outcome`).
+- **Projects** list parts and how many of each (items), each made from a
+  job's part (Slice page: Project; a job's page: Add to a project; or the
+  API). A job plate's parts count for those items, so every print's
+  outcome moves the project along: good, failed, unchecked, printing,
+  queued, and copies still needing a plate. A project becomes `printed` by
+  itself when every part has enough good copies; `ready`, `shipped`,
+  `on_hold` and `cancelled` are for people or ordering software.
+  FarmSlicer keeps no customer records: a project carries the ordering
+  tool's `client_ref` and `external_ref` (creating the same
+  `external_ref` twice returns the first project).
+- **The queue** holds plates waiting for a printer (one entry per print:
+  "this plate 5 times" is five entries), ordered by the entry's priority,
+  then its projects' priority and due date, then age; projects on hold
+  wait. Each entry says which printers it fits (model, G-code check, a pin
+  to one printer); a printer's **Send next** sends the first that fits.
+  A print that never started puts its entry back; one that failed ends
+  it (or queues the plate again, with `requeue_failed`). A project's
+  missing copies are queued again with one button.
+
 ## Building
 
 Everything heavy is in the `Dockerfile` (five stages: OrcaSlicer deps →
@@ -388,6 +417,11 @@ summary prints the `pin.json` to paste there.
 | `GET /api/prints?printer=&active=1&pending=1&unchecked=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status (each print's `lines`: what it holds, one per kind of part, and `outcome`); pause/resume/stop/speed as the printer allows (sender, group managers, admins) |
 | `POST /api/prints/{id}/outcome`, `GET /api/outcome-reasons` | how an ended print came out: `{all: "good"\|"failed", reason, note}` or `{lines: [{line, good, failed, reason}]}`, every copy accounted for; prints the printer fails or stops are recorded failed automatically, finished ones stay unchecked unless the site setting `finished_outcome` is `good` |
 | `POST /api/prints/{id}/approve`, `POST /api/prints/{id}/reject` | decide a print that broke the print rules (admins, the group's managers) or whose G-code needs review (`safety_review`: admins only); the requester may withdraw |
+| `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects (`?status=active\|open,...&client_ref=&external_ref=&q=`), each with `summary` and, singly, its `items` (progress: `good`, `failed`, `unchecked`, `printing`, `queued`, `missing`, `done`) and the job plates carrying them; create with `{name, group_id, client_ref, external_ref, due_at, priority, notes, items: [{name, quantity} \| {job_id, model \| part, quantity}]}` (200 with the existing project for a known `external_ref`) |
+| `POST /api/projects/{id}/status` | `{status: open\|ready\|shipped\|on_hold\|cancelled, note}` (`printed` is set when every item is done) |
+| `POST /api/projects/{id}/items`, `PATCH/DELETE /api/projects/{id}/items/{item}`, `POST /api/projects/{id}/items/{item}/reprint` | items; queue a plate carrying the item as often as its missing copies need |
+| `POST /api/projects/{id}/jobs`, `DELETE /api/projects/{id}/jobs/{job}`, `GET /api/jobs/{id}/parts` | count a job's parts for the project's items (`items: [{model \| part, item_id \| name, quantity}]`, omitted = each part a new item); a job's parts and what they count for. `POST /api/jobs` takes `project` (`{project_id \| new: {name, ...}, items}`) to do the same as it creates the job |
+| `GET/POST /api/queue`, `PATCH/DELETE /api/queue/{id}`, `POST /api/queue/{id}/send`, `POST /api/printers/{id}/send-next` | the queue (`?status=queued\|sent\|done&printer=`: entries in order, each with `fits` per printer, and per printer the entry it would take `next`); queue `{job_id, plate \| plates, count, priority, printer_id, note}`; change priority (`position: "top"`), pin, note; send one entry, or a printer's next (admins, the printer's operators) |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}` or `{material}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament or a material, or cool it |
 | `GET /api/printers/{id}/thumbnail` | picture of the job the printer runs or ran (fetched from the printer for prints started elsewhere) |
@@ -436,6 +470,9 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 bambu/, moonraker/, octoprint/, prusalink/, sdcp/ (drivers),
                 printing.rs + prints_api.rs (sending, tracking),
                 outcomes.rs + db/outcomes.rs (how prints came out),
+                projects.rs + projects_api.rs + db/projects.rs (projects),
+                queue.rs + queue_api.rs + db/queue.rs (the print queue),
+                events.rs (what happened, for webhooks),
                 preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,
                 discovery/ (SSDP, mDNS, SDCP), feedback.rs +

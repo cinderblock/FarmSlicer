@@ -131,3 +131,64 @@ export function overdue(due: string | null, status: ProjectStatus): boolean {
   const d = new Date(due.length === 10 ? `${due}T23:59:59` : `${due.replace(" ", "T")}Z`);
   return d.getTime() < Date.now();
 }
+
+// -- The queue (src/queue.rs) --
+
+export interface Fit {
+  printer_id: string;
+  /** Why it can't go there at all (pin, pool, model, G-code). */
+  refused: string | null;
+  /** Why not right now (busy, offline). */
+  busy: string | null;
+  /** Filament the printer would need changed first. */
+  problems: string[];
+}
+
+export interface QueueEntry {
+  id: string;
+  job_id?: string;
+  plate: number;
+  status: "queued" | "sent" | "printed" | "failed" | "cancelled";
+  priority: number;
+  printer_id: string | null;
+  pool_id: string | null;
+  print_id?: string | null;
+  note?: string | null;
+  created_by_name?: string | null;
+  created_at: string;
+  sent_at?: string | null;
+  held: boolean;
+  /** false: a job the viewer can't see (only its place in the queue). */
+  visible: boolean;
+  name?: string;
+  can_manage: boolean;
+  lines?: { line: number; name: string; planned: number; item_id: string | null }[];
+  projects?: { id: string; name: string; status: ProjectStatus; due_at: string | null }[];
+  print_time_sec?: number | null;
+  weight_g?: number | null;
+  has_thumbnail?: boolean;
+  due_at?: string | null;
+  fits?: Fit[];
+}
+
+export interface QueuePrinter {
+  printer_id: string;
+  name: string;
+  busy: string | null;
+  /** The entry it would take next. */
+  next: string | null;
+  /** The viewer may send the queue to it. */
+  operates: boolean;
+  send_mode: "manual" | "confirm" | "yolo";
+}
+
+export interface QueueView {
+  entries: QueueEntry[];
+  printers: QueuePrinter[];
+  counts: Partial<Record<QueueEntry["status"], number>>;
+}
+
+/** "3× Bracket, 1× Clip" */
+export function linesText(lines: { name: string; planned: number }[] | undefined): string {
+  return (lines ?? []).map((l) => (l.planned > 1 ? `${l.planned}× ${l.name}` : l.name)).join(", ");
+}

@@ -1779,6 +1779,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(printers_api::routes())
         .merge(prints_api::routes())
         .merge(crate::projects_api::routes())
+        .merge(crate::queue_api::routes())
         .merge(crate::preview_api::routes())
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())

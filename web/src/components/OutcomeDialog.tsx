@@ -67,7 +67,12 @@ export default function OutcomeDialog({ print, onClose, onSaved }: Props) {
         </div>
         <div className="send-plate">
           {print.job_id && (
-            <img className="plate-thumb" src={`/api/jobs/${print.job_id}/thumbnail?plate=${print.plate}`} alt="" />
+            <img
+              className="plate-thumb"
+              src={`/api/jobs/${print.job_id}/thumbnail?plate=${print.plate}`}
+              alt=""
+              onError={(e) => (e.currentTarget.style.display = "none")}
+            />
           )}
           <div>
             <div>

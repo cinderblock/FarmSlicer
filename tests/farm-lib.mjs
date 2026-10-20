@@ -5,7 +5,7 @@ import { zip } from "./lib.mjs";
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Poll `client.get(path)` until `ok(json)`, at most `tries` × 250 ms. */
-export async function until(client, path, ok, tries = 80) {
+export async function until(client, path, ok, tries = 120) {
   let v;
   for (let i = 0; i < tries; i++) {
     v = (await client.get(path)).json;

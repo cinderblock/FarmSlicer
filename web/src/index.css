@@ -3604,3 +3604,86 @@ a.btn-sm {
 }
 .add-item input[type="number"] { width: 5rem; }
 .job-projects ul { margin: 0.25rem 0 0.5rem; padding-left: 1.25rem; }
+
+/* The queue (pages/Queue.tsx) */
+.queue-printers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 1rem;
+}
+.queue-printer {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--success);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: var(--bg-card);
+}
+.queue-printer.busy { border-left-color: var(--accent); }
+.queue-printer-name { font-weight: 600; }
+.queue-printer-next { font-size: 0.9rem; }
+.queue-printer button { align-self: flex-start; }
+.send-mode-yolo {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #3a1e1e;
+  color: var(--error);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.queue-unchecked {
+  border: 1px dashed var(--warning);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  margin-bottom: 1rem;
+}
+.queue-unchecked h3 { margin: 0.25rem 0; font-size: 1rem; }
+.queue-unchecked ul { margin: 0; padding-left: 1.25rem; }
+.queue-unchecked li { margin: 0.3rem 0; }
+.queue-priority { display: inline-flex; gap: 0.35rem; align-items: center; }
+.queue-priority input { width: 4.5rem; }
+.queue-queued { background: #2a2a3e; color: var(--text-dim); }
+.queue-sent { background: #1e3a5f; color: var(--accent); }
+.queue-printed { background: #1e3a2e; color: var(--success); }
+.queue-failed { background: #3a1e1e; color: var(--error); }
+.queue-cancelled { background: #2a2a3e; color: var(--text-dim); }
+.inline-label { display: inline-flex; align-items: center; gap: 0.25rem; }
+.inline-label input { width: 4.5rem; }
+.project-plate-text { flex: 1; }
+
+/* Fields on the farm pages (queue, projects, outcomes) */
+.data-table input,
+.filters select,
+.filters input,
+.add-item input,
+.add-item select,
+.outcome-dialog textarea,
+.project-form textarea,
+.job-projects select,
+.job-projects input {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.project-form textarea { width: 100%; }
+@media (max-width: 800px), (pointer: coarse) {
+  .data-table input,
+  .filters select,
+  .filters input,
+  .add-item input,
+  .add-item select,
+  .outcome-dialog textarea {
+    font-size: 16px;
+  }
+}
+.project-job h4 a,
+.page > p.hint a { color: var(--accent); }

@@ -9,6 +9,7 @@ import GcodeCheckDetails, { GcodeChip } from "../components/GcodeCheck";
 import GcodePreview from "../components/preview/GcodePreview";
 import NozzlePlanView from "../components/NozzlePlanView";
 import JobProjects from "../components/JobProjects";
+import QueueButton from "../components/QueueButton";
 import type { BedShape } from "../components/ModelViewer";
 import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
@@ -148,6 +149,7 @@ export default function JobPage() {
               Print…
             </button>
           )}
+          {done && job.package_json && <QueueButton jobId={job.id} plates={plates.map((p) => p.index)} />}
           {canReslice && (
             <button
               className="btn-sm"

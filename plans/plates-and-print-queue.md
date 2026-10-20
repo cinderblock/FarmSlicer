@@ -361,7 +361,20 @@ Decisions here are mine unless marked; the user can overrule any of them.
   `POST /api/jobs`, Projects pages, Job page panel, Slice page field;
   `tests/projects-e2e.mjs`; full e2e suite green. UI not yet checked in
   a browser (do it with step 4).
-- [ ] Step 4: the queue (current).
+- [x] Step 4: the queue: `src/queue.rs` (+ db/queue.rs, queue_api.rs),
+  `prints_api::send_plate` shared by direct and queued sends, entries
+  follow their prints, `requeue_failed`, reprints of missing copies,
+  Queue page (printers + Send next, unchecked prints, entries with fits),
+  Job page "Add to queue", project buttons; `tests/queue-e2e.mjs`; 17 e2e
+  suites green. UI checked in a browser (desktop and 360 px) with a
+  seeded stub server: Queue, Projects, Project, outcome dialog.
+- [ ] Step 5: pools and operators (current).
+
+- The queue's order needs result-column aliases (`held`, `due`,
+  `project_priority`) in ORDER BY: a number inside an expression
+  (`COALESCE(19, 0)`) is a literal to SQLite, not a column.
+- Tests that stop a print need a fake print long enough to still be
+  running (4 s): a 1.5 s one finished before the stop arrived.
 
 ## Things not to do
 

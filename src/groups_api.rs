@@ -666,6 +666,7 @@ fn settings_json(state: &AppState) -> Value {
         "uploads": groups::site_uploads(&state.db),
         "gcode_limits": crate::gcode::site_limits(&state.db),
         "finished_outcome": crate::outcomes::finished_outcome(state),
+        "requeue_failed": crate::queue::requeue_failed(state),
     })
 }
 
@@ -707,6 +708,9 @@ struct UpdateSettings {
     /// copy `good` (src/outcomes.rs).
     #[serde(default)]
     finished_outcome: Option<String>,
+    /// Queue a plate again when its print fails (src/queue.rs).
+    #[serde(default)]
+    requeue_failed: Option<bool>,
 }
 
 async fn update_settings(
@@ -761,6 +765,9 @@ async fn update_settings(
             return Err(err(StatusCode::BAD_REQUEST, "finished_outcome: ask | good"));
         }
         state.db.set_setting("finished_outcome", Some(v));
+    }
+    if let Some(v) = body.requeue_failed {
+        state.db.set_setting("requeue_failed", Some(if v { "true" } else { "false" }));
     }
     if let Some(l) = &body.gcode_limits {
         l.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;

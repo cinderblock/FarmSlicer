@@ -471,13 +471,6 @@ impl Db {
             .map(|s| format!("'{s}'"))
             .collect::<Vec<_>>()
             .join(", ");
-        let queued = if self.has_queue() {
-            "(SELECT COALESCE(SUM(ji.copies), 0) FROM job_items ji
-                JOIN queue_entries q ON q.job_id = ji.job_id AND q.plate = ji.plate
-              WHERE ji.item_id = i.id AND q.status = 'queued')"
-        } else {
-            "0"
-        };
         let sql = format!(
             "SELECT i.id,
                 (SELECT COALESCE(SUM(o.good), 0) FROM print_outcomes o WHERE o.item_id = i.id),
@@ -488,7 +481,9 @@ impl Db {
                 (SELECT COALESCE(SUM(ji.copies), 0) FROM job_items ji
                     JOIN prints p ON p.job_id = ji.job_id AND p.plate = ji.plate
                   WHERE ji.item_id = i.id AND p.status IN ({active})),
-                {queued}
+                (SELECT COALESCE(SUM(ji.copies), 0) FROM job_items ji
+                    JOIN queue_entries q ON q.job_id = ji.job_id AND q.plate = ji.plate
+                  WHERE ji.item_id = i.id AND q.status = 'queued')
              FROM project_items i WHERE i.project_id = ?1 ORDER BY i.idx"
         );
         let conn = self.conn.lock().unwrap();
@@ -511,12 +506,6 @@ impl Db {
             .prepare(&format!("{} WHERE p.job_id = ?1 ORDER BY p.created_at, p.rowid", Self::PRINT_SELECT))
             .unwrap();
         stmt.query_map(params![job_id], Self::print_from_row).unwrap().filter_map(|r| r.ok()).collect()
-    }
-
-    /// The queue's table exists (step 4 adds it; progress counts it then).
-    fn has_queue(&self) -> bool {
-        let conn = self.conn.lock().unwrap();
-        conn.prepare("SELECT 1 FROM queue_entries LIMIT 0").is_ok()
     }
 }
 

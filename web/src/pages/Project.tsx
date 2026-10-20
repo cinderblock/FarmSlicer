@@ -190,7 +190,7 @@ export default function ProjectPage() {
                   {j.sendable && (
                     <img className="job-thumb" src={`/api/jobs/${j.job_id}/thumbnail?plate=${n}`} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
                   )}
-                  <div>
+                  <div className="project-plate-text">
                     <strong>Plate {n}</strong>:{" "}
                     {parts.map((x) => `${x.copies}× ${p.items.find((i) => i.id === x.item_id)?.name ?? x.name}`).join(", ")}
                     <div className="hint">
@@ -201,6 +201,11 @@ export default function ProjectPage() {
                             .join(" · ")}
                     </div>
                   </div>
+                  {p.can_edit && j.sendable && (
+                    <button className="btn-sm" onClick={() => act(() => apiJson("/api/queue", "POST", { job_id: j.job_id, plate: n }))}>
+                      Queue
+                    </button>
+                  )}
                 </li>
               );
             })}
@@ -216,6 +221,14 @@ function ItemRow({ project, item, onChange, onError }: { project: ProjectDetail;
   const save = async (q: number) => {
     try {
       await apiJson(`/api/projects/${project.id}/items/${item.id}`, "PATCH", { quantity: q });
+      onChange();
+    } catch (e) {
+      onError(errorText(e));
+    }
+  };
+  const reprint = async () => {
+    try {
+      await apiJson(`/api/projects/${project.id}/items/${item.id}/reprint`, "POST", {});
       onChange();
     } catch (e) {
       onError(errorText(e));
@@ -260,6 +273,16 @@ function ItemRow({ project, item, onChange, onError }: { project: ProjectDetail;
         )}
       </td>
       <td className="cell-actions">
+        {project.can_edit && item.missing > 0 && project.jobs.some((j) => j.sendable && j.parts.some((x) => x.item_id === item.id)) && (
+          <button className="btn-sm" onClick={reprint} title="Queue a plate carrying this part as many times as the missing copies need">
+            Queue {item.missing} more
+          </button>
+        )}
+        {project.can_edit && item.missing > 0 && !project.jobs.some((j) => j.parts.some((x) => x.item_id === item.id)) && (
+          <Link className="btn-sm" to={`/slice?project=${project.id}`}>
+            Slice it
+          </Link>
+        )}
         {project.can_edit && (
           <button className="btn-sm btn-danger" onClick={remove}>
             Remove

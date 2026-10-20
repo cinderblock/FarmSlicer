@@ -6,8 +6,10 @@ use std::sync::Mutex;
 mod feedback;
 mod outcomes;
 mod projects;
+mod queue;
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
 pub use projects::{Item, JobItem, NewProject, Progress, Project, ProjectFilter};
+pub use queue::QueueEntry;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -562,6 +564,7 @@ impl Db {
         }
         outcomes::migrate(&conn);
         projects::migrate(&conn);
+        queue::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (

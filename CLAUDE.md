@@ -231,6 +231,26 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   Storage `src/db/outcomes.rs` (`print_outcomes`, `prints.outcome*`);
   `POST /api/prints/{id}/outcome`, the Prints page's `OutcomeDialog`.
   Plan: `plans/plates-and-print-queue.md`
+- `src/projects.rs` — projects (demand): items (a part × quantity, with a
+  recipe: a job and one of its models); `job_items` says which items a
+  job plate's parts count for (one item per part: `model:N` or
+  `object:<name>`, `part_key`); progress per item is counted in SQL
+  (`db/projects.rs` `project_progress`: outcomes, unchecked/active prints,
+  queued entries), `refresh` moves open ⇄ printed. `link_job` /
+  `recipe_item`; `POST /api/jobs`'s `project` field
+  (`server::JobProject`). API in `projects_api.rs`; pages
+  `Projects.tsx`, `Project.tsx`, `components/JobProjects.tsx`
+- `src/queue.rs` — the print queue (supply): `fit` (pin, pool,
+  `printing::incompatibility`, blocked G-code; busy and filament problems
+  reported, not refused), `next_for`, `print_ended` (called wherever a
+  print ends: `printing::apply`, the send task, the sweep, rejections).
+  Storage `db/queue.rs` (order in `ENTRY_ORDER`); API `queue_api.rs`.
+  Sends go through `prints_api::send_plate` (claims the entry before the
+  print, gives it back if nothing is sent; a direct send takes the
+  plate's oldest queued entry). Page `Queue.tsx`
+- `src/events.rs` — every event (`print.outcome`, `project.status`, ...)
+  goes through `emit`; `src/pools.rs` and `src/dispatch.rs` are filled in
+  by steps 5 and 7 of `plans/plates-and-print-queue.md`
 - `src/printing.rs` — sending: compatibility (package format per protocol,
   model, nozzle), AMS mapping where the protocol maps filaments, dispatch to
   the driver's send, and `track()` moving prints along from printer

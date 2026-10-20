@@ -243,7 +243,7 @@ fn active_print_on(state: &AppState, printer_id: &str) -> Option<PrintRecord> {
 }
 
 /// Why a printer can't take a print right now, if it can't.
-fn busy_reason(state: &AppState, printer: &Printer) -> Option<String> {
+pub(crate) fn busy_reason(state: &AppState, printer: &Printer) -> Option<String> {
     if let Some(p) = active_print_on(state, &printer.id) {
         return Some(format!(
             "{} is {} {}{}",
@@ -329,26 +329,27 @@ async fn job_targets(
     })))
 }
 
-#[derive(Deserialize)]
-struct SendRequest {
-    printer_id: String,
-    plate: Option<u32>,
+#[derive(Deserialize, Clone, Default)]
+pub(crate) struct SendRequest {
+    pub printer_id: String,
+    pub plate: Option<u32>,
     /// Tray slot per project filament (index = filament id - 1), -1 = none.
     /// Omitted: the suggestion.
-    ams_mapping: Option<Vec<i64>>,
+    pub ams_mapping: Option<Vec<i64>>,
     #[serde(default)]
-    options: PrintOptions,
+    pub options: PrintOptions,
     /// Send even though the mapping doesn't match what's loaded.
     #[serde(default)]
-    ignore_mapping_problems: bool,
+    pub ignore_mapping_problems: bool,
     /// Admins: send even though the G-code check wants a review (recorded
     /// on the print).
     #[serde(default)]
-    acknowledge_review: bool,
+    pub acknowledge_review: bool,
 }
 
 /// `POST /api/jobs/{id}/print`: upload the job's package to a printer and
-/// start it. Returns the print (status `uploading`) right away.
+/// start it. Returns the print (status `uploading`) right away. A queued
+/// entry of the same plate is taken by the print (src/queue.rs).
 async fn send_job(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -356,7 +357,44 @@ async fn send_job(
     Json(body): Json<SendRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
-    let pkg = checked(&state, &job).await?;
+    let (code, print) = send_plate(&state, &user, &tree, &viewer, &job, body, None).await?;
+    Ok((code, Json(json!(print))))
+}
+
+/// Send a plate of `job` (the caller checked they may), for queue entry
+/// `entry` when given (claimed here; given back if nothing is sent). A
+/// direct send takes the plate's oldest queued entry, if it has one.
+pub(crate) async fn send_plate(
+    state: &Arc<AppState>,
+    user: &User,
+    tree: &Tree,
+    viewer: &Viewer,
+    job: &Job,
+    body: SendRequest,
+    entry: Option<&str>,
+) -> Result<(StatusCode, PrintRecord), ApiError> {
+    if let Some(e) = entry {
+        if !state.db.claim_queue_entry(e) {
+            return Err(api_err(StatusCode::CONFLICT, "that queue entry was sent or removed meanwhile"));
+        }
+    }
+    let sent = send_plate_now(state, user, tree, viewer, job, body, entry).await;
+    if let (Err(_), Some(e)) = (&sent, entry) {
+        state.db.release_queue_entry(e);
+    }
+    sent
+}
+
+async fn send_plate_now(
+    state: &Arc<AppState>,
+    user: &User,
+    tree: &Tree,
+    viewer: &Viewer,
+    job: &Job,
+    body: SendRequest,
+    entry: Option<&str>,
+) -> Result<(StatusCode, PrintRecord), ApiError> {
+    let pkg = checked(state, job).await?;
     let package_path = job
         .package_path
         .clone()
@@ -441,6 +479,19 @@ async fn send_job(
         safety_review,
         decided_by.as_deref(),
     );
+    // The queue entry this print is (before the upload starts: a failed
+    // upload gives it back).
+    let entry = entry.map(String::from).or_else(|| {
+        state
+            .db
+            .queued_for_plate(&job.id, print.plate)
+            .into_iter()
+            .find(|q| state.db.claim_queue_entry(&q.id))
+            .map(|q| q.id)
+    });
+    if let Some(e) = &entry {
+        state.db.set_queue_entry_print(e, &print.id);
+    }
     if waits {
         println!(
             "Print {}: {} asks to print {} on {}; needs approval: {}",
@@ -450,7 +501,7 @@ async fn send_job(
             printer.name,
             reason.as_deref().unwrap_or("")
         );
-        return Ok((StatusCode::ACCEPTED, Json(json!(print))));
+        return Ok((StatusCode::ACCEPTED, print));
     }
     if decided_by.is_some() {
         println!("Print {}: {} sends it despite the G-code review: {}", print.id, user.username, review.join("; "));
@@ -460,7 +511,7 @@ async fn send_job(
         print.id, user.username, job.model_name, plate.index, printer.name, mapping
     );
     printing::spawn_send(state.clone(), print.clone(), package_path, plate, mapping, body.options);
-    Ok((StatusCode::CREATED, Json(json!(print))))
+    Ok((StatusCode::CREATED, print))
 }
 
 // -- Prints ----------------------------------------------------------------------
@@ -779,6 +830,7 @@ async fn reject_print(
         return Err(api_err(StatusCode::CONFLICT, format!("the print is {}", print.status)));
     }
     println!("Print {id}: {note}");
+    crate::queue::print_ended(&state, &print, "rejected");
     Ok(Json(json!(state.db.get_print(&id))))
 }
 
