@@ -1,6 +1,8 @@
-//! What gets sent to a printer: a sliced Bambu project (`.gcode.3mf`) or
-//! plain G-code, and what each plate in it needs (printer model, nozzle,
-//! filaments, time) and looks like (thumbnail).
+//! What gets sent to a printer: a sliced project (`.gcode.3mf`, one or more
+//! plates) or plain G-code, and what each plate in it needs (printer model,
+//! nozzle, filaments, time) and looks like (thumbnail). Bambu printers take
+//! the project; other firmware takes one plate's G-code, which a project
+//! sliced for it gives up (`plate_gcode`).
 //!
 //! Jobs sliced here and sliced files uploaded from any slicer both end up as
 //! a [`Package`] stored on the job (`jobs.package_path` + `package_json`).
@@ -18,8 +20,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PackageFormat {
-    /// A sliced Bambu project (`.gcode.3mf`). Packages recorded before plain
-    /// G-code existed carry no format: they are all this.
+    /// A sliced project (`.gcode.3mf`): Bambu's format, which OrcaSlicer
+    /// writes for any printer (FarmSlicer does for jobs with several
+    /// plates). Packages recorded before plain G-code existed carry no
+    /// format: they are all this.
     #[default]
     Bambu3mf,
     /// Plain G-code: one plate.
@@ -97,6 +101,29 @@ impl Package {
     pub fn plate(&self, index: u32) -> Option<&Plate> {
         self.plates.iter().find(|p| p.index == index)
     }
+
+    /// Print time over every plate (the G-code check's where it ran).
+    pub fn total_time_sec(&self) -> f64 {
+        self.plates.iter().filter_map(crate::gcode::effective_time).sum()
+    }
+
+    /// Filament over every plate (the G-code check's where it ran).
+    pub fn total_grams(&self) -> f64 {
+        self.plates
+            .iter()
+            .map(|p| p.check.as_ref().map(|c| c.grams).or(p.weight_g).unwrap_or(0.0))
+            .sum()
+    }
+}
+
+impl Plate {
+    /// Sliced for another make's firmware (a project's plate that names a
+    /// printer model that isn't Bambu's and no Bambu model id). Plates that
+    /// say neither count as Bambu's, as they always have.
+    pub fn for_other_firmware(&self) -> bool {
+        self.printer_model_id.as_deref().is_none_or(str::is_empty)
+            && self.printer_model.as_deref().is_some_and(|m| !m.is_empty() && !m.starts_with("Bambu Lab"))
+    }
 }
 
 /// The largest plate G-code we read: a day-long print is ~50 MB.
@@ -122,6 +149,15 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
     match sniff(path)? {
         PackageFormat::Bambu3mf => bambu::inspect(path),
         PackageFormat::Gcode => gcode::inspect(path),
+    }
+}
+
+/// Plate `index`'s G-code on its own: the file itself for plain G-code,
+/// the plate's entry of a project (re-verified: the file is read again).
+pub fn plate_gcode(path: &Path, format: PackageFormat, index: u32) -> Result<Vec<u8>, String> {
+    match format {
+        PackageFormat::Gcode => std::fs::read(path).map_err(|e| format!("can't read the package: {e}")),
+        PackageFormat::Bambu3mf => bambu::plate_gcode(path, index),
     }
 }
 

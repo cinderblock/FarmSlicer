@@ -126,9 +126,9 @@ jobs:
       - name: Build engine (st + mt)
         run: NPROC=4 bash wasm/build.sh all
 
-      # The single-threaded engine under Node: one model, then a plate of
-      # three parts from two models (the mt engine doesn't finish under Node;
-      # see CLAUDE.md, Known Issues).
+      # The single-threaded engine under Node: one model, a plate of three
+      # parts from two models, and the same parts on two plates (the mt
+      # engine doesn't finish under Node; see CLAUDE.md, Known Issues).
       - name: Smoke-test the engine
         run: |
           node wasm/test/resolve-profile.mjs --profiles extern/OrcaSlicer/resources/profiles \
@@ -136,6 +136,7 @@ jobs:
             --filament "Bambu PLA Basic @BBL X1C" > /tmp/x1c.json
           node wasm/test/smoke.mjs --variant st --config /tmp/x1c.json
           node wasm/test/smoke.mjs --variant st --config /tmp/x1c.json --plate
+          node wasm/test/smoke.mjs --variant st --config /tmp/x1c.json --plates
 
       - uses: actions/upload-artifact@v4
         with:

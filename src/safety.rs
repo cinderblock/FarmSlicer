@@ -28,9 +28,9 @@ pub fn check_job(state: &AppState, job_id: &str) -> Result<Package, String> {
     state
         .db
         .set_job_package(job_id, &path, &serde_json::to_string(&pkg).expect("packages serialize"));
-    // Quotas and costs count the first plate, as the job's own numbers do.
-    if let Some(c) = pkg.plates.first().and_then(|p| p.check.as_ref()) {
-        state.db.set_job_stats(job_id, c.time_sec, c.grams);
+    // Quotas and costs count every plate, as the job's own numbers do.
+    if pkg.plates.iter().any(|p| p.check.is_some()) {
+        state.db.set_job_stats(job_id, pkg.total_time_sec(), pkg.total_grams());
     }
     for plate in &pkg.plates {
         let Some(c) = &plate.check else { continue };

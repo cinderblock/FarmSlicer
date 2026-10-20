@@ -57,7 +57,8 @@ struct NextSlice {
     std::string model_name;
     /// Model 0's placement, without a plate.
     farmslicer::core::Placement placement;
-    /// With a plate: every model's name and the placements of its copies.
+    /// With a plate (or several): every model's name and the placements of
+    /// its copies, each on its plate.
     bool has_plate = false;
     std::vector<std::string> names;
     std::vector<std::vector<farmslicer::core::Placement>> parts;
@@ -163,6 +164,7 @@ std::string build_report(const farmslicer::core::Outcome& o)
                   ",\"stats\":{\"printTimeSec\":%.3f,\"filamentG\":%.4f,\"filamentMm\":%.3f,\"layers\":%u}",
                   o.print_time_sec, o.filament_used_g, o.filament_used_mm, o.layer_count);
     r += stats;
+    r += ",\"plates\":" + std::to_string(o.plates);
     r += ",\"package\":" + (o.package_path.empty() ? std::string("null") : "\"" + json_escape(o.package_path) + "\"");
     r += "}";
     return r;
@@ -278,6 +280,9 @@ int do_slice(const char* model_name, const uint8_t* model, int model_len,
         }
         ::unlink(outcome.gcode_path.c_str());
     }
+    // Later plates' G-code went into the package.
+    for (unsigned p = 2; p <= outcome.plates; ++p)
+        ::unlink(farmslicer::core::plate_gcode_path(gcode_path, p).c_str());
 
     if (out_report) *out_report = dup_cstr(build_report(outcome));
     return outcome.ok ? 0 : (outcome.cancelled ? 2 : 1);
@@ -358,8 +363,9 @@ EMSCRIPTEN_KEEPALIVE const char* fs_version()
 #endif
         // fs_set_options takes a placement (hosts refuse to slice a placed
         // model with an engine that would ignore it), and a plate of several
-        // parts with fs_stage_model for the further models.
-        ",\"placement\":true,\"plate\":true}";
+        // parts with fs_stage_model for the further models, and several
+        // plates (`plates`; their G-code goes into the package).
+        ",\"placement\":true,\"plate\":true,\"plates\":true}";
     return v.c_str();
 }
 
@@ -389,12 +395,14 @@ EMSCRIPTEN_KEEPALIVE int fs_slice(const char* model_name, const uint8_t* model, 
 // Options for the next fs_slice / fs_slice_start, as JSON:
 // {package: bool, printer_model_id, model_name, label, logo_width,
 // logo_height, placement: {rotation: [9], offset: [2]} | null,
-// plate: {objects: [{model, placement?}]} | null, models: [{name}]}, plus
-// the logo as RGBA (rows top-down; may be null). With a plate, `model`
-// indexes the plate's models (0 = the one passed to fs_slice, the others
-// staged with fs_stage_model) and `placement` is ignored. Returns 0, or 1
-// when the JSON doesn't parse, a placement or the plate is malformed or the
-// logo size doesn't match.
+// plate: {objects: [{model, placement?}]} | null,
+// plates: [{objects: [...]}, ...] | null, models: [{name}]}, plus the logo
+// as RGBA (rows top-down; may be null). With a plate, `model` indexes the
+// job's models (0 = the one passed to fs_slice, the others staged with
+// fs_stage_model) and `placement` is ignored; `plates` (several plates,
+// which need `package`) wins over `plate`. Returns 0, or 1 when the JSON
+// doesn't parse, a placement or a plate is malformed or the logo size
+// doesn't match.
 EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const uint8_t* logo, int logo_len)
 {
     NextSlice n;
@@ -408,24 +416,33 @@ EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const ui
         o.overlay.logo_width = j.value("logo_width", 0u);
         o.overlay.logo_height = j.value("logo_height", 0u);
         if (const auto p = j.find("placement"); p != j.end() && !p->is_null()) n.placement = parse_placement(*p);
-        if (const auto plate = j.find("plate"); plate != j.end() && !plate->is_null()) {
-            const auto& objects = plate->at("objects");
-            if (objects.empty()) return 1;
+        std::vector<nlohmann::json> plates;
+        if (const auto list = j.find("plates"); list != j.end() && list->is_array() && !list->empty())
+            for (const auto& plate : *list) plates.push_back(plate);
+        else if (const auto plate = j.find("plate"); plate != j.end() && !plate->is_null())
+            plates.push_back(*plate);
+        if (plates.size() > 1 && o.package_path.empty()) return 1;
+        if (!plates.empty()) {
             if (const auto models = j.find("models"); models != j.end() && models->is_array())
                 for (const auto& m : *models) n.names.push_back(m.value("name", std::string()));
-            for (const auto& obj : objects) {
-                const size_t model = obj.at("model").get<size_t>();
-                if (model >= 1000) return 1;
-                if (n.parts.size() <= model) n.parts.resize(model + 1);
-                farmslicer::core::Placement p;
-                if (const auto pl = obj.find("placement"); pl != obj.end() && !pl->is_null()) p = parse_placement(*pl);
-                n.parts[model].push_back(p);
+            for (size_t index = 0; index < plates.size(); ++index) {
+                const auto& objects = plates[index].at("objects");
+                if (objects.empty()) return 1;
+                for (const auto& obj : objects) {
+                    const size_t model = obj.at("model").get<size_t>();
+                    if (model >= 1000) return 1;
+                    if (n.parts.size() <= model) n.parts.resize(model + 1);
+                    farmslicer::core::Placement p;
+                    if (const auto pl = obj.find("placement"); pl != obj.end() && !pl->is_null()) p = parse_placement(*pl);
+                    p.plate = unsigned(index);
+                    n.parts[model].push_back(p);
+                }
             }
-            // A lone unplaced part is centred (an empty list); every model
-            // must be on the plate.
+            // A lone unplaced part on a lone plate is centred (an empty
+            // list); every model must be on a plate.
             for (auto& parts : n.parts) {
                 if (parts.empty()) return 1;
-                if (parts.size() == 1 && !parts[0].set) parts.clear();
+                if (parts.size() == 1 && !parts[0].set && plates.size() == 1) parts.clear();
             }
             if (n.names.empty() && !n.model_name.empty()) n.names.push_back(n.model_name);
             n.has_plate = true;

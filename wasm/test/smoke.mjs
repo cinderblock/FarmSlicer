@@ -3,7 +3,7 @@
 //
 //   node wasm/test/smoke.mjs [--engine web/public/wasm] [--variant st|mt]
 //                            [--model path.stl] [--config merged.json] [--out out.gcode]
-//                            [--plate] [--package]
+//                            [--plate] [--plates] [--package]
 //
 // With no --model it slices a generated 20 mm cube with libslic3r's defaults
 // (an empty config), which exercises load → place → slice → export. Exit code
@@ -12,6 +12,11 @@
 // --plate: a plate of three parts from two models (two copies of the model,
 // one turned on its side, and a 10 mm cube staged with fs_stage_model); also
 // fails unless the G-code prints three objects.
+//
+// --plates: the same three parts on two plates (the two copies on plate 1,
+// the small cube on plate 2), packaged; fails unless the report counts two
+// plates, plate 1's G-code prints two objects and the package holds both
+// plates' G-code.
 //
 // --package: also write a Bambu sliced project (.gcode.3mf), as the server
 // asks for Bambu printers; fails unless one comes back.
@@ -77,6 +82,10 @@ const cfgBytes = enc.encode(config);
 const cfgPtr = put(cfgBytes);
 const outGcode = m._malloc(4), outLen = m._malloc(4), outReport = m._malloc(4), state = m._malloc(8);
 
+if (args.plates) {
+  args.plate = "1";
+  args.package = "1";
+}
 if (args.package && !args.plate) {
   const options = enc.encode(JSON.stringify({ package: true, printer_model_id: "BL-P001", model_name: modelName }));
   const optPtr = put(options);
@@ -84,30 +93,32 @@ if (args.package && !args.plate) {
 }
 if (args.plate) {
   if (typeof m._fs_stage_model !== "function" || !version.plate) throw new Error("this engine takes no plates");
+  if (args.plates && !version.plates) throw new Error("this engine takes no list of plates");
   const small = enc.encode(cubeStl(10));
   const smallName = put(enc.encode("small.stl"));
   const smallPtr = put(small);
   if (m._fs_stage_model(1, smallName, smallPtr, small.length) !== 0) throw new Error("fs_stage_model failed");
   const I = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   const RX90 = [1, 0, 0, 0, 0, -1, 0, 1, 0];
+  const copies = [
+    { model: 0, placement: { rotation: I, offset: [-40, 0] } },
+    { model: 0, placement: { rotation: RX90, offset: [40, 0] } },
+  ];
+  const smallPart = { model: 1, placement: { rotation: I, offset: [0, 40] } };
   const options = enc.encode(
     JSON.stringify({
       package: Boolean(args.package),
       printer_model_id: "BL-P001",
       model_name: modelName,
       models: [{ name: modelName }, { name: "small.stl" }],
-      plate: {
-        objects: [
-          { model: 0, placement: { rotation: I, offset: [-40, 0] } },
-          { model: 0, placement: { rotation: RX90, offset: [40, 0] } },
-          { model: 1, placement: { rotation: I, offset: [0, 40] } },
-        ],
-      },
+      ...(args.plates
+        ? { plates: [{ objects: copies }, { objects: [smallPart] }] }
+        : { plate: { objects: [...copies, smallPart] } }),
     }),
   );
   const optPtr = put(options);
   if (m._fs_set_options(optPtr, options.length, 0, 0) !== 0) throw new Error("fs_set_options refused the plate");
-  console.log("plate: 3 parts from 2 models");
+  console.log(args.plates ? "plates: 2 copies on plate 1, a small cube on plate 2" : "plate: 3 parts from 2 models");
 }
 
 const t1 = performance.now();
@@ -156,13 +167,20 @@ if (rc === 0 && gcodeLen > 0) {
     const named = [...text.matchAll(/^; printing object (.*)$/gm)].map((x) => x[1].trim());
     const objects = new Set(labelled.length > 0 ? labelled : named);
     console.log(`  objects printed: ${objects.size} ${JSON.stringify([...objects])}`);
-    if (objects.size !== 3) rc = 1;
+    if (objects.size !== (args.plates ? 2 : 3)) rc = 1;
   }
 }
 if (args.package) {
   const ok = Boolean(report?.package) && m.FS.analyzePath(report.package).exists;
   console.log(`  package: ${ok ? `${m.FS.stat(report.package).size} bytes` : "missing"}`);
   if (!ok) rc = 1;
+  if (ok && args.plates) {
+    // The zip's directory names every entry.
+    const names = Buffer.from(m.FS.readFile(report.package)).toString("latin1");
+    const plates = ["Metadata/plate_1.gcode", "Metadata/plate_2.gcode"].filter((n) => names.includes(n));
+    console.log(`  plates: report ${report.plates}, package ${JSON.stringify(plates)}`);
+    if (report.plates !== 2 || plates.length !== 2) rc = 1;
+  }
 }
 if (m.fsTerminateThreads) m.fsTerminateThreads();
 process.exit(rc === 0 && gcodeLen > 0 ? 0 : 1);

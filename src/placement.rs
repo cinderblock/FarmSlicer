@@ -7,11 +7,14 @@
 //! rotated model's bounding-box centre goes relative to the bed centre (mm).
 //! The model always rests on the bed. No placement = centred, as loaded.
 //!
-//! A plate (`PlateLayout`, the job's `plate` field) holds one or more parts:
+//! A plate (`PlateLayout`) holds one or more parts:
 //! `{"objects": [{"model": 0, "placement": {...}}, ...]}`. `model` indexes
 //! the job's models in upload order; a model can be placed several times
-//! (copies). A lone part may go without a placement (centred); with several,
-//! every part says where it goes.
+//! (copies), on any plate. A job has one or more plates (`JobPlates`, the
+//! job's `plates` field and `jobs.plate_json`: `{"plates": [plate, ...]}`;
+//! a bare plate is one plate, as jobs were stored before several plates).
+//! A lone part may go without a placement (centred); with several, every
+//! part says where it goes. Every model is on some plate; no plate is empty.
 
 use serde::{Deserialize, Serialize};
 
@@ -80,50 +83,120 @@ pub struct PlateObject {
     pub placement: Option<Placement>,
 }
 
-/// Every part on the plate.
+/// Most plates one job may have.
+pub const MAX_PLATES: usize = 50;
+
+/// Every part on one plate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlateLayout {
     pub objects: Vec<PlateObject>,
 }
 
-impl PlateLayout {
-    /// Parse and check a plate for a job with `models` source models.
+/// Every plate of a job, in order (plate 1 first).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct JobPlates {
+    pub plates: Vec<PlateLayout>,
+}
+
+/// What a job's plates may be stored or sent as: the list, or one bare
+/// plate (jobs and pages from before several plates).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PlatesJson {
+    Many(PlateList),
+    One(PlateLayout),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlateList {
+    plates: Vec<PlateLayout>,
+}
+
+impl<'de> Deserialize<'de> for JobPlates {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match PlatesJson::deserialize(d)? {
+            PlatesJson::Many(list) => JobPlates { plates: list.plates },
+            PlatesJson::One(plate) => JobPlates { plates: vec![plate] },
+        })
+    }
+}
+
+impl JobPlates {
+    /// Parse and check a job's plates (either shape) for a job with
+    /// `models` source models.
     pub fn parse(text: &str, models: usize) -> Result<Self, String> {
-        let plate: PlateLayout = serde_json::from_str(text).map_err(|e| format!("plate: {e}"))?;
-        plate.check(models)?;
-        Ok(plate)
+        let plates: JobPlates = serde_json::from_str(text)
+            .map_err(|_| r#"plate: expected {"plates": [{"objects": [...]}, ...]} or one plate"#.to_string())?;
+        plates.check(models)?;
+        Ok(plates)
     }
 
     /// One model, placed (or centred) the way jobs were before plates.
     pub fn single(placement: Option<Placement>) -> Self {
-        PlateLayout {
-            objects: vec![PlateObject { model: 0, placement }],
+        JobPlates {
+            plates: vec![PlateLayout {
+                objects: vec![PlateObject { model: 0, placement }],
+            }],
         }
     }
 
     fn check(&self, models: usize) -> Result<(), String> {
-        if self.objects.is_empty() {
-            return Err("plate: no parts".into());
+        if self.plates.is_empty() {
+            return Err("plate: no plates".into());
         }
-        if self.objects.len() > MAX_OBJECTS {
-            return Err(format!("plate: more than {MAX_OBJECTS} parts"));
+        if self.plates.len() > MAX_PLATES {
+            return Err(format!("plate: more than {MAX_PLATES} plates"));
         }
-        for o in &self.objects {
-            if o.model >= models {
-                return Err(format!("plate: part of model {} but the job has {models} model(s)", o.model));
+        let several = self.several();
+        for (i, plate) in self.plates.iter().enumerate() {
+            let which = if several { format!("plate {}", i + 1) } else { "plate".to_string() };
+            if plate.objects.is_empty() {
+                return Err(format!("{which}: no parts"));
             }
-            if let Some(p) = &o.placement {
-                p.check()?;
+            if plate.objects.len() > MAX_OBJECTS {
+                return Err(format!("{which}: more than {MAX_OBJECTS} parts"));
+            }
+            for o in &plate.objects {
+                if o.model >= models {
+                    return Err(format!("{which}: part of model {} but the job has {models} model(s)", o.model));
+                }
+                if let Some(p) = &o.placement {
+                    p.check()?;
+                }
             }
         }
-        if (0..models).any(|m| !self.objects.iter().any(|o| o.model == m)) {
-            return Err("plate: every uploaded model must be on the plate".into());
+        if (0..models).any(|m| !self.parts().any(|o| o.model == m)) {
+            return Err("plate: every uploaded model must be on a plate".into());
         }
-        if self.objects.len() > 1 && self.objects.iter().any(|o| o.placement.is_none()) {
+        if self.parts().count() > 1 && self.parts().any(|o| o.placement.is_none()) {
             return Err("plate: with several parts, each needs a placement".into());
         }
         Ok(())
+    }
+
+    /// Every part on every plate, with its plate (0-based).
+    pub fn parts_by_plate(&self) -> impl Iterator<Item = (usize, &PlateObject)> {
+        self.plates.iter().enumerate().flat_map(|(i, p)| p.objects.iter().map(move |o| (i, o)))
+    }
+
+    fn parts(&self) -> impl Iterator<Item = &PlateObject> {
+        self.plates.iter().flat_map(|p| &p.objects)
+    }
+
+    /// Several plates (only a package holds them all).
+    pub fn several(&self) -> bool {
+        self.plates.len() > 1
+    }
+
+    /// The part of a job with one part.
+    pub fn lone_part(&self) -> Option<&PlateObject> {
+        let mut parts = self.parts();
+        match (parts.next(), parts.next()) {
+            (Some(one), None) => Some(one),
+            _ => None,
+        }
     }
 
     pub fn to_json(&self) -> String {
@@ -166,10 +239,14 @@ mod tests {
 
     #[test]
     fn plates() {
+        // A bare plate (older pages, stored jobs) is one plate.
         let two = format!(r#"{{"objects":[{{"model":0,"placement":{ID}}},{{"model":0,"placement":{ID}}},{{"model":1,"placement":{ID}}}]}}"#);
-        assert_eq!(PlateLayout::parse(&two, 2).unwrap().objects.len(), 3);
+        let parsed = JobPlates::parse(&two, 2).unwrap();
+        assert_eq!(parsed.plates.len(), 1);
+        assert_eq!(parsed.plates[0].objects.len(), 3);
         // A lone part may be centred.
-        assert!(PlateLayout::parse(r#"{"objects":[{"model":0}]}"#, 1).is_ok());
+        assert!(JobPlates::parse(r#"{"objects":[{"model":0}]}"#, 1).is_ok());
+        assert!(JobPlates::parse(r#"{"plates":[{"objects":[{"model":0}]}]}"#, 1).is_ok());
         for (bad, models) in [
             (r#"{"objects":[]}"#.to_string(), 1),
             // No such model.
@@ -182,7 +259,37 @@ mod tests {
             (r#"{"objects":[{"model":0,"placement":{"rotation":[2,0,0,0,1,0,0,0,1],"offset":[0,0]}}]}"#.to_string(), 1),
             (r#"{"objects":[{"model":0,"scale":2}]}"#.to_string(), 1),
         ] {
-            assert!(PlateLayout::parse(&bad, models).is_err(), "{bad}");
+            assert!(JobPlates::parse(&bad, models).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn several_plates() {
+        let part = |m: usize| format!(r#"{{"model":{m},"placement":{ID}}}"#);
+        // Model 0 on both plates, model 1 on plate 2 only.
+        let text = format!(r#"{{"plates":[{{"objects":[{}]}},{{"objects":[{},{}]}}]}}"#, part(0), part(0), part(1));
+        let plates = JobPlates::parse(&text, 2).unwrap();
+        assert!(plates.several());
+        assert_eq!(plates.plates[1].objects.len(), 2);
+        assert_eq!(plates.parts_by_plate().map(|(i, o)| (i, o.model)).collect::<Vec<_>>(), [(0, 0), (1, 0), (1, 1)]);
+        // Stored as the list, read back the same.
+        assert_eq!(JobPlates::parse(&plates.to_json(), 2).unwrap(), plates);
+        for bad in [
+            // An empty plate.
+            format!(r#"{{"plates":[{{"objects":[{}]}},{{"objects":[]}}]}}"#, part(0)),
+            // No plates.
+            r#"{"plates":[]}"#.to_string(),
+            // Model 1 on no plate.
+            format!(r#"{{"plates":[{{"objects":[{}]}},{{"objects":[{}]}}]}}"#, part(0), part(0)),
+            // Two lone parts: each needs a placement.
+            r#"{"plates":[{"objects":[{"model":0}]},{"objects":[{"model":1}]}]}"#.to_string(),
+            // Unknown keys.
+            format!(r#"{{"plates":[{{"objects":[{}]}}],"extra":1}}"#, part(0)),
+        ] {
+            assert!(JobPlates::parse(&bad, 2).is_err(), "{bad}");
+        }
+        let one = format!(r#"{{"objects":[{}]}}"#, part(0));
+        let many = format!(r#"{{"plates":[{}]}}"#, vec![one; MAX_PLATES + 1].join(","));
+        assert!(JobPlates::parse(&many, 1).is_err());
     }
 }

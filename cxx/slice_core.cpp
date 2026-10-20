@@ -1,9 +1,10 @@
 // FarmSlicer slicing pipeline on top of libslic3r.
 //
-// Mirrors what OrcaSlicer's CLI does for a single plate: build a
+// Mirrors what OrcaSlicer's CLI does for a project's plates: build a
 // DynamicPrintConfig from the merged profile JSON, load the models and put
-// every part where the user placed it, Print::apply → validate → process →
-// export_gcode, then collect the statistics the G-code processor computed. Used unchanged by the native
+// every part where the user placed it, then per plate Print::apply →
+// validate → process → export_gcode and collect the statistics the G-code
+// processor computed. Used unchanged by the native
 // server and the WebAssembly engine so both produce the same G-code for the
 // same config.
 
@@ -35,10 +36,13 @@
 #include <new>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -364,18 +368,23 @@ Slic3r::Vec2d bed_center(const Slic3r::DynamicPrintConfig& config)
     return bed.defined ? bed.center() : Vec2d(0.0, 0.0);
 }
 
-// Build the plate: every model file once, every copy of it where the user
-// placed it. A copy is the file's objects (with their instances as loaded)
-// as one rigid group: rotated, its bounding box centred on the bed centre
+/// The parts on each plate: (object, instance) indexes into the Model.
+using PlateParts = std::vector<std::vector<std::pair<int, int>>>;
+
+// Build the plates: every model file once, every copy of it where the user
+// placed it, on its plate. All plates share the bed's coordinates (each
+// plate's Print sees only its own instances: `select_plate`). A copy is the
+// file's objects (with their instances as loaded) as one rigid group: rotated, its bounding box centred on the bed centre
 // plus the placement's offset (just the bed centre without one, like the
 // desktop plater on import) and dropped onto Z=0. Copies are instances of
 // the same objects, so libslic3r slices identical copies once.
 // (ModelObject::ensure_on_bed would drop every instance by the lowest one;
 // each copy here rests on the bed by itself.)
-Slic3r::Model build_plate(const std::vector<ModelInput>& inputs, const Slic3r::Vec2d& center)
+Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::Vec2d& center, PlateParts& plates)
 {
     using namespace Slic3r;
     Model plate;
+    plates.clear();
     for (const ModelInput& in : inputs) {
         Model src = Model::read_from_file(in.path);
         const std::string what = in.name.empty() ? std::string("a model file") : "\"" + in.name + "\"";
@@ -384,9 +393,11 @@ Slic3r::Model build_plate(const std::vector<ModelInput>& inputs, const Slic3r::V
 
         // The file's objects on the plate, and their instances as loaded.
         std::vector<ModelObject*> objects;
+        std::vector<int> object_index;
         std::vector<std::vector<Transform3d>> as_loaded;
         for (ModelObject* o : src.objects) {
             if (o->instances.empty()) o->add_instance();
+            object_index.push_back(int(plate.objects.size()));
             ModelObject* copy = plate.add_object(*o);
             std::vector<Transform3d> trafos;
             for (const ModelInstance* inst : copy->instances) trafos.push_back(inst->get_matrix());
@@ -397,6 +408,7 @@ Slic3r::Model build_plate(const std::vector<ModelInput>& inputs, const Slic3r::V
 
         const std::vector<Placement> parts = in.parts.empty() ? std::vector<Placement>{Placement{}} : in.parts;
         for (const Placement& part : parts) {
+            if (plates.size() <= part.plate) plates.resize(part.plate + 1);
             Transform3d rotation = Transform3d::Identity();
             if (part.set)
                 for (int r = 0; r < 3; ++r)
@@ -409,6 +421,7 @@ Slic3r::Model build_plate(const std::vector<ModelInput>& inputs, const Slic3r::V
                     inst->set_transformation(Geometry::Transformation(rotation * trafo));
                     box.merge(objects[k]->instance_bounding_box(*inst));
                     group.push_back(inst);
+                    plates[part.plate].emplace_back(object_index[k], int(objects[k]->instances.size()) - 1);
                 }
             const Vec2d target = center + (part.set ? Vec2d(part.offset[0], part.offset[1]) : Vec2d::Zero());
             const Vec3d shift(target.x() - box.center().x(), target.y() - box.center().y(), -box.min.z());
@@ -419,8 +432,18 @@ Slic3r::Model build_plate(const std::vector<ModelInput>& inputs, const Slic3r::V
     return plate;
 }
 
+// Only the parts on `parts` print (Print::apply and the thumbnails skip
+// instances that aren't printable).
+void select_plate(Slic3r::Model& model, const std::vector<std::pair<int, int>>& parts)
+{
+    for (Slic3r::ModelObject* obj : model.objects)
+        for (Slic3r::ModelInstance* inst : obj->instances) inst->printable = false;
+    for (const auto& [o, i] : parts) model.objects[size_t(o)]->instances[size_t(i)]->printable = true;
+}
+
 // Refuse parts that don't fit: libslic3r would slice them, and the G-code
-// would drive the head beyond the bed.
+// would drive the head beyond the bed. Only the current plate's parts (the
+// printable ones) count.
 void check_build_volume(Slic3r::Model& model, const Slic3r::DynamicPrintConfig& config)
 {
     using namespace Slic3r;
@@ -430,11 +453,12 @@ void check_build_volume(Slic3r::Model& model, const Slic3r::DynamicPrintConfig& 
     const BuildVolume volume(area->values, height ? height->value : 0.0, {}, {});
     model.update_print_volume_state(volume);
     size_t parts = 0;
-    for (const ModelObject* obj : model.objects) parts += obj->instances.size();
+    for (const ModelObject* obj : model.objects)
+        for (const ModelInstance* inst : obj->instances) parts += inst->printable ? 1 : 0;
     for (const ModelObject* obj : model.objects)
         for (size_t i = 0; i < obj->instances.size(); ++i) {
             const ModelInstance* inst = obj->instances[i];
-            if (inst->print_volume_state == ModelInstancePVS_Inside) continue;
+            if (!inst->printable || inst->print_volume_state == ModelInstancePVS_Inside) continue;
             std::string what = parts > 1 ? "\"" + obj->name + "\"" : std::string("the model");
             if (obj->instances.size() > 1) what += " (copy " + std::to_string(i + 1) + ")";
             throw std::runtime_error(inst->print_volume_state == ModelInstancePVS_Fully_Outside
@@ -506,6 +530,13 @@ void init_runtime(const std::string& resources_dir, const std::string& temp_dir)
     Slic3r::set_logging_level(2); // errors + warnings
 }
 
+std::string plate_gcode_path(const std::string& output_path, unsigned plate)
+{
+    if (plate <= 1) return output_path;
+    const std::filesystem::path p(output_path);
+    return (p.parent_path() / (p.stem().string() + ".plate" + std::to_string(plate) + p.extension().string())).string();
+}
+
 Outcome slice_models(const std::vector<ModelInput>& models,
                      const std::string& config_json,
                      const std::string& output_path,
@@ -514,70 +545,36 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 {
     using namespace Slic3r;
     Outcome out;
+    unsigned plate_count = 0;
 
     try {
         if (models.empty()) throw std::runtime_error("nothing to slice: no model");
 
         report(cb, 0, "Loading configuration");
-        DynamicPrintConfig config;
-        load_config(config, config_json, out.warnings);
+        DynamicPrintConfig base_config;
+        load_config(base_config, config_json, out.warnings);
 
         report(cb, 2, models.size() > 1 ? "Loading models" : "Loading model");
-        Model model = build_plate(models, bed_center(config));
-        check_build_volume(model, config);
+        PlateParts plate_parts;
+        Model model = build_plates(models, bed_center(base_config), plate_parts);
+        plate_count = unsigned(plate_parts.size());
+        for (size_t p = 0; p < plate_parts.size(); ++p)
+            if (plate_parts[p].empty()) throw std::runtime_error("plate " + std::to_string(p + 1) + " has no parts");
+        const bool several = plate_count > 1;
+        if (several && options.package_path.empty())
+            throw std::runtime_error("several plates need a package to go into");
 
-        const int filament_count = int(std::max<size_t>(1, vector_size(config, "filament_diameter")));
-
-        ZeroedPrint print_holder;
-        Print& print = print_holder.get();
-        print.set_plate_origin(Vec3d::Zero());
-        const std::string printer_model = config.opt_string("printer_model", true);
-        print.is_BBL_printer() = printer_model.rfind("Bambu Lab", 0) == 0;
-        Model::setExtruderParams(config, filament_count);
-
-        std::mutex status_mutex;
-        print.set_status_callback([&](const PrintBase::SlicingStatus& s) {
-            std::lock_guard<std::mutex> lock(status_mutex);
-            if (s.percent >= 0)
-                report(cb, int(5 + s.percent * 0.85), s.text);
-            if (s.warning_step != -1 && !s.text.empty())
-                out.warnings.push_back(s.text);
-        });
-        if (cb.cancelled) {
-            print.set_cancel_callback([&cb]() {
-                if (cb.cancelled()) throw CanceledException();
-            });
-        }
-
-        place_wipe_tower(config);
-        print.apply(model, config);
-        Model::setPrintSpeedTable(config, print.config());
-        if (print.empty())
-            throw std::runtime_error("nothing to slice: no object is inside the printable volume");
-
-        {
-            StringObjectException warning;
-            StringObjectException err = print.validate(&warning);
-            if (!err.string.empty()) throw std::runtime_error(err.string);
-            if (!warning.string.empty()) out.warnings.push_back(warning.string);
-        }
-
-        report(cb, 5, "Slicing");
-        print.process();
-        if (fit_wipe_tower(print, config)) {
-            print.apply(model, config);
-            print.process();
-        }
-        if (std::string conflict = print.get_conflict_string(); !conflict.empty())
-            out.warnings.push_back(conflict);
+        const int filament_count = int(std::max<size_t>(1, vector_size(base_config, "filament_diameter")));
+        const bool bambu = base_config.opt_string("printer_model", true).rfind("Bambu Lab", 0) == 0;
 
         // Thumbnails: the G-code exporter asks for the sizes the printer
         // profile lists (none for Bambu printers, which read the package's).
+        // They show the plate being sliced (its parts are the printable ones).
         ThumbnailOverlay overlay = options.overlay;
         if (overlay.font_path.empty())
             overlay.font_path = (std::filesystem::path(g_resources_dir) / "fonts" / "Sarabun-SemiBold.ttf").string();
         std::vector<std::string> colors;
-        if (const auto* c = config.option<ConfigOptionStrings>("filament_colour")) colors = c->values;
+        if (const auto* c = base_config.option<ConfigOptionStrings>("filament_colour")) colors = c->values;
         std::set<std::string> overlay_warnings;
         auto make_thumbnail = [&](unsigned w, unsigned h) {
             ThumbnailData t;
@@ -593,85 +590,167 @@ Outcome slice_models(const std::vector<ModelInput>& models,
             return list;
         };
 
-        report(cb, 90, "Exporting G-code");
-        GCodeProcessorResult gcode_result;
-        std::string written = print.export_gcode(output_path, &gcode_result, thumbnails);
-        if (move_unreachable_filaments(print, gcode_result, config, out.warnings)) {
-            print.apply(model, config);
-            print.process();
-            if (fit_wipe_tower(print, config)) {
+        // What the package records per plate, filled while each plate's
+        // Print still exists. The project config is plate 1's (the cover).
+        std::vector<std::unique_ptr<PlateData>> plate_data;
+        std::vector<std::unique_ptr<ThumbnailData>> plate_thumbnails;
+        DynamicPrintConfig project_config;
+
+        for (unsigned p = 0; p < plate_count; ++p) {
+            const std::string prefix = several ? "plate " + std::to_string(p + 1) + ": " : std::string();
+            // This plate's share of the progress bar (5-90 %).
+            const double lo = 5 + 85.0 * p / plate_count, span = 85.0 / plate_count;
+            auto step = [&](double fraction, const std::string& message) {
+                report(cb, int(lo + span * fraction),
+                       several ? "Plate " + std::to_string(p + 1) + "/" + std::to_string(plate_count) + ": " + message
+                               : message);
+            };
+            const std::string output = plate_gcode_path(output_path, p + 1);
+            try {
+                select_plate(model, plate_parts[p]);
+                check_build_volume(model, base_config);
+
+                // The prime tower's position and the filament map can move
+                // per plate.
+                DynamicPrintConfig config = base_config;
+
+                ZeroedPrint print_holder;
+                Print& print = print_holder.get();
+                print.set_plate_origin(Vec3d::Zero());
+                print.is_BBL_printer() = bambu;
+                Model::setExtruderParams(config, filament_count);
+
+                std::mutex status_mutex;
+                print.set_status_callback([&](const PrintBase::SlicingStatus& s) {
+                    std::lock_guard<std::mutex> lock(status_mutex);
+                    if (s.percent >= 0) step(s.percent / 100.0, s.text);
+                    if (s.warning_step != -1 && !s.text.empty()) out.warnings.push_back(prefix + s.text);
+                });
+                if (cb.cancelled) {
+                    print.set_cancel_callback([&cb]() {
+                        if (cb.cancelled()) throw CanceledException();
+                    });
+                }
+
+                place_wipe_tower(config);
                 print.apply(model, config);
+                Model::setPrintSpeedTable(config, print.config());
+                if (print.empty())
+                    throw std::runtime_error("nothing to slice: no object is inside the printable volume");
+
+                {
+                    StringObjectException warning;
+                    StringObjectException err = print.validate(&warning);
+                    if (!err.string.empty()) throw std::runtime_error(err.string);
+                    if (!warning.string.empty()) out.warnings.push_back(prefix + warning.string);
+                }
+
+                step(0, "Slicing");
                 print.process();
+                if (fit_wipe_tower(print, config)) {
+                    print.apply(model, config);
+                    print.process();
+                }
+                if (std::string conflict = print.get_conflict_string(); !conflict.empty())
+                    out.warnings.push_back(prefix + conflict);
+
+                step(1, "Exporting G-code");
+                GCodeProcessorResult gcode_result;
+                std::vector<std::string> moved;
+                std::string written = print.export_gcode(output, &gcode_result, thumbnails);
+                if (move_unreachable_filaments(print, gcode_result, config, moved)) {
+                    print.apply(model, config);
+                    print.process();
+                    if (fit_wipe_tower(print, config)) {
+                        print.apply(model, config);
+                        print.process();
+                    }
+                    gcode_result = GCodeProcessorResult();
+                    written = print.export_gcode(output, &gcode_result, thumbnails);
+                }
+                for (const std::string& w : moved) out.warnings.push_back(prefix + w);
+                check_nozzle_reach(gcode_result);
+                if (written.empty()) written = output;
+                if (!std::filesystem::exists(written))
+                    throw std::runtime_error("G-code export produced no file");
+
+                // Statistics from the G-code processor (same numbers the
+                // desktop app shows in its sliced-plate panel).
+                const auto& ps = gcode_result.print_statistics;
+                const double time_sec =
+                    double(ps.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Normal)].time);
+                double grams = 0;
+                for (const auto& [extruder, vol_mm3] : ps.total_volumes_per_extruder) {
+                    const double d = filament_diameter(config, extruder);
+                    const double area = M_PI * d * d / 4.0;
+                    grams += vol_mm3 / 1000.0 * filament_density(config, extruder);
+                    out.filament_used_mm += area > 0 ? vol_mm3 / area : 0.0;
+                }
+                out.print_time_sec += time_sec;
+                out.filament_used_g += grams;
+
+                std::set<long long> layer_zs;
+                for (const PrintObject* po : print.objects()) {
+                    for (const Layer* l : po->layers()) layer_zs.insert(llround(l->print_z * 1e4));
+                    for (const SupportLayer* l : po->support_layers()) layer_zs.insert(llround(l->print_z * 1e4));
+                }
+                out.layer_count = std::max(out.layer_count, unsigned(layer_zs.size()));
+                if (p == 0) out.gcode_path = written;
+
+                if (!options.package_path.empty()) {
+                    plate_thumbnails.push_back(
+                        std::make_unique<ThumbnailData>(make_thumbnail(PACKAGE_THUMBNAIL, PACKAGE_THUMBNAIL)));
+
+                    // What OrcaSlicer's "send to printer" records for a plate
+                    // (PartPlateList::store_to_3mf_structure + Plater::export_3mf).
+                    auto plate = std::make_unique<PlateData>();
+                    plate->plate_index = int(p);
+                    plate->objects_and_instances = plate_parts[p];
+                    plate->printer_model_id = options.printer_model_id;
+                    if (const ConfigOption* nd = config.option("nozzle_diameter")) plate->nozzle_diameters = nd->serialize();
+                    plate->gcode_file = written;
+                    plate->is_sliced_valid = true;
+                    plate->gcode_prediction = std::to_string(int(std::lround(time_sec)));
+                    char weight[32];
+                    std::snprintf(weight, sizeof weight, "%.2f", grams);
+                    plate->gcode_weight = weight;
+                    plate->is_support_used = print.is_support_used();
+                    // Which nozzle each filament printed from (1-based), as
+                    // libslic3r chose it on printers with several:
+                    // dual-nozzle printers read it from slice_info.
+                    plate->filament_maps = print.get_filament_maps();
+                    plate->parse_filament_info(&gcode_result);
+                    const auto* filament_ids = config.option<ConfigOptionStrings>("filament_ids");
+                    for (FilamentInfo& f : plate->slice_filaments_info) {
+                        std::string displayed;
+                        f.type = config.get_filament_type(displayed, f.id);
+                        f.filament_id = filament_ids && size_t(f.id) < filament_ids->values.size() ? filament_ids->get_at(f.id) : "";
+                        f.color = size_t(f.id) < colors.size() ? colors[f.id] : "#FFFFFF";
+                    }
+                    plate_data.push_back(std::move(plate));
+                    if (p == 0) project_config = config;
+                }
+            } catch (const std::runtime_error& e) {
+                if (!several) throw;
+                throw std::runtime_error(prefix + e.what());
             }
-            gcode_result = GCodeProcessorResult();
-            written = print.export_gcode(output_path, &gcode_result, thumbnails);
         }
-        check_nozzle_reach(gcode_result);
-        if (written.empty()) written = output_path;
-        if (!std::filesystem::exists(written))
-            throw std::runtime_error("G-code export produced no file");
-
-        // Statistics from the G-code processor (same numbers the desktop app
-        // shows in its sliced-plate panel).
-        const auto& ps = gcode_result.print_statistics;
-        out.print_time_sec =
-            double(ps.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Normal)].time);
-        for (const auto& [extruder, vol_mm3] : ps.total_volumes_per_extruder) {
-            const double d = filament_diameter(config, extruder);
-            const double area = M_PI * d * d / 4.0;
-            out.filament_used_g += vol_mm3 / 1000.0 * filament_density(config, extruder);
-            out.filament_used_mm += area > 0 ? vol_mm3 / area : 0.0;
-        }
-
-        std::set<long long> layer_zs;
-        for (const PrintObject* po : print.objects()) {
-            for (const Layer* l : po->layers()) layer_zs.insert(llround(l->print_z * 1e4));
-            for (const SupportLayer* l : po->support_layers()) layer_zs.insert(llround(l->print_z * 1e4));
-        }
-        out.layer_count = unsigned(layer_zs.size());
-
-        out.gcode_path = written;
 
         if (!options.package_path.empty()) {
             report(cb, 96, "Packaging");
-            ThumbnailData plate_thumbnail = make_thumbnail(PACKAGE_THUMBNAIL, PACKAGE_THUMBNAIL);
-
-            // What OrcaSlicer's "send to printer" records for one plate
-            // (PartPlateList::store_to_3mf_structure + Plater::export_3mf).
-            auto plate = std::make_unique<PlateData>();
-            plate->plate_index = 0;
-            for (size_t oi = 0; oi < model.objects.size(); ++oi)
-                for (size_t ii = 0; ii < model.objects[oi]->instances.size(); ++ii)
-                    plate->objects_and_instances.emplace_back(int(oi), int(ii));
-            plate->printer_model_id = options.printer_model_id;
-            if (const ConfigOption* nd = config.option("nozzle_diameter")) plate->nozzle_diameters = nd->serialize();
-            plate->gcode_file = written;
-            plate->is_sliced_valid = true;
-            plate->gcode_prediction = std::to_string(int(std::lround(out.print_time_sec)));
-            char weight[32];
-            std::snprintf(weight, sizeof weight, "%.2f", out.filament_used_g);
-            plate->gcode_weight = weight;
-            plate->is_support_used = print.is_support_used();
-            // Which nozzle each filament printed from (1-based), as libslic3r
-            // chose it on printers with several: dual-nozzle printers read
-            // it from slice_info.
-            plate->filament_maps = print.get_filament_maps();
-            plate->parse_filament_info(&gcode_result);
-            const auto* filament_ids = config.option<ConfigOptionStrings>("filament_ids");
-            for (FilamentInfo& f : plate->slice_filaments_info) {
-                std::string displayed;
-                f.type = config.get_filament_type(displayed, f.id);
-                f.filament_id = filament_ids && size_t(f.id) < filament_ids->values.size() ? filament_ids->get_at(f.id) : "";
-                f.color = size_t(f.id) < colors.size() ? colors[f.id] : "#FFFFFF";
-            }
+            // Every part printable again: the package lists each plate's
+            // parts itself.
+            for (ModelObject* obj : model.objects)
+                for (ModelInstance* inst : obj->instances) inst->printable = true;
 
             StoreParams params;
             params.path = options.package_path.c_str();
             params.model = &model;
-            params.plate_data_list = {plate.get()};
+            for (const auto& plate : plate_data) params.plate_data_list.push_back(plate.get());
+            // Plate 1 is the cover; thumbnails go with plates by position.
             params.export_plate_idx = 0;
-            params.config = &config;
-            params.thumbnail_data = {&plate_thumbnail};
+            params.config = &project_config;
+            for (const auto& t : plate_thumbnails) params.thumbnail_data.push_back(t.get());
             params.strategy = SaveStrategy::Silence | SaveStrategy::SkipModel | SaveStrategy::WithGcode |
                               SaveStrategy::SkipAuxiliary | SaveStrategy::Zip64;
             // The exporter gives the model a scratch "backup" directory, which
@@ -697,19 +776,25 @@ Outcome slice_models(const std::vector<ModelInput>& models,
         }
 
         for (const std::string& w : overlay_warnings) out.warnings.push_back(w);
+        out.plates = plate_count;
         out.ok = true;
         report(cb, 100, "Done");
     } catch (const CanceledException&) {
         out.cancelled = true;
         out.error = "cancelled";
-        std::error_code ec;
-        std::filesystem::remove(output_path, ec);
     } catch (const std::exception& e) {
         out.error = e.what();
     } catch (...) {
         out.error = "unknown error inside libslic3r";
     }
 
+    if (!out.ok) {
+        // No half-sliced job: drop the G-code the plates wrote.
+        out.gcode_path.clear();
+        std::error_code ec;
+        for (unsigned p = 1; p <= std::max(1u, plate_count); ++p)
+            std::filesystem::remove(plate_gcode_path(output_path, p), ec);
+    }
     return out;
 }
 

@@ -95,11 +95,11 @@ impl Prices {
         )
     }
 
-    /// A job's estimate: its package's first plate, else its weight at the
+    /// A job's estimate: its package's plates, else its weight at the
     /// configured filament's price.
     pub fn job(&self, job: &Job) -> Option<f64> {
         if let Some(pkg) = crate::printing::package_of(job) {
-            return pkg.plates.first().map(|p| self.plate(p));
+            return (!pkg.plates.is_empty()).then(|| round(pkg.plates.iter().map(|p| self.plate(p)).sum()));
         }
         let grams = job.filament_used_g?;
         let material = job

@@ -17,7 +17,10 @@ can run in the user's browser.
   in the slicer's coordinates, with any number of parts: drop or add several
   model files, Duplicate the selected part into free space, Fill the plate
   with as many copies as fit, Arrange packs everything (A), Delete removes
-  one. Move a part with arrows or by dragging it, rotate it with rings (15°
+  one. A job can have several plates (tabs above the view: add, delete,
+  move a part to another plate); Arrange puts what doesn't fit onto new
+  plates, and all of them are sliced together into one sliced project
+  (`.gcode.3mf`), whatever the printer, each plate sent on its own. Move a part with arrows or by dragging it, rotate it with rings (15°
   snaps; Shift for free movement), or lay a face on the plate; position and
   rotation can also be typed. Both engines slice every part where it sits
   (copies of one model slice once). A part that leaves the printable volume
@@ -143,7 +146,9 @@ License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
   address.
 - Non-Bambu printers print what they're sent: FarmSlicer lists the plate's
   filaments to load instead of mapping them to trays, and checks the
-  sliced-for model and nozzle against the printer.
+  sliced-for model and nozzle against the printer. A sliced project
+  (`.gcode.3mf`, from FarmSlicer or OrcaSlicer) made for another make's
+  printer is sent one plate at a time, as that plate's plain G-code.
 - Prusa printers check the file's model, nozzle and filament themselves and
   ask on their screen when unsure; such a print waits "at the printer" until
   someone answers there.
@@ -390,8 +395,8 @@ summary prints the `pin.json` to paste there.
 | `GET /api/discovery` | printers seen on the LAN, each with the protocol and address to add it with |
 | `GET/POST/PUT/DELETE /api/custom-profiles[/{id}]` | saved setting overrides (members: only the Slice page's settings; nobody: `post_process`) |
 | `GET /api/jobs?group=&mine=1` | visible jobs with status, progress, step message, warnings, `source`, creator, group |
-| `POST /api/jobs` (multipart) | `model` (repeatable) + profile names (`machine`, `process`, `filament` (repeatable: filament 1, 2, ...; `support_filament` / `support_interface_filament` in the overrides pick among them), `overrides`, `bed_type`, `color`, `printer_id`, `routing`). `source=server` slices here, `source=browser` in the browser. Every job keeps its models so it can be sliced again; a browser job may instead name models kept in the browser (`local_models`: `[{"name", "bytes", "sha256"}]`). Optional `group_id`; optional `plate` (`{"objects": [{"model": 0, "placement": {"rotation": [3x3 row-major], "offset": [dx, dy]}}]}`: per part, the rotation applied to the model as loaded and its bounding-box centre relative to the bed centre in mm; a lone part without a placement is centred as loaded; `placement` alone still works for one model); optional `proposed` (what the page defaulted to, JSON); 429 when a quota is used up |
-| `GET /api/jobs/{id}` | one job with its `models` (name, bytes, sha256, `stored`), `inputs` (what it was made from) and `plate` |
+| `POST /api/jobs` (multipart) | `model` (repeatable) + profile names (`machine`, `process`, `filament` (repeatable: filament 1, 2, ...; `support_filament` / `support_interface_filament` in the overrides pick among them), `overrides`, `bed_type`, `color`, `printer_id`, `routing`). `source=server` slices here, `source=browser` in the browser. Every job keeps its models so it can be sliced again; a browser job may instead name models kept in the browser (`local_models`: `[{"name", "bytes", "sha256"}]`). Optional `group_id`; optional `plates` (`{"plates": [{"objects": [{"model": 0, "placement": {"rotation": [3x3 row-major], "offset": [dx, dy]}}]}, ...]}`: per plate, per part, the rotation applied to the model as loaded and its bounding-box centre relative to the bed centre in mm; every model on some plate, no plate empty, at most 50; a job's only part may go without a placement (centred as loaded); `plate` with one bare plate, or `placement` alone for one model, still work); several plates always slice into a package; optional `proposed` (what the page defaulted to, JSON); 429 when a quota is used up |
+| `GET /api/jobs/{id}` | one job with its `models` (name, bytes, sha256, `stored`), `inputs` (what it was made from) and `plates` (`plate` too, the only one, when there is just one); its time and filament are totals over every plate, each plate's own in `package_json` |
 | `PUT /api/jobs/{id}` | move a job to another group (`group_id`, null = personal) |
 | `DELETE /api/jobs/{id}`, `POST /api/jobs/delete` `{ids}` | delete jobs with their files (creator, group managers, admins); refused while slicing or while a print still needs the package. The bulk form answers `{deleted, refused: [{id, error}]}` |
 | `GET /api/jobs/{id}/model`, `GET /api/jobs/{id}/models/{idx}` | the job's (first, or idx-th) source model; 404 when it stayed in a browser |

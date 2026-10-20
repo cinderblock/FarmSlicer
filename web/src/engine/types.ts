@@ -26,7 +26,10 @@ export interface SliceReport {
   cancelled: boolean;
   error: string | null;
   warnings: string[];
+  /** Totals over every plate (layers: the tallest plate's). */
   stats: SliceStats;
+  /** How many plates were sliced (engines from before several plates omit it). */
+  plates?: number;
   /** MEMFS path of the sliced project, when one was asked for (engines built before packaging omit it). */
   package?: string | null;
 }
@@ -43,9 +46,10 @@ export interface Placement {
 }
 
 /**
- * Every part on the plate (src/placement.rs `PlateLayout`): `model` indexes
- * the job's models in order; a model can be placed several times (copies).
- * A lone part may go without a placement (centred as loaded).
+ * Every part on one plate (src/placement.rs `PlateLayout`): `model` indexes
+ * the job's models in order; a model can be placed several times (copies),
+ * on any plate. A job's only part may go without a placement (centred as
+ * loaded).
  */
 export interface PlateLayout {
   objects: { model: number; placement?: Placement | null }[];
@@ -63,14 +67,16 @@ export interface SliceOptions {
   logo?: { rgba: ArrayBuffer; width: number; height: number };
   /** Where a single-part job put the model; null/absent = centred as loaded (engines from before plates). */
   placement?: Placement | null;
-  /** Every part on the plate, by model index. */
+  /** The only plate (null with several: engines from before them would slice just one). */
   plate?: PlateLayout | null;
-  /** The plate's models, in order. */
+  /** Every plate, in order; several need `package` (that's where they go). */
+  plates?: PlateLayout[];
+  /** The job's models, in order. */
   models?: { name: string }[];
 }
 
 export interface SliceOutput {
-  /** Backed by a plain ArrayBuffer (copied out of the engine heap), so it can go straight into a Blob. */
+  /** Plate 1's G-code. Backed by a plain ArrayBuffer (copied out of the engine heap), so it can go straight into a Blob. */
   gcode: Uint8Array<ArrayBuffer>;
   /** The sliced project, when SliceOptions.package asked for one and the engine supports it. */
   package: Uint8Array<ArrayBuffer> | null;
@@ -89,7 +95,7 @@ export type WorkerRequest =
 export type WorkerResponse =
   | {
       type: "ready";
-      version: { engine: string; orca: string; threads: boolean; placement?: boolean; plate?: boolean };
+      version: { engine: string; orca: string; threads: boolean; placement?: boolean; plate?: boolean; plates?: boolean };
       threadCount: number;
     }
   | { type: "init-error"; error: string }

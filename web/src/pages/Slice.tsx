@@ -128,7 +128,10 @@ interface ResliceJob {
     color: string;
     group_id: string | null;
   } | null;
+  /** The only plate (null with several, or from servers before plates). */
   plate: PlateLayout | null;
+  /** Every plate (servers before several plates send only `plate`). */
+  plates?: PlateLayout[];
 }
 
 interface ProfileEntry extends FilamentOption {
@@ -325,7 +328,7 @@ export default function SlicePage() {
   // Slicing a job again (/slice?from=<job>): its models, plate and choices.
   const [searchParams] = useSearchParams();
   const fromJob = searchParams.get("from");
-  const [initialPlate, setInitialPlate] = useState<{ key: string; files: File[]; plate: PlateLayout | null } | null>(null);
+  const [initialPlate, setInitialPlate] = useState<{ key: string; files: File[]; plates: PlateLayout[] | null } | null>(null);
   const [reslice, setReslice] = useState<{ name: string; error?: string } | null>(null);
   const machineModelsLoaded = machineModels.length > 0;
   useEffect(() => {
@@ -383,7 +386,7 @@ export default function SlicePage() {
       if (inputs?.filaments[0])
         setMaterialsChoice({ part: inputs.filaments[0], value: materialsFromJob(inputs.filaments, saved) });
       setOverrides(Object.fromEntries(Object.entries(saved).filter(([k]) => !SUPPORT_KEYS.includes(k))));
-      setInitialPlate({ key: fromJob, files, plate: job.plate });
+      setInitialPlate({ key: fromJob, files, plates: job.plates ?? (job.plate ? [job.plate] : null) });
     })().catch((err) => {
       if (!stale) setReslice((r) => ({ name: r?.name ?? "this job", error: err instanceof Error ? err.message : String(err) }));
     });
@@ -726,7 +729,7 @@ export default function SlicePage() {
     if (color) formData.append("color", color);
     formData.append("overrides", JSON.stringify(jobOverrides));
     if (groupId) formData.append("group_id", groupId);
-    if (layout) formData.append("plate", JSON.stringify(layout.plate));
+    if (layout) formData.append("plates", JSON.stringify({ plates: layout.plates }));
     // What the page would have sent untouched: the defaults-changed report
     // compares it with what the job was made from.
     formData.append(
@@ -822,7 +825,9 @@ export default function SlicePage() {
       const secs = ((performance.now() - started) / 1000).toFixed(1);
       setResult({
         ok: true,
-        message: `Sliced in this browser in ${secs}s: ${out.report.stats.layers} layers, est. ${formatDuration(out.report.stats.printTimeSec)}, ${out.report.stats.filamentG.toFixed(1)} g`,
+        message: `Sliced in this browser in ${secs}s: ${
+          (out.report.plates ?? 1) > 1 ? `${out.report.plates} plates` : `${out.report.stats.layers} layers`
+        }, est. ${formatDuration(out.report.stats.printTimeSec)}, ${out.report.stats.filamentG.toFixed(1)} g`,
       });
       setSliced({ jobId: job.id, gcode: out.gcode });
       setView("preview");
@@ -875,6 +880,7 @@ export default function SlicePage() {
   };
   const supportThreshold = Number(profileValue("support_threshold_angle")) || 0;
   const offBed = !!layout && (layout.fit !== "inside" || layout.overlaps);
+  const partCount = layout?.plates.reduce((n, p) => n + p.objects.length, 0) ?? 0;
 
   const handleCancelBrowserSlice = useCallback(() => {
     engineRef.current?.cancel();
@@ -1223,7 +1229,8 @@ export default function SlicePage() {
             <div className="model-info">
               <p>
                 {modelFiles.length === 1 ? modelFiles[0].name : `${modelFiles.length} models`}
-                {layout.plate.objects.length > 1 && ` · ${layout.plate.objects.length} parts`}
+                {partCount > 1 && ` · ${partCount} parts`}
+                {layout.plates.length > 1 && ` on ${layout.plates.length} plates`}
               </p>
               <p className="hint">
                 {(modelFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(1)} MB

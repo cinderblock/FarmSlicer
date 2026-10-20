@@ -283,6 +283,8 @@ export class Part {
 
   /** The loaded model this part is a copy of. */
   readonly shape: PartShape;
+  /** Which of the job's plates the part is on (0-based; `setPlate`). */
+  plate = 0;
 
   constructor(shape: PartShape) {
     this.shape = shape;
@@ -338,11 +340,12 @@ export class Part {
     return this.shape.hullFaces;
   }
 
-  /** Another part of the same shape, turned the same way, at the same place. */
+  /** Another part of the same shape, turned the same way, at the same place on the same plate. */
   clone(): Part {
     const copy = new Part(this.shape);
     copy.setRotation(this.root.quaternion);
     copy.setCenter(this.center.x, this.center.y);
+    copy.plate = this.plate;
     return copy;
   }
 
@@ -353,6 +356,11 @@ export class Part {
   /** Radius of the part's bounding sphere (about the bounding-box centre). */
   get radius(): number {
     return this.extent.getSize(new THREE.Vector3()).length() / 2;
+  }
+
+  /** Put the part on another plate (0-based). */
+  setPlate(plate: number) {
+    this.plate = plate;
   }
 
   /** Rotate the part, keeping its bounding-box centre where it is and resting on the plate. */

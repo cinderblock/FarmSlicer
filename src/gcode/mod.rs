@@ -194,7 +194,7 @@ fn check_plate(
         materials,
         densities: settings.densities.clone(),
         filament_diameter: settings.diameter.unwrap_or(1.75),
-        other_firmware: format == PackageFormat::Gcode,
+        other_firmware: format == PackageFormat::Gcode || plate.for_other_firmware(),
     };
     let reader = BufReader::with_capacity(1 << 16, gcode.take(MAX_GCODE_BYTES));
     let mut result = check::check(reader, data::data(), &declared, limits)

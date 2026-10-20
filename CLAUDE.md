@@ -95,7 +95,7 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `path` '' = kept in the user's browser, found again by `sha256`); what
   it was made from is `jobs.inputs_json` (`server::JobInputs`: machine,
   process, filaments, plate type, printer, routing, group, source), what
-  the Slice page proposed `proposed_json`, its parts `plate_json`.
+  the Slice page proposed `proposed_json`, its plates `plate_json`.
   `delete_job` returns the files to remove (slices rows go too; prints and
   incidents keep their history)
 - `src/profiles.rs` — OrcaSlicer profile loading, `inherits` resolution,
@@ -157,8 +157,14 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (`_moonraker._tcp`, `_octoprint._tcp`, `_prusalink._tcp`), `sdcp.rs`
   (`M99999` UDP broadcast)
 - `src/package/` — what printers are sent: `bambu.rs` (`.gcode.3mf`
-  plates, slice_info) and `gcode.rs` (plain G-code: model, nozzle, time,
-  filaments, bed type and thumbnails from the slicer's comments)
+  plates, slice_info, `printer_model` from project_settings) and `gcode.rs`
+  (plain G-code: model, nozzle, time, filaments, bed type and thumbnails
+  from the slicer's comments). A project whose plates are for another
+  make (`Plate::for_other_firmware`: a non-Bambu `printer_model`, no model
+  id) goes to plain-G-code printers one plate at a time
+  (`package::plate_gcode`, `printing::sent_as`) and is checked as other
+  firmware. A job's time/filament are totals over its plates
+  (`Package::total_*`)
 - `src/printers_api.rs` — printer CRUD (admins), status + SSE events,
   `/api/printer-protocols`, cameras
 - `src/farm_api.rs` — equipment reports, preheat/cooldown; print rules are
@@ -241,11 +247,16 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   then `Preset::normalize` (every filament key an entry per filament, as
   the desktop app loads presets) and, for several filaments, purge volumes
   from their colours (`complete_flush_volumes`, the CLI's method) → the
-  plate (`build_plate`: each model file once, each copy an instance of its
-  objects, rotated, centred on its offset and dropped onto the bed by
-  itself) → a `BuildVolume` check naming the part that doesn't fit →
-  Print::apply/validate/process/export_gcode → stats, the package (with
-  libslic3r's filament-to-nozzle map). On multi-nozzle printers the prime
+  plates (`build_plates`: one Model, each model file once, each copy an
+  instance of its objects, rotated, centred on its offset and dropped onto
+  the bed by itself; every plate in the same bed coordinates) → per plate,
+  as the desktop app does (one `Print` each, `select_plate` marks only that
+  plate's instances printable, a copy of the config): a `BuildVolume`
+  check naming the part that doesn't fit → Print::apply/validate/process/
+  export_gcode (plate N to `plate_gcode_path`: `<job>.plateN.gcode`, plate
+  1 the job's own) → stats (totals), its `PlateData` and thumbnail → one
+  package with every plate (with libslic3r's filament-to-nozzle map);
+  errors and warnings say "plate N:" when there are several. On multi-nozzle printers the prime
   tower goes where the desktop app puts it (x 165, y 250, then inside the
   area every nozzle reaches: `place_wipe_tower`, `fit_wipe_tower`). With a Manual map, a filament the
   export's G-code check says its nozzle can't reach moves to the other
@@ -255,25 +266,31 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   cxx bridge and the wasm bridge; no Rust or Emscripten includes allowed.
 - `src/placement.rs` — `Placement` (a row-major rotation applied to the
   model as loaded, plus the XY offset of its bounding-box centre from the
-  bed centre) and `PlateLayout` (the job's `plate`: parts by model index,
-  copies allowed; a lone part may be unplaced = centred). Checked on
-  `POST /api/jobs`, stored as `jobs.plate_json` (`placement_json` on older
-  jobs; `server::job_plate` reads either) and handed to both engines. The
-  wasm engine stages models 1.. with `fs_stage_model` and takes the plate in
-  `fs_set_options`; `fs_version` reports `placement` and `plate`, and the
-  worker refuses what an older engine would ignore
+  bed centre), `PlateLayout` (one plate: parts by model index, copies
+  allowed) and `JobPlates` (the job's `plates`, `{"plates": [...]}`; a bare
+  plate reads as one; a job's only part may be unplaced = centred).
+  Checked on `POST /api/jobs`, stored as `jobs.plate_json` (`placement_json`
+  on older jobs; `server::job_plates` reads every shape) and handed to both
+  engines (`ModelInput.plates`: each copy's plate). Several plates always
+  get a package (`slice_options`, `browser_slice_options`), and a browser
+  result for them is refused without it. The wasm engine stages models 1..
+  with `fs_stage_model` and takes the plates in `fs_set_options`;
+  `fs_version` reports `placement`, `plate` and `plates`, and the worker
+  refuses what an older engine would ignore
 - `web/src/components/viewer/` — the Slice page's 3D view, Z-up in slicer
   coordinates with the origin at the bed centre: `part.ts` (`PartShape`: a
   loaded model, its convex hull (capped input, see the file) and overhang
   cache, shared by copies; `Part`: one copy's placement, fit against the
   bed, look), `layout.ts` (footprints = 2D hulls, overlap by separating
-  axes, free spots for Duplicate/Add/Fill, shelf-packing Arrange),
+  axes, free spots for Duplicate/Add/Fill, shelf-packing Arrange and
+  `arrangeOnPlates` for what one plate can't hold),
   `overhangs.ts` (faces under the support threshold off the plate, points
   that start in mid-air; the amber/red overlay), `Bed.tsx`, `drag.ts`
   (pointer rays, snapping, dragging a part), `Gizmo.tsx` (move arrows,
   rotate rings, lay on face, for the selected part). `ModelViewer.tsx`
-  reports `PlateState` (files in plate order, the plate, fit, overlaps) and
-  the support check. No camera damping on purpose (CAD-style direct
+  holds every plate's parts (`Part.plate`), shows one plate at a time
+  (tabs), and reports `PlateState` (files in plate order, the plates with
+  parts, fit, overlaps) and the support check. No camera damping on purpose (CAD-style direct
   control)
 - `web/src/components/preview/` — the G-code preview. `GcodePreview.tsx`
   (`source={{url}}` or `{{data}}`: text, bytes or a Blob already in memory;

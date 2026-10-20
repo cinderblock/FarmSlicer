@@ -120,7 +120,6 @@ async fn upload_package(
     let path = dir.join(format!("{}{}", job.id, pkg.format.extension()));
     std::fs::rename(&staging, &path).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = path.to_string_lossy().to_string();
-    let first = &pkg.plates[0];
     state
         .db
         .set_job_package(&job.id, &path, &serde_json::to_string(&pkg).expect("packages serialize"));
@@ -128,8 +127,8 @@ async fn upload_package(
         &state,
         &job.id,
         &path,
-        first.print_time_sec.unwrap_or(0.0),
-        first.weight_g.unwrap_or(0.0),
+        pkg.total_time_sec(),
+        pkg.total_grams(),
         &[],
     );
     // Check the G-code now, so the uploader sees what it found.
@@ -434,7 +433,7 @@ async fn send_job(
         &printer,
         Some(&user.id),
         job.group_id.as_deref(),
-        &printing::file_name(&name, &print_id, pkg.format),
+        &printing::file_name(&name, &print_id, printing::sent_as(&printer, pkg.format)),
         &name,
         &serde_json::to_string(&mapping).expect("mappings serialize"),
         &serde_json::to_string(&body.options).expect("options serialize"),

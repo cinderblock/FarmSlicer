@@ -68,11 +68,18 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
         Err(_) => BTreeMap::new(),
     };
 
-    // The build plate: project_settings.config (JSON) holds the whole config.
-    let bed_type = read_entry_from(&mut zip, "Metadata/project_settings.config")
-        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-        .and_then(|v| v.get("curr_bed_type")?.as_str().map(String::from))
-        .filter(|s| !s.is_empty());
+    // The build plate and the printer model: project_settings.config (JSON)
+    // holds the whole config.
+    let settings = read_entry_from(&mut zip, "Metadata/project_settings.config")
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    let setting = |key: &str| {
+        settings
+            .as_ref()
+            .and_then(|v| v.get(key)?.as_str().map(String::from))
+            .filter(|s| !s.is_empty())
+    };
+    let bed_type = setting("curr_bed_type");
+    let printer_model = setting("printer_model");
 
     let mut plates = Vec::new();
     for index in gcode_plates {
@@ -100,7 +107,7 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
         plates.push(Plate {
             index,
             printer_model_id: meta.printer_model_id,
-            printer_model: None,
+            printer_model: printer_model.clone(),
             nozzle_diameters: meta.nozzle_diameters,
             print_time_sec: meta.prediction,
             weight_g: meta.weight,
@@ -112,6 +119,24 @@ pub fn inspect(path: &Path) -> Result<Package, String> {
         });
     }
     Ok(Package { format: PackageFormat::Bambu3mf, plates })
+}
+
+/// Plate `index`'s G-code, out of the package at `path` (its structure
+/// verified again first: it is read anew).
+pub fn plate_gcode(path: &Path, index: u32) -> Result<Vec<u8>, String> {
+    let mut file = std::fs::File::open(path).map_err(|e| format!("can't open the package: {e}"))?;
+    super::zipcheck::verify(&mut file)?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("can't read the package: {e}"))?;
+    let entry = zip.by_name(&gcode_entry(index)).map_err(|_| format!("the package has no plate {index}"))?;
+    let mut out = Vec::new();
+    entry
+        .take(MAX_GCODE_BYTES + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("can't read plate {index}: {e}"))?;
+    if out.len() as u64 > MAX_GCODE_BYTES {
+        return Err(format!("plate {index}'s G-code is too large"));
+    }
+    Ok(out)
 }
 
 fn thumbnail_entry(index: u32) -> String {

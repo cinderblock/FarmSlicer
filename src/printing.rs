@@ -68,14 +68,25 @@ pub fn incompatibility(store: &ProfileStore, printer: &Printer, format: PackageF
     let Some(protocol) = protocol_of(printer) else {
         return Some(format!("FarmSlicer can't send prints to {} printers", printer.protocol));
     };
+    // Other firmware takes plain G-code, or a project's plate sliced for it
+    // (sent as its G-code).
     let takes = protocol.capabilities().package;
-    if takes != format {
-        return Some(format!("{} takes {}; this is {}", printer.name, takes.label(), format.label()));
+    let other_firmware = format == PackageFormat::Gcode || plate.for_other_firmware();
+    match takes {
+        PackageFormat::Bambu3mf if format == PackageFormat::Gcode => {
+            return Some(format!("{} takes {}; this is {}", printer.name, takes.label(), format.label()));
+        }
+        PackageFormat::Bambu3mf if other_firmware => {
+            let model = plate.printer_model.as_deref().unwrap_or("another make's printer");
+            return Some(format!("sliced for {}; {} is a Bambu Lab printer", with_article(model), printer.name));
+        }
+        PackageFormat::Gcode if !other_firmware => {
+            return Some(format!("{} takes {}; this is {}", printer.name, takes.label(), format.label()));
+        }
+        _ => {}
     }
-    let model_problem = match format {
-        PackageFormat::Bambu3mf => bambu_model_problem(store, printer, plate),
-        PackageFormat::Gcode => model_problem(store, printer, plate),
-    };
+    let model_problem =
+        if other_firmware { model_problem(store, printer, plate) } else { bambu_model_problem(store, printer, plate) };
     if model_problem.is_some() {
         return model_problem;
     }
@@ -345,6 +356,12 @@ pub fn file_name(display: &str, print_id: &str, format: PackageFormat) -> String
     format!("{safe}-{}{}", &print_id[..8], format.extension())
 }
 
+/// The format `printer` receives a package in `format` as: other firmware
+/// gets a project's plate as plain G-code.
+pub fn sent_as(printer: &Printer, format: PackageFormat) -> PackageFormat {
+    protocol_of(printer).map_or(format, |p| p.capabilities().package)
+}
+
 // -- Sending ---------------------------------------------------------------------
 
 pub fn package_of(job: &Job) -> Option<Package> {
@@ -384,9 +401,20 @@ async fn send(
         .as_deref()
         .and_then(|id| state.db.get_printer(id))
         .ok_or("the printer was removed")?;
-    let data = tokio::fs::read(package_path)
-        .await
-        .map_err(|e| format!("can't read the package: {e}"))?;
+    // Other firmware takes the plate's G-code, out of a project if need be.
+    let path = std::path::PathBuf::from(package_path);
+    let index = plate.index;
+    let plain = sent_as(&printer, PackageFormat::Bambu3mf) == PackageFormat::Gcode;
+    let data = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let format = crate::package::sniff(&path)?;
+        if plain {
+            crate::package::plate_gcode(&path, format, index)
+        } else {
+            std::fs::read(&path).map_err(|e| format!("can't read the package: {e}"))
+        }
+    })
+    .await
+    .map_err(|e| format!("can't read the package: {e}"))??;
     println!(
         "Print {}: uploading {} ({} bytes) to {} at {}",
         print.id,

@@ -27,8 +27,8 @@ mod ffi {
         font_path: String,
     }
 
-    /// One model file and every copy of it on the plate
-    /// (`crate::placement::PlateLayout`).
+    /// One model file and every copy of it on the job's plates
+    /// (`crate::placement::JobPlates`).
     struct ModelInput {
         path: String,
         /// Name for a single-object model (instead of the stored file's).
@@ -38,6 +38,8 @@ mod ffi {
         /// the bed centre (2 each). Empty = one copy, centred as loaded.
         rotations: Vec<f64>,
         offsets: Vec<f64>,
+        /// Per copy, its plate (0-based).
+        plates: Vec<u32>,
     }
 
     /// Outcome of one `Slicer::slice` call.
@@ -45,13 +47,18 @@ mod ffi {
         success: bool,
         /// True when the job was cancelled via `progress::request_cancel`.
         cancelled: bool,
+        /// Plate 1's G-code (later plates' are only in the package).
         gcode_path: String,
-        /// The package, when one was asked for and written.
+        /// The package, when one was asked for and written (always, with
+        /// several plates).
         package_path: String,
         error: String,
         /// Non-fatal messages from libslic3r (config substitutions, validation
         /// warnings, print conflicts).
         warnings: Vec<String>,
+        /// How many plates were sliced.
+        plates: u32,
+        /// Totals over every plate (layers: the tallest plate's).
         print_time_sec: f64,
         filament_used_g: f64,
         filament_used_mm: f64,
@@ -72,7 +79,7 @@ mod ffi {
         /// nozzle info tables, flush matrices).
         fn new_slicer(resources_dir: &str) -> UniquePtr<Slicer>;
 
-        /// Slice the plate `models` make (STL/3MF/OBJ/STEP) with the merged
+        /// Slice the plates `models` make (STL/3MF/OBJ/STEP) with the merged
         /// OrcaSlicer config `config_json` (a JSON object of profile keys)
         /// and write G-code to `output_path`, plus what `options` asks for.
         fn slice(
@@ -114,6 +121,7 @@ mod stub {
         pub name: String,
         pub rotations: Vec<f64>,
         pub offsets: Vec<f64>,
+        pub plates: Vec<u32>,
     }
 
     pub struct SliceResult {
@@ -123,6 +131,7 @@ mod stub {
         pub package_path: String,
         pub error: String,
         pub warnings: Vec<String>,
+        pub plates: u32,
         pub print_time_sec: f64,
         pub filament_used_g: f64,
         #[allow(dead_code)]
@@ -155,6 +164,7 @@ mod stub {
                 package_path: String::new(),
                 error: "this server was built without libslic3r (FARMSLICER_SKIP_CXX); slice in the browser".into(),
                 warnings: Vec::new(),
+                plates: 0,
                 print_time_sec: 0.0,
                 filament_used_g: 0.0,
                 filament_used_mm: 0.0,

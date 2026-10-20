@@ -51,13 +51,14 @@ SliceResult Slicer::slice(
         core::ModelInput in;
         in.path = std::string(m.path);
         in.name = std::string(m.name);
-        // Placed copies: 9 rotation and 2 offset numbers each (the server
-        // checked them); anything else is one copy, centred.
+        // Placed copies: 9 rotation and 2 offset numbers and a plate each
+        // (the server checked them); anything else is one copy, centred.
         const size_t copies = m.rotations.size() / 9;
-        if (m.rotations.size() == copies * 9 && m.offsets.size() == copies * 2) {
+        if (m.rotations.size() == copies * 9 && m.offsets.size() == copies * 2 && m.plates.size() == copies) {
             for (size_t c = 0; c < copies; ++c) {
                 core::Placement p;
                 p.set = true;
+                p.plate = m.plates[c];
                 std::copy(m.rotations.begin() + c * 9, m.rotations.begin() + (c + 1) * 9, p.rotation);
                 std::copy(m.offsets.begin() + c * 2, m.offsets.begin() + (c + 1) * 2, p.offset);
                 in.parts.push_back(p);
@@ -79,6 +80,7 @@ SliceResult Slicer::slice(
     result.filament_used_g = out.filament_used_g;
     result.filament_used_mm = out.filament_used_mm;
     result.layer_count = out.layer_count;
+    result.plates = out.plates;
     return result;
 }
 

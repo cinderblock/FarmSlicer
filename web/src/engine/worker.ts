@@ -48,6 +48,8 @@ let threaded = false;
 /** The engine applies SliceOptions.placement (older engines ignore it). */
 let placesModels = false;
 let takesPlates = false;
+/** The engine slices several plates into one package. */
+let takesPlateList = false;
 let currentId = 0;
 
 function writeString(m: EngineModule, s: string): { ptr: number; len: number } {
@@ -84,6 +86,7 @@ async function init(variant: "st" | "mt", baseUrl: string, threads?: number) {
   threaded = Boolean(version.threads) && typeof engine._fs_slice_start === "function";
   placesModels = Boolean(version.placement);
   takesPlates = Boolean(version.plate) && typeof engine._fs_stage_model === "function";
+  takesPlateList = takesPlates && Boolean(version.plates);
   const threadCount = threaded && engine._fs_thread_count ? engine._fs_thread_count() : 1;
   post({ type: "ready", version, threadCount });
 }
@@ -144,9 +147,15 @@ async function slice(id: number, models: { name: string; data: ArrayBuffer }[], 
     post({ type: "error", id, error: "no model to slice" });
     return;
   }
-  // A plate of several parts needs an engine that takes plates; one part
+  // Several plates need an engine that takes them (an older one would
+  // slice one); a plate of several parts one that takes plates; one part
   // goes through `placement`, which older engines understand too.
-  const parts = options?.plate?.objects.length ?? 1;
+  const plateCount = options?.plates?.length ?? 1;
+  if (plateCount > 1 && !takesPlateList) {
+    post({ type: "error", id, error: "this browser engine predates jobs with several plates; reload the page, or slice on the server" });
+    return;
+  }
+  const parts = options?.plates?.reduce((n, p) => n + p.objects.length, 0) ?? options?.plate?.objects.length ?? 1;
   if ((parts > 1 || models.length > 1) && !takesPlates) {
     post({ type: "error", id, error: "this browser engine predates plates of several parts; reload the page, or slice on the server" });
     return;
@@ -154,6 +163,7 @@ async function slice(id: number, models: { name: string; data: ArrayBuffer }[], 
   if (options && !takesPlates) {
     options = { ...options };
     delete options.plate;
+    delete options.plates;
     delete options.models;
   }
   // A placed model must not be sliced by an engine that would ignore the
@@ -162,7 +172,7 @@ async function slice(id: number, models: { name: string; data: ArrayBuffer }[], 
     post({ type: "error", id, error: "this browser engine predates part placement; reload the page, or slice on the server" });
     return;
   }
-  if (options && !setOptions(m, options) && (options.placement || options.plate)) {
+  if (options && !setOptions(m, options) && (options.placement || options.plate || options.plates)) {
     post({ type: "error", id, error: "the browser engine refused the plate's layout" });
     return;
   }
@@ -249,7 +259,9 @@ async function slice(id: number, models: { name: string; data: ArrayBuffer }[], 
   m._free(state);
 
   const elapsedMs = performance.now() - started;
-  if (rc === 0 && gcode) {
+  if (rc === 0 && gcode && plateCount > 1 && !pkg) {
+    post({ type: "error", id, error: "the browser engine sliced the plates but wrote no package for them", report });
+  } else if (rc === 0 && gcode) {
     post({ type: "done", id, gcode, package: pkg, report, elapsedMs }, pkg ? [gcode, pkg] : [gcode]);
   } else {
     post({ type: "error", id, error: report.error ?? (rc === 2 ? "cancelled" : "slicing failed"), report });

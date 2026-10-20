@@ -569,6 +569,26 @@ body {
   opacity: 0.8;
 }
 
+/* Plate tabs: one per plate, the problem ones in red. */
+.plate-tabs .plate-count {
+  margin-left: 0.35rem;
+  padding: 0 0.35rem;
+  border-radius: 8px;
+  background: var(--bg-card);
+  font-size: 0.7rem;
+}
+
+.plate-tabs button.plate-bad {
+  color: var(--error);
+}
+
+.plate-tabs .plate-move {
+  width: auto;
+  margin: 0 2px;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+}
+
 .viewer-hint {
   font-size: 0.75rem;
   color: var(--text-dim);
@@ -577,13 +597,9 @@ body {
   border-radius: 4px;
 }
 
+/* Under the toolbars, in their column (they wrap on narrow screens). */
 .viewer-fit-warning {
-  position: absolute;
-  top: 7.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  max-width: calc(100% - 2rem);
+  max-width: 100%;
   padding: 0.45rem 0.75rem;
   border: 1px solid var(--error);
   border-radius: 6px;

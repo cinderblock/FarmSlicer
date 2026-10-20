@@ -23,7 +23,7 @@ use crate::groups_api;
 use crate::join_api;
 use crate::nozzles;
 use crate::overlay;
-use crate::placement::{Placement, PlateLayout};
+use crate::placement::{JobPlates, Placement};
 use crate::printer::PrinterHub;
 use crate::printers_api;
 use crate::prints_api;
@@ -511,7 +511,10 @@ async fn get_job(
     v["estimated_cost"] = json!(crate::cost::Prices::load(&state.db).job(&job));
     v["models"] = json!(models);
     v["inputs"] = job_inputs(&job).map_or(Value::Null, |i| json!(i));
-    v["plate"] = json!(job_plate(&job));
+    // Every plate; `plate` (the only one) for pages from before several.
+    let plates = job_plates(&job);
+    v["plate"] = if plates.several() { Value::Null } else { json!(plates.plates[0]) };
+    v["plates"] = json!(plates.plates);
     v["nozzle_plan"] = job.nozzle_plan_json.as_deref().and_then(|p| serde_json::from_str(p).ok()).unwrap_or(Value::Null);
     Ok(Json(v))
 }
@@ -761,8 +764,9 @@ fn model_extension(file_name: &str) -> String {
 ///   overrides' `support_filament` / `support_interface_filament` pick
 ///   among them), `overrides`, `bed_type`, `color`,
 ///   `printer_id`, `routing`, `group_id`, `source` ("server" | "browser").
-/// - `plate`: the parts (src/placement.rs `PlateLayout`); `placement`: one
-///   model's placement, from older pages.
+/// - `plates`: the parts on each plate (src/placement.rs `JobPlates`;
+///   `plate`, one plate, from older pages); `placement`: one model's
+///   placement, from older pages still.
 /// - `proposed`: what the page proposed before the user changed anything
 ///   (JSON object; kept for the defaults-changed report).
 async fn create_job(
@@ -815,7 +819,7 @@ async fn create_job(
             "overrides" => overrides_str = text,
             "bed_type" => inputs.bed_type = text.trim().to_string(),
             "placement" => placement_str = text.trim().to_string(),
-            "plate" => plate_str = text.trim().to_string(),
+            "plate" | "plates" => plate_str = text.trim().to_string(),
             "proposed" => proposed_str = text.trim().to_string(),
             "source" => inputs.source = text,
             "local_models" => {
@@ -869,13 +873,13 @@ async fn create_job(
         .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
         .map_err(|e| bad(&e))?;
     let plate = if !plate_str.is_empty() {
-        PlateLayout::parse(&plate_str, models.len()).map_err(|e| bad(&e))?
+        JobPlates::parse(&plate_str, models.len()).map_err(|e| bad(&e))?
     } else if models.len() > 1 {
         return Err(bad(&"several models need a plate saying where each goes"));
     } else if placement_str.is_empty() {
-        PlateLayout::single(None)
+        JobPlates::single(None)
     } else {
-        PlateLayout::single(Some(Placement::parse(&placement_str).map_err(|e| bad(&e))?))
+        JobPlates::single(Some(Placement::parse(&placement_str).map_err(|e| bad(&e))?))
     };
     let proposed = if proposed_str.is_empty() {
         None
@@ -1151,14 +1155,17 @@ fn is_bambu_config(config_json: &str) -> bool {
 fn browser_slice_options(state: &AppState, job: &Job, config_json: &str) -> Value {
     let bambu = is_bambu_config(config_json);
     let overlay = crate::overlay::overlay_for_job(state, job);
+    let plates = job_plates(job);
     json!({
-        "package": bambu,
+        // Several plates go into one package, whatever the printer.
+        "package": bambu || plates.several(),
         "printer_model_id": if bambu { printer_model_id(state, config_json).unwrap_or_default() } else { String::new() },
         "model_name": job.model_name,
-        // Every part on the plate, by model index (the engine stages the
-        // models in that order); single-part jobs also send `placement` for
-        // engines from before plates.
-        "plate": job_plate(job),
+        // Every part on every plate, by model index (the engine stages the
+        // models in that order); a single plate also goes as `plate` and a
+        // single part as `placement`, for engines from before them.
+        "plates": plates.plates,
+        "plate": if plates.several() { Value::Null } else { json!(plates.plates[0]) },
         "models": state.db.job_models(&job.id).iter().map(|m| json!({"name": m.name})).collect::<Vec<_>>(),
         "label": overlay.label,
         "logo_url": overlay.logo.as_ref().and(job.group_id.as_ref()).map(|g| format!("/api/groups/{g}/overlay/logo")),
@@ -1166,15 +1173,19 @@ fn browser_slice_options(state: &AppState, job: &Job, config_json: &str) -> Valu
     })
 }
 
-/// Package (Bambu printers only: the format is theirs) and thumbnail
-/// overlay for a server slice.
+/// Package (Bambu printers: the format is theirs; any printer for several
+/// plates, which only a package holds together) and thumbnail overlay for
+/// a server slice.
 fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::SliceOptions {
     let mut options = slicer::SliceOptions::default();
+    let job = state.db.get_job(job_id);
     if is_bambu_config(config_json) {
         options.package_path = package_output_path(state, job_id);
         options.printer_model_id = printer_model_id(state, config_json).unwrap_or_default();
+    } else if job.as_ref().is_some_and(|j| job_plates(j).several()) {
+        options.package_path = package_output_path(state, job_id);
     }
-    if let Some(job) = state.db.get_job(job_id) {
+    if let Some(job) = job {
         let overlay = crate::overlay::overlay_for_job(state, &job);
         options.font_path = crate::overlay::font_path();
         options.label = overlay.label;
@@ -1188,7 +1199,7 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
 }
 
 /// What the server's slicer gets for a job: each stored model with the
-/// placements of its copies on the plate.
+/// placements of its copies, each on its plate.
 fn model_inputs(state: &AppState, job: &Job) -> Result<Vec<slicer::ModelInput>, String> {
     let mut models = state.db.job_models(&job.id);
     if models.is_empty() && !job.model_path.is_empty() {
@@ -1201,7 +1212,7 @@ fn model_inputs(state: &AppState, job: &Job) -> Result<Vec<slicer::ModelInput>, 
             sha256: None,
         });
     }
-    let plate = job_plate(job);
+    let plates = job_plates(job);
     models
         .iter()
         .enumerate()
@@ -1214,11 +1225,13 @@ fn model_inputs(state: &AppState, job: &Job) -> Result<Vec<slicer::ModelInput>, 
                 name: m.name.clone(),
                 rotations: Vec::new(),
                 offsets: Vec::new(),
+                plates: Vec::new(),
             };
-            for o in plate.objects.iter().filter(|o| o.model == i) {
+            for (plate, o) in plates.parts_by_plate().filter(|(_, o)| o.model == i) {
                 if let Some(p) = &o.placement {
                     input.rotations.extend(p.rotation);
                     input.offsets.extend(p.offset);
+                    input.plates.push(plate as u32);
                 }
             }
             Ok(input)
@@ -1226,25 +1239,22 @@ fn model_inputs(state: &AppState, job: &Job) -> Result<Vec<slicer::ModelInput>, 
         .collect()
 }
 
-/// The job's parts; stored plates were checked when the job was created.
-/// Jobs from before plates have one model, maybe placed.
-pub(crate) fn job_plate(job: &Job) -> PlateLayout {
+/// The job's plates; stored plates were checked when the job was created
+/// (one bare plate: jobs from before several). Jobs from before plates
+/// have one model, maybe placed.
+pub(crate) fn job_plates(job: &Job) -> JobPlates {
     job.plate_json
         .as_deref()
         .and_then(|j| serde_json::from_str(j).ok())
         .unwrap_or_else(|| {
-            PlateLayout::single(job.placement_json.as_deref().and_then(|j| serde_json::from_str(j).ok()))
+            JobPlates::single(job.placement_json.as_deref().and_then(|j| serde_json::from_str(j).ok()))
         })
 }
 
 /// The placement of a single-part job (engines from before plates take
 /// only that).
 fn job_placement(job: &Job) -> Option<Placement> {
-    let plate = job_plate(job);
-    match plate.objects.as_slice() {
-        [one] => one.placement.clone(),
-        _ => None,
-    }
+    job_plates(job).lone_part().and_then(|o| o.placement.clone())
 }
 
 /// Read a freshly written package, attach it to the job (sendable now) and
@@ -1259,7 +1269,7 @@ pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_fil
             // slicer reported stands (the check raises it if the G-code
             // takes more, never lowers it).
             if !own_file {
-                if let Some(job) = state.db.get_job(job_id) {
+                if let Some(job) = state.db.get_job(job_id).filter(|_| pkg.plates.len() == 1) {
                     for plate in &mut pkg.plates {
                         plate.print_time_sec = plate.print_time_sec.or(job.print_time_sec.filter(|t| *t > 0.0));
                         plate.weight_g = plate.weight_g.or(job.filament_used_g.filter(|g| *g > 0.0));
@@ -1336,8 +1346,8 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
             record_package(state, job_id, &result.gcode_path, false);
         }
         println!(
-            "job {job_id}: sliced OK ({} layers, {:.0} s, {:.1} g)",
-            result.layer_count, result.print_time_sec, result.filament_used_g
+            "job {job_id}: sliced OK ({} plate(s), {} layers, {:.0} s, {:.1} g)",
+            result.plates, result.layer_count, result.print_time_sec, result.filament_used_g
         );
     } else if result.cancelled {
         state.db.cancel_job(job_id);
@@ -1476,6 +1486,10 @@ async fn upload_job_result(
     };
     if gcode.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "empty gcode"));
+    }
+    // `gcode` is plate 1's; only the package holds the others.
+    if job_plates(&job).several() && package.as_ref().is_none_or(|p| p.is_empty()) {
+        return Err(err(StatusCode::BAD_REQUEST, "a job with several plates needs its package"));
     }
 
     let output_path = gcode_output_path(&state, &id);

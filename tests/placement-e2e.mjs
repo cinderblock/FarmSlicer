@@ -30,7 +30,7 @@ check(
   "the browser engine gets the placement",
   json(r),
 );
-const placed = (job) => JSON.parse(job?.plate_json ?? "null")?.objects?.[0]?.placement;
+const placed = (job) => JSON.parse(job?.plate_json ?? "null")?.plates?.[0]?.objects?.[0]?.placement;
 check(placed(r.json)?.offset?.[0] === -40, "the job records it", json(r));
 const browserJob = r.json?.id;
 

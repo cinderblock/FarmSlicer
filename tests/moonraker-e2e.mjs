@@ -2,14 +2,15 @@
 // End-to-end test of the Moonraker (Klipper) driver against the fake in
 // tests/fake-moonraker/: connecting (with and without an API key), live
 // status, sending plain G-code and following it to the end, pause / resume /
-// stop / speed, pre-heating by material, pictures of prints started
-// elsewhere, and Klipper shutting down.
+// stop / speed, a plate of a project with several (sent as its G-code),
+// pre-heating by material, pictures of prints started elsewhere, and
+// Klipper shutting down.
 //
 //   node tests/moonraker-e2e.mjs http://localhost:9337
 //
 // Needs a fresh server (it performs first-run setup). Exit code 0 iff all
 // checks pass. No dependencies beyond Node 22.
-import { BASE, check, Client, SoftAuthenticator, register, finish } from "./lib.mjs";
+import { BASE, check, Client, SoftAuthenticator, register, finish, zip } from "./lib.mjs";
 import { startFakeMoonraker } from "./fake-moonraker/fake-moonraker.mjs";
 
 console.log(`moonraker e2e against ${BASE}`);
@@ -123,6 +124,43 @@ check(p?.status === "finished" && p.progress === 100, "the print finishes", JSON
 
 r = await fetch(`${BASE}/api/printers/${id}/thumbnail`, { headers: { cookie: owner.cookie } });
 check(r.status === 200 && r.headers.get("content-type") === "image/png", "the printer card shows the job's picture", String(r.status));
+
+// ---- a plate of a project ----------------------------------------------------------------
+// A job with several plates for a Klipper printer is a .gcode.3mf (one
+// package holds them all): the printer gets the chosen plate's G-code.
+const plateGcode = (n) => gcode.replace("G1 X10 Y10 E1", `G1 X${n}0 Y10 E1 ; plate ${n}`);
+const project = (settings) =>
+  zip({
+    "Metadata/plate_1.gcode": plateGcode(1),
+    "Metadata/plate_2.gcode": plateGcode(2),
+    "Metadata/project_settings.config": JSON.stringify(settings),
+  });
+r = await owner.form("/api/uploads", { file: [new Blob([project({ printer_model: "Voron 2.4 350" })]), "Two plates.gcode.3mf"] });
+check(r.status === 201 && JSON.parse(r.json.package_json ?? "{}").plates?.length === 2, "a two-plate project for a Voron uploads", json(r));
+const projectJob = r.json.id;
+r = await owner.get(`/api/jobs/${projectJob}/targets`);
+check(r.json?.targets?.find((t) => t.printer_id === id)?.incompatible === null, "the Voron takes a plate of it", json(r));
+r = await owner.post(`/api/jobs/${projectJob}/print`, { printer_id: id, plate: 2, acknowledge_review: true });
+check(r.status === 201 && r.json.plate === 2 && r.json.file_name.endsWith(".gcode") && !r.json.file_name.endsWith(".3mf"), "plate 2 goes as plain G-code", json(r));
+p = await printOf(r.json.id, (x) => x?.status === "finished");
+check(p?.status === "finished", "and prints", JSON.stringify(p));
+const sent = fake.files.get(`farmslicer/${p.file_name}`)?.toString();
+check(sent === plateGcode(2), "what the printer got is plate 2's G-code, nothing else", JSON.stringify(sent?.slice(0, 200)));
+// A project sliced for a Bambu printer stays off it.
+r = await owner.form("/api/uploads", {
+  file: [
+    new Blob([
+      zip({
+        "Metadata/plate_1.gcode": plateGcode(1),
+        "Metadata/slice_info.config": `<?xml version="1.0" encoding="UTF-8"?>\n<config><plate><metadata key="index" value="1"/><metadata key="printer_model_id" value="BL-P001"/></plate></config>`,
+      }),
+    ]),
+    "Bambu.gcode.3mf",
+  ],
+});
+const bambuJob = r.json?.id;
+r = await owner.get(`/api/jobs/${bambuJob}/targets`);
+check(/takes plain G-code/.test(r.json?.targets?.find((t) => t.printer_id === id)?.incompatible ?? ""), "a Bambu printer's project isn't sent to the Voron", json(r));
 
 // ---- controls -----------------------------------------------------------------------------
 r = await owner.post(`/api/jobs/${jobId}/print`, { printer_id: id, acknowledge_review: true });

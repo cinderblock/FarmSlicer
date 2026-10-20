@@ -2,7 +2,7 @@
 // slices, then the layer preview, the numbers, what the slicer warned
 // about, the G-code check, and sending it to a printer.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { formatDuration, useJson } from "../api";
 import { formatCost, packageVerdict, type Prices } from "../printers";
@@ -38,7 +38,7 @@ export default function SliceResult({
   onBack,
 }: {
   jobId: string;
-  /** The G-code, when this browser sliced it (no download needed). */
+  /** Plate 1's G-code, when this browser sliced it (no download needed). */
   gcode?: Uint8Array | null;
   bed: BedShape | null;
   /** Back to the plate. */
@@ -47,7 +47,28 @@ export default function SliceResult({
   const navigate = useNavigate();
   const [rev, setRev] = useState(0);
   const [sending, setSending] = useState(false);
+  const [plateChoice, setPlateChoice] = useState(1);
   const job = useJson<ResultJob>(`/api/jobs/${jobId}`, rev).data;
+  // A job with several plates: one tab each (their numbers from the package).
+  const packageJson = job?.package_json ?? null;
+  const plates = useMemo(() => {
+    try {
+      const pkg = packageJson ? JSON.parse(packageJson) : null;
+      return (pkg?.plates ?? []) as { index: number; print_time_sec: number | null; weight_g: number | null }[];
+    } catch {
+      return [];
+    }
+  }, [packageJson]);
+  const plate = plates.length > 1 ? (plates.find((p) => p.index === plateChoice) ?? plates[0]) : null;
+  const plateIndex = plate?.index ?? 1;
+  const several = plates.length > 1;
+  const source = useMemo(
+    () =>
+      gcode && plateIndex === 1
+        ? { data: gcode }
+        : { url: `/api/jobs/${jobId}/gcode${several ? `?plate=${plateIndex}` : ""}` },
+    [gcode, plateIndex, jobId, several],
+  );
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
   const busy = !job || job.status === "queued" || job.status === "slicing";
   // The package lands after the G-code (its check runs): wait a little for
@@ -89,7 +110,6 @@ export default function SliceResult({
   }
 
   const { support, other } = sortWarnings(parseWarnings(job.warnings));
-  const source = gcode ? { data: gcode } : { url: `/api/jobs/${jobId}/gcode` };
   return (
     <div className="slice-result">
       <div className="slice-result-bar">
@@ -97,6 +117,7 @@ export default function SliceResult({
           ← Plate
         </button>
         <span className="slice-result-stats">
+          {plates.length > 1 && `${plates.length} plates: `}
           {formatDuration(job.print_time_sec)} · {(job.filament_used_g ?? 0).toFixed(1)} g ·{" "}
           {formatCost(job.estimated_cost, currency)}
         </span>
@@ -130,8 +151,24 @@ export default function SliceResult({
           ))}
         </details>
       )}
+      {plate && (
+        <div className="job-plates" role="tablist" aria-label="Plates">
+          {plates.map((p) => (
+            <button
+              key={p.index}
+              role="tab"
+              aria-selected={p.index === plate.index}
+              className={p.index === plate.index ? "active" : ""}
+              onClick={() => setPlateChoice(p.index)}
+              title={`${formatDuration(p.print_time_sec)} · ${(p.weight_g ?? 0).toFixed(1)} g`}
+            >
+              Plate {p.index}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="slice-result-preview">
-        <GcodePreview source={source} bed={bed} />
+        <GcodePreview key={plateIndex} source={source} bed={bed} />
       </div>
       {sending && (
         <SendDialog

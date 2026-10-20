@@ -1,5 +1,6 @@
 // Several parts on one plate: their footprints, whether they overlap, where
-// a new copy fits, and packing them all (Arrange). Footprints are the 2D
+// a new copy fits, and packing them all (Arrange), onto more plates when one
+// isn't enough. Footprints are the 2D
 // convex hulls of the parts' rotated convex hulls: exact for convex parts,
 // a safe outline for the rest. Everything here is in scene coordinates (the
 // bed centre is the origin).
@@ -162,19 +163,68 @@ export function fillCopies(part: Part, others: Part[], bed: SceneBed): Part[] {
   return copies;
 }
 
-/**
- * Pack every part on the plate, rows of footprint boxes (tallest first),
- * PART_SPACING apart, the whole block centred on the bed. Parts keep their
- * rotations. Returns false (and moves nothing) when they don't all fit.
- */
-export function arrange(parts: Part[], bed: SceneBed): boolean {
-  if (parts.length === 0) return true;
+type Item = { part: Part; print: Footprint };
+
+/** Deepest first, then widest: the order shelves pack in. */
+function packingOrder(parts: Part[]): Item[] {
   const items = parts.map((p) => ({ part: p, print: footprint(p) }));
   items.sort((a, b) => {
     const da = a.print.box.max.y - a.print.box.min.y;
     const db = b.print.box.max.y - b.print.box.min.y;
     return db - da || b.print.box.max.x - b.print.box.min.x - (a.print.box.max.x - a.print.box.min.x);
   });
+  return items;
+}
+
+/**
+ * Pack every part on the plate, rows of footprint boxes (tallest first),
+ * PART_SPACING apart, the whole block centred on the bed. Parts keep their
+ * rotations. Returns false (and moves nothing) when they don't all fit.
+ */
+export function arrange(parts: Part[], bed: SceneBed): boolean {
+  const moves = planShelves(packingOrder(parts), bed);
+  if (!moves) return false;
+  for (const m of moves) m.part.setCenter(m.center.x, m.center.y);
+  return true;
+}
+
+/**
+ * Pack the parts onto as many plates as they need, each plate packed like
+ * Arrange (the biggest parts first). Returns the parts per plate, moved
+ * into place but with their `plate` left to the caller, or null (moving
+ * nothing) when a part doesn't fit even on an empty plate.
+ */
+export function arrangeOnPlates(parts: Part[], bed: SceneBed): Part[][] | null {
+  let rest = packingOrder(parts);
+  const plates: { part: Part; center: THREE.Vector2 }[][] = [];
+  while (rest.length > 0) {
+    // The longest run of the remaining parts that packs on one plate.
+    // Shelf packing in this order fits any shorter run of a run that fits,
+    // so search for it.
+    let lo = 0;
+    let hi = rest.length;
+    let best: { part: Part; center: THREE.Vector2 }[] | null = null;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const moves = planShelves(rest.slice(0, mid), bed);
+      if (moves) {
+        lo = mid;
+        best = moves;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (!best || lo === 0) return null;
+    plates.push(best);
+    rest = rest.slice(lo);
+  }
+  for (const plate of plates) for (const m of plate) m.part.setCenter(m.center.x, m.center.y);
+  return plates.map((plate) => plate.map((m) => m.part));
+}
+
+/** Where shelf packing puts `items` (in that order) on the bed, or null when they don't all fit. */
+function planShelves(items: Item[], bed: SceneBed): { part: Part; center: THREE.Vector2 }[] | null {
+  if (items.length === 0) return [];
   const width = bed.max.x - bed.min.x;
   const depth = bed.max.y - bed.min.y;
   // Shelves: fill a row left to right, then start the next one above it.
@@ -191,7 +241,7 @@ export function arrange(parts: Part[], bed: SceneBed): boolean {
       x = 0;
       rowDepth = 0;
     }
-    if (w > width || y + d > depth) return false;
+    if (w > width || y + d > depth) return null;
     spots.push({ item, x, y });
     usedWidth = Math.max(usedWidth, x + w);
     x += w + PART_SPACING;
@@ -206,7 +256,6 @@ export function arrange(parts: Part[], bed: SceneBed): boolean {
     return { part: item.part, moved: shifted(item.print, dx, dy), center: item.part.center.clone().add(new THREE.Vector2(dx, dy)) };
   });
   // Round or odd-shaped beds: the box packing must also be on the bed.
-  if (!moves.every((m) => onBed(m.moved, bed))) return false;
-  for (const m of moves) m.part.setCenter(m.center.x, m.center.y);
-  return true;
+  if (!moves.every((m) => onBed(m.moved, bed))) return null;
+  return moves.map(({ part, center }) => ({ part, center }));
 }

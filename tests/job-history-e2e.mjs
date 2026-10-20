@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // End-to-end test of job history: every job keeps its source models (or
 // names the ones that stayed in the browser), records what it was made from
-// and its plate, serves its models back for re-slicing, and can be deleted
+// and its plates, serves its models back for re-slicing, and can be deleted
 // (alone or in bulk) with its files, by whoever may.
 //
 //   node tests/job-history-e2e.mjs http://localhost:9337
@@ -102,6 +102,50 @@ r = await jobForm(alice, [
 ]);
 check(r.status === 201 && r.json?.slice_options?.plate?.objects?.length === 3 && r.json?.model_count === 1, "copies of one model", json(r));
 
+// ---- several plates ---------------------------------------------------------------
+const part = (m, x) => ({ model: m, placement: { rotation: ID, offset: [x, 0] } });
+r = await jobForm(alice, [
+  ["source", "browser"],
+  model(CUBE, "cube.stl"),
+  model(PEG, "peg.stl"),
+  ["plates", JSON.stringify({ plates: [{ objects: [part(0, -20), part(0, 20)] }, { objects: [part(1, 0)] }] })],
+]);
+check(r.status === 201, "a job with two plates", json(r));
+check(
+  r.json?.slice_options?.plates?.length === 2 && r.json.slice_options.plates[1].objects[0].model === 1 && r.json.slice_options.plate === null,
+  "the browser engine gets both plates (and no lone plate for older engines)",
+  json(r),
+);
+check(r.json?.slice_options?.package === true, "several plates need a package, whatever the printer", json(r));
+const plated = r.json?.id;
+r = await alice.get(`/api/jobs/${plated}`);
+check(r.json?.plates?.length === 2 && r.json?.plate === null && JSON.parse(r.json?.plate_json ?? "{}").plates?.length === 2, "the job keeps its plates", json(r));
+r = await browserResult(alice, plated);
+check(r.status === 400 && /package/.test(r.json?.error ?? ""), "a result without the package is refused (only it holds plate 2)", json(r));
+const plateCode = (n) => `; plate ${n}\nG28\nG1 X${n * 10} Y10 E1\n`;
+r = await alice.form(`/api/jobs/${plated}/result`, {
+  gcode: [new Blob([plateCode(1)]), "x.gcode"],
+  package: [
+    new Blob([
+      zip({
+        "Metadata/plate_1.gcode": plateCode(1),
+        "Metadata/plate_2.gcode": plateCode(2),
+        "Metadata/project_settings.config": JSON.stringify({ printer_model: "Voron 2.4 350" }),
+      }),
+    ]),
+    "x.gcode.3mf",
+  ],
+  print_time_sec: "120",
+  filament_used_g: "3",
+  warnings: "[]",
+});
+check(r.status === 200 && r.json?.status === "done", "with it the job is done", json(r));
+r = await alice.get(`/api/jobs/${plated}`);
+const platedPackage = JSON.parse(r.json?.package_json ?? "{}");
+check(platedPackage.plates?.length === 2 && platedPackage.plates[1].printer_model === "Voron 2.4 350", "its package lists both plates", json(r));
+r = await alice.get(`/api/jobs/${plated}/gcode?plate=2`);
+check(r.status === 200 && (r.json?.raw ?? "").startsWith("; plate 2"), "plate 2's G-code is served", json(r));
+
 r = await jobForm(alice, [
   ["source", "browser"],
   model(CUBE, "cube.stl"),
@@ -188,6 +232,8 @@ for (const [label, fields] of [
   ["a plate naming a model that wasn't sent", [model(CUBE, "a.stl"), ["plate", JSON.stringify({ objects: [{ model: 1 }] })]]],
   ["two models without a plate", [model(CUBE, "a.stl"), model(PEG, "b.stl")]],
   ["a model left off the plate", [model(CUBE, "a.stl"), model(PEG, "b.stl"), ["plate", JSON.stringify({ objects: [{ model: 0, placement: { rotation: ID, offset: [0, 0] } }] })]]],
+  ["an empty plate", [model(CUBE, "a.stl"), ["plates", JSON.stringify({ plates: [{ objects: [{ model: 0 }] }, { objects: [] }] })]]],
+  ["a model on no plate", [model(CUBE, "a.stl"), model(PEG, "b.stl"), ["plates", JSON.stringify({ plates: [{ objects: [part(0, 0)] }, { objects: [part(0, 0)] }] })]]],
   ["a proposal that isn't an object", [model(CUBE, "a.stl"), ["proposed", "[1,2]"]]],
   ["an unknown build plate", [model(CUBE, "a.stl"), ["bed_type", "Lava Plate"]]],
   ["G-code in the overrides", [model(CUBE, "a.stl"), ["overrides", JSON.stringify({ machine_start_gcode: "G28" })]]],
