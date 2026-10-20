@@ -148,6 +148,48 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
    for external billing, API docs.
 7. Auto-plating; auto-send (bed-clear confirmation) and YOLO send modes.
 
+## Step 1 design: several plates per job (current step)
+
+Mapped 2026-10-20 (every single-plate assumption, file:line, was surveyed;
+the summary is here).
+
+- **Shape:** `jobs.plate_json` = `{"plates":[{"objects":[...]}, ...]}`.
+  Reading accepts the old `{objects}` (one plate) and `placement_json`.
+  Validation per plate (≥1 part; placements when several parts) and per
+  job (every model used somewhere, `MAX_PLATES`). The API returns `plates`,
+  and `plate` (= plate 1) only for single-plate jobs so older pages and
+  engines keep working; a multi-plate job is refused by an engine without
+  `plates` in `fs_version`.
+- **Slicing:** one `slice_models` call loops over plates (upstream does
+  the same: one `Print` per plate on one shared `Model`, `Print::apply`
+  takes only `printable` instances; CLI `OrcaSlicer.cpp` ~5681-6040). Per
+  plate: mark that plate's instances printable, build-volume check naming
+  the plate, copy of the config (wipe tower position and filament map are
+  per plate), fresh `ZeroedPrint`, export `{out}.plate{N}.gcode`, fill its
+  `PlateData` + thumbnail while the Print lives, free the Print (wasm
+  memory). Then one `store_bbs_3mf` with every plate (`thumbnail_data[i]`
+  must line up with `plate_data_list[i]`). Progress scaled per plate,
+  warnings prefixed "plate N:".
+- **Totals:** `jobs.print_time_sec` / `filament_used_g` become sums over
+  plates (fix `safety.rs:32`, `prints_api.rs:123`, `cost.rs:102`, browser
+  upload); per-plate numbers live in `package_json.plates[]`. Quotas read
+  the totals.
+- **Plain G-code printers:** a multi-plate job is still one package file:
+  the `.gcode.3mf` container `store_bbs_3mf` writes, as a new
+  `PackageFormat::GcodePlates`. Inspect = the Bambu reader; check with
+  `other_firmware`; send extracts `plate_N.gcode` and uploads it as
+  `.gcode`; preview/thumbnails read the zip. Single-plate plain jobs and
+  uploaded `.gcode` stay `Gcode`.
+- **Browser engine:** `fs_set_options` takes `plates`; the report gains
+  `plates: [{index, stats}]`; the browser uploads the package (plus plate
+  1's G-code for the instant preview).
+- **Viewer:** parts carry a plate index; plate tabs (add, delete, move part
+  to plate N); Duplicate/Fill/Arrange act on the active plate; Arrange can
+  spill onto new plates. `SliceResult` gets the Job page's plate tabs.
+- **Tests:** placement/job-history e2e for the new shape and old shapes;
+  `wasm/test/smoke.mjs --plates`; preview e2e (plain multi-plate now has
+  plate 2); unit tests for the shape and per-plate validation.
+
 ## Findings / gotchas
 
 - (none yet)
