@@ -148,7 +148,7 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
    for external billing, API docs.
 7. Auto-plating; auto-send (bed-clear confirmation) and YOLO send modes.
 
-## Step 1 design: several plates per job (current step)
+## Step 1 design: several plates per job (built 2026-10-20)
 
 Mapped 2026-10-20 (every single-plate assumption, file:line, was surveyed;
 the summary is here).
@@ -174,12 +174,17 @@ the summary is here).
   plates (fix `safety.rs:32`, `prints_api.rs:123`, `cost.rs:102`, browser
   upload); per-plate numbers live in `package_json.plates[]`. Quotas read
   the totals.
-- **Plain G-code printers:** a multi-plate job is still one package file:
-  the `.gcode.3mf` container `store_bbs_3mf` writes, as a new
-  `PackageFormat::GcodePlates`. Inspect = the Bambu reader; check with
-  `other_firmware`; send extracts `plate_N.gcode` and uploads it as
-  `.gcode`; preview/thumbnails read the zip. Single-plate plain jobs and
-  uploaded `.gcode` stay `Gcode`.
+- **Plain G-code printers:** a multi-plate job is still one package file,
+  the `.gcode.3mf` container `store_bbs_3mf` writes. *Changed while
+  building:* no new package format. `PackageFormat::Bambu3mf` is the
+  container; a plate is "for other firmware" when the project's
+  `printer_model` (read from project_settings) isn't Bambu's and it has no
+  model id (`Plate::for_other_firmware`). Plain-G-code printers accept
+  such plates and get `plate_N.gcode` extracted (`package::plate_gcode`,
+  file named `.gcode` via `printing::sent_as`); Bambu printers refuse
+  them; the check runs as other firmware. Bonus: OrcaSlicer projects
+  uploaded for Klipper/Prusa/etc. are now sendable too. Single-plate plain
+  jobs and uploaded `.gcode` stay `Gcode`.
 - **Browser engine:** `fs_set_options` takes `plates`; the report gains
   `plates: [{index, stats}]`; the browser uploads the package (plus plate
   1's G-code for the instant preview).
@@ -192,13 +197,31 @@ the summary is here).
 
 ## Findings / gotchas
 
+- Uploaded multi-plate projects now count every plate in the job's totals
+  (quota, cost), like FarmSlicer's own multi-plate jobs; before, only
+  plate 1 counted. A job = all its plates.
+- The viewer drops an empty plate when you leave it (or move its last part
+  away), so the tabs number plates the way the job will; empty plates are
+  never sent.
+- Verified 2026-10-20: native two-plate slices (X1C and Voron 2.4) through
+  the API in a `farmslicer:plates` image: package with both plates, right
+  objects per plate, per-plate thumbnails and stats, totals summed; wasm
+  `st` `smoke.mjs --plates` passes (`--plate` and single too); 146 Rust
+  tests, 14 e2e suites; the viewer checked in a browser (tabs, move to
+  plate, Arrange spilling onto a new plate).
+
 - (none yet)
 
 ## Progress log
 
 - [x] Surveyed what exists (2026-10-20).
 - [x] User answers to the open questions (2026-10-20).
-- [ ] Step 1 onward.
+- [x] Step 1: several plates per job: slicer core, both engines, server,
+  sending plates of projects to other firmware, viewer tabs, Slice result
+  tabs, tests (e2e, `smoke.mjs --plates` in CI), docs.
+- [ ] Not on hardware yet: a real print of plate 2 of a multi-plate job
+  (Bambu and a Klipper printer).
+- [ ] Step 2: print outcomes (good/bad copies per print).
 
 ## Things not to do
 
