@@ -4,6 +4,7 @@ import { errorText, useJson } from "../api";
 import { QuotaRulesEditor } from "../components/Quota";
 import type { Rule } from "../groups";
 import PrintRulesEditor from "../components/PrintRulesEditor";
+import PoolsEditor from "../components/PoolsEditor";
 import { UPLOAD_POLICIES, type GcodeLimits, type Prices, type PrintRules, type UploadPolicy } from "../printers";
 
 interface SiteSettings {
@@ -18,6 +19,7 @@ interface SiteSettings {
   gcode_limits: GcodeLimits;
   finished_outcome: "ask" | "good";
   requeue_failed: boolean;
+  mixing: "none" | "group" | "any";
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -116,6 +118,18 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         <span className="hint">
           Otherwise the project shows the copies as missing, and someone queues them again (Projects page).
         </span>
+        <label>
+          Parts of different projects on one plate
+          <select value={s.mixing} onChange={(e) => setS({ ...s, mixing: e.target.value as SiteSettings["mixing"] })}>
+            <option value="none">Never</option>
+            <option value="group">Same group and client only</option>
+            <option value="any">Any</option>
+          </select>
+          <span className="hint">For plates FarmSlicer makes from projects' missing parts; a pool can set its own.</span>
+        </label>
+
+        <h3>Printer pools</h3>
+        <PoolsEditor />
 
         <h3>Sliced files and G-code checks</h3>
         <p className="hint">

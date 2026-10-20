@@ -248,9 +248,16 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   Sends go through `prints_api::send_plate` (claims the entry before the
   print, gives it back if nothing is sent; a direct send takes the
   plate's oldest queued entry). Page `Queue.tsx`
+- `src/pools.rs` — printer pools (`db/pools.rs`; API in the same file):
+  `operates(state, viewer, printer)` gives operators of a pool, for its
+  printers, what admins have: the queue in full (`operates_entry`), send
+  next, control (`prints_api::can_control_print`, `control_printer`),
+  outcomes, seeing the prints. Admins aren't operators by default:
+  callers check `viewer.admin` too. `mixing` (site setting and per pool)
+  is for the auto-plater
 - `src/events.rs` — every event (`print.outcome`, `project.status`, ...)
-  goes through `emit`; `src/pools.rs` and `src/dispatch.rs` are filled in
-  by steps 5 and 7 of `plans/plates-and-print-queue.md`
+  goes through `emit`; `src/dispatch.rs` is filled in by step 7 of
+  `plans/plates-and-print-queue.md`
 - `src/printing.rs` — sending: compatibility (package format per protocol,
   model, nozzle), AMS mapping where the protocol maps filaments, dispatch to
   the driver's send, and `track()` moving prints along from printer

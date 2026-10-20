@@ -524,6 +524,7 @@ fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRe
             .as_deref()
             .and_then(|j| state.db.get_job(j))
             .is_some_and(|job| viewer.can_see_job(tree, &job))
+        || crate::pools::operates(state, viewer, print.printer_id.as_deref())
 }
 
 /// Admins and the managers of the print's group approve requests; only
@@ -532,10 +533,13 @@ fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool 
     viewer.admin || (!print.safety_review && print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)))
 }
 
-fn can_control_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
+/// Whoever sent it, the group's managers, admins, and the operators of its
+/// printer (src/pools.rs).
+fn can_control_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
     viewer.admin
         || print.user_id.as_deref() == Some(viewer.user.id.as_str())
         || print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+        || crate::pools::operates(state, viewer, print.printer_id.as_deref())
 }
 
 #[derive(Deserialize)]
@@ -583,7 +587,7 @@ async fn list_prints(
                     .and_then(|j| state.db.get_job(j))
                     .and_then(|job| printing::package_of(&job))
                     .and_then(|pkg| pkg.plate(p.plate as u32).map(|pl| prices.plate(pl))));
-                v["can_control"] = json!(can_control_print(&tree, &viewer, &p));
+                v["can_control"] = json!(can_control_print(&state, &tree, &viewer, &p));
                 v["can_approve"] = json!(p.status == "pending_approval" && can_approve_print(&tree, &viewer, &p));
                 add_outcome(&state, &tree, &viewer, &p, &mut v);
                 v
@@ -611,7 +615,7 @@ async fn get_print(
         .filter(|p| can_see_print(&state, &tree, &viewer, p))
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
     let mut v = json!(print);
-    v["can_control"] = json!(can_control_print(&tree, &viewer, &print));
+    v["can_control"] = json!(can_control_print(&state, &tree, &viewer, &print));
     v["can_approve"] = json!(print.status == "pending_approval" && can_approve_print(&tree, &viewer, &print));
     add_outcome(&state, &tree, &viewer, &print, &mut v);
     Ok(Json(v))
@@ -619,10 +623,9 @@ async fn get_print(
 
 // -- Outcomes --------------------------------------------------------------------
 
-/// Whoever may control a print may say how it came out; so may the
-/// operators of its printer (src/pools.rs).
+/// Whoever may control a print may say how it came out.
 fn can_record_outcome(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
-    can_control_print(tree, viewer, print) || crate::pools::operates(state, viewer, print.printer_id.as_deref())
+    can_control_print(state, tree, viewer, print)
 }
 
 /// Did the print get far enough to hold copies to count?
@@ -667,7 +670,7 @@ async fn record_outcome(
     let print = state
         .db
         .get_print(&id)
-        .filter(|p| can_see_print(&state, &tree, &viewer, p) || crate::pools::operates(&state, &viewer, p.printer_id.as_deref()))
+        .filter(|p| can_see_print(&state, &tree, &viewer, p))
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
     if !can_record_outcome(&state, &tree, &viewer, &print) {
         return Err(api_err(
@@ -890,7 +893,7 @@ async fn control_print(
         .get_print(&id)
         .filter(|p| can_see_print(&state, &tree, &viewer, p))
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
-    if !can_control_print(&tree, &viewer, &print) {
+    if !can_control_print(&state, &tree, &viewer, &print) {
         return Err(api_err(StatusCode::FORBIDDEN, "only whoever sent the print, its group's managers or an admin can"));
     }
     if !matches!(print.status.as_str(), "printing" | "paused" | "starting") {
@@ -910,8 +913,8 @@ async fn control_print(
     run_control(&state, &printer_id, command).await
 }
 
-/// `POST /api/printers/{id}/control` (admins): act on whatever the printer
-/// is doing, including prints started elsewhere.
+/// `POST /api/printers/{id}/control` (admins, the printer's operators): act
+/// on whatever the printer is doing, including prints started elsewhere.
 #[derive(Deserialize)]
 struct IncidentQuery {
     user: Option<String>,
@@ -938,7 +941,10 @@ async fn control_printer(
     Path(id): Path<String>,
     Json(body): Json<ControlRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    let (_, viewer) = groups_api::context(&state, &user);
+    if !viewer.admin && !crate::pools::operates(&state, &viewer, Some(&id)) {
+        return Err(api_err(StatusCode::FORBIDDEN, "only admins and the printer's operators can"));
+    }
     state.db.get_printer(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such printer"))?;
     let command = control_command(&body)?;
     println!("Printer {id}: {} asks to {}", user.username, body.action);

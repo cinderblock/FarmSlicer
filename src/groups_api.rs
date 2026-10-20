@@ -667,6 +667,7 @@ fn settings_json(state: &AppState) -> Value {
         "gcode_limits": crate::gcode::site_limits(&state.db),
         "finished_outcome": crate::outcomes::finished_outcome(state),
         "requeue_failed": crate::queue::requeue_failed(state),
+        "mixing": crate::pools::site_mixing(state),
     })
 }
 
@@ -711,6 +712,9 @@ struct UpdateSettings {
     /// Queue a plate again when its print fails (src/queue.rs).
     #[serde(default)]
     requeue_failed: Option<bool>,
+    /// Which projects' parts may share a plate (src/pools.rs `MIXING`).
+    #[serde(default)]
+    mixing: Option<String>,
 }
 
 async fn update_settings(
@@ -765,6 +769,12 @@ async fn update_settings(
             return Err(err(StatusCode::BAD_REQUEST, "finished_outcome: ask | good"));
         }
         state.db.set_setting("finished_outcome", Some(v));
+    }
+    if let Some(m) = &body.mixing {
+        if !crate::pools::MIXING.contains(&m.as_str()) {
+            return Err(err(StatusCode::BAD_REQUEST, "mixing: none | group | any"));
+        }
+        state.db.set_setting("mixing", Some(m));
     }
     if let Some(v) = body.requeue_failed {
         state.db.set_setting("requeue_failed", Some(if v { "true" } else { "false" }));

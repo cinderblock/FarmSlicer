@@ -368,7 +368,12 @@ Decisions here are mine unless marked; the user can overrule any of them.
   Job page "Add to queue", project buttons; `tests/queue-e2e.mjs`; 17 e2e
   suites green. UI checked in a browser (desktop and 360 px) with a
   seeded stub server: Queue, Projects, Project, outcome dialog.
-- [ ] Step 5: pools and operators (current).
+- [x] Step 5: pools and operators: `src/pools.rs` (+ db/pools.rs, API),
+  operators send/control/record on their printers, entries kept to a
+  pool, `mixing` setting (site + pool; used by step 7), Settings page
+  pools editor, Queue pool filter; `tests/pools-e2e.mjs`; 18 e2e suites
+  green; Settings page checked in a browser.
+- [ ] Step 6: integration (current).
 
 - The queue's order needs result-column aliases (`held`, `due`,
   `project_priority`) in ORDER BY: a number inside an expression

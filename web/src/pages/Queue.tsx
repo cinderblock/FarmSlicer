@@ -16,8 +16,11 @@ export default function QueuePage() {
   const [rev, setRev] = useState(0);
   const [show, setShow] = useState<Show>("queued");
   const [printer, setPrinter] = useState("");
+  const [pool, setPool] = useState("");
+  const pools = useJson<{ pools: { id: string; name: string }[] }>("/api/pools").data?.pools ?? [];
   const params = new URLSearchParams({ status: show });
   if (printer) params.set("printer", printer);
+  if (pool) params.set("pool", pool);
   const queue = useJson<QueueView>(`/api/queue?${params}`, rev);
   const unchecked = useJson<PrintRecord[]>("/api/prints?unchecked=1&limit=50", rev).data;
   const [checking, setChecking] = useState<PrintRecord | null>(null);
@@ -128,6 +131,16 @@ export default function QueuePage() {
             </button>
           ))}
         </div>
+        {pools.length > 0 && (
+          <select value={pool} onChange={(e) => setPool(e.target.value)} aria-label="Pool">
+            <option value="">Every pool</option>
+            {pools.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
         <select value={printer} onChange={(e) => setPrinter(e.target.value)} aria-label="Printer">
           <option value="">Every printer</option>
           {printers.map((p) => (

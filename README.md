@@ -322,6 +322,11 @@ what the printers do next (the queue).
   A print that never started puts its entry back; one that failed ends
   it (or queues the plate again, with `requeue_failed`). A project's
   missing copies are queued again with one button.
+- **Pools** (Settings page, admins) are sets of printers with the people
+  who run them. An operator sees the queue for their pools' printers in
+  full, sends to them, controls their prints (anyone's) and records
+  outcomes; queue entries can be kept to one pool. With no pools, admins
+  run everything.
 
 ## Building
 
@@ -422,6 +427,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/projects/{id}/items`, `PATCH/DELETE /api/projects/{id}/items/{item}`, `POST /api/projects/{id}/items/{item}/reprint` | items; queue a plate carrying the item as often as its missing copies need |
 | `POST /api/projects/{id}/jobs`, `DELETE /api/projects/{id}/jobs/{job}`, `GET /api/jobs/{id}/parts` | count a job's parts for the project's items (`items: [{model \| part, item_id \| name, quantity}]`, omitted = each part a new item); a job's parts and what they count for. `POST /api/jobs` takes `project` (`{project_id \| new: {name, ...}, items}`) to do the same as it creates the job |
 | `GET/POST /api/queue`, `PATCH/DELETE /api/queue/{id}`, `POST /api/queue/{id}/send`, `POST /api/printers/{id}/send-next` | the queue (`?status=queued\|sent\|done&printer=`: entries in order, each with `fits` per printer, and per printer the entry it would take `next`); queue `{job_id, plate \| plates, count, priority, printer_id, note}`; change priority (`position: "top"`), pin, note; send one entry, or a printer's next (admins, the printer's operators) |
+| `GET/POST /api/pools`, `PATCH/DELETE /api/pools/{id}` | printer pools (admins; operators see their own): `{name, printer_ids, operator_ids, settings: {mixing: none\|group\|any}}` |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}` or `{material}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament or a material, or cool it |
 | `GET /api/printers/{id}/thumbnail` | picture of the job the printer runs or ran (fetched from the printer for prints started elsewhere) |
@@ -472,6 +478,7 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 outcomes.rs + db/outcomes.rs (how prints came out),
                 projects.rs + projects_api.rs + db/projects.rs (projects),
                 queue.rs + queue_api.rs + db/queue.rs (the print queue),
+                pools.rs + db/pools.rs (printer pools, operators),
                 events.rs (what happened, for webhooks),
                 preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,

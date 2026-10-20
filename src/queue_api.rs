@@ -96,6 +96,8 @@ fn entry_json(state: &AppState, tree: &Tree, viewer: &Viewer, e: &QueueEntry, fi
 struct QueueQuery {
     /// Only entries that could go to this printer, with how they fit it.
     printer: Option<String>,
+    /// Only this pool's printers.
+    pool: Option<String>,
     /// queued (default) | sent | done (printed, failed, cancelled) | all
     status: Option<String>,
     limit: Option<i64>,
@@ -121,7 +123,9 @@ async fn list_queue(
         .list_printers()
         .into_iter()
         .filter(|p| q.printer.as_deref().is_none_or(|id| id == p.id))
+        .filter(|p| q.pool.as_deref().is_none_or(|pool| crate::pools::has_printer(&state, pool, &p.id)))
         .collect();
+    let narrowed = q.printer.is_some() || q.pool.is_some();
     let queued = statuses == ["queued"];
     let fits: Vec<Vec<crate::queue::Fit>> = entries
         .iter()
@@ -149,7 +153,7 @@ async fn list_queue(
     let list: Vec<Value> = entries
         .iter()
         .zip(&fits)
-        .filter(|(_, f)| q.printer.is_none() || f.iter().any(|f| f.refused.is_none()) || !queued)
+        .filter(|(_, f)| !narrowed || f.iter().any(|f| f.refused.is_none()) || !queued)
         .map(|(e, f)| entry_json(&state, &tree, &viewer, e, queued.then_some(f.as_slice())))
         .collect();
     let counts: serde_json::Map<String, Value> =
