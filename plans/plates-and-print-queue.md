@@ -1,6 +1,6 @@
 # Plates and print queues: demand (projects) and supply (printers)
 
-Status: step 1 built and pushed (`e5868a7`); steps 2-7 being built (user: "keep going, boil the ocean", 2026-10-20). Started 2026-10-20.
+Status: all seven steps built and committed (2026-10-20); step 1 pushed, steps 2-7 local (`9b93c0e`..`903f27d`), not pushed, not deployed. Started 2026-10-20.
 
 ## Goal
 
@@ -132,6 +132,17 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
 ## Open questions for the user
 
 (1–5 answered 2026-10-20; folded into the decisions above.)
+
+6. **Integration keys from the internet.** Every API key is LAN-only
+   (`auth::authenticate`), integration keys included, so ordering software
+   outside the network can't reach FarmSlicer yet. Options: keep it so
+   (a tool on the LAN relays), or let an admin mark one integration key
+   as allowed from outside (only its scoped routes). Recommendation: the
+   per-key opt-in, off by default; it's a security change, so it waits
+   for your yes.
+7. **YOLO after a failure** waits for someone to clear the bed (my call,
+   see Findings). Say if YOLO should carry on regardless.
+8. **Push and deploy** steps 2-7: waiting for your go-ahead.
 
 ## Plan / steps (draft order, revise once questions are answered)
 
