@@ -1,6 +1,6 @@
 # Plates and print queues: demand (projects) and supply (printers)
 
-Status: **design, nothing built**. Started 2026-10-20.
+Status: step 1 built and pushed (`e5868a7`); steps 2-7 being built (user: "keep going, boil the ocean", 2026-10-20). Started 2026-10-20.
 
 ## Goal
 
@@ -195,6 +195,129 @@ the summary is here).
   `wasm/test/smoke.mjs --plates`; preview e2e (plain multi-plate now has
   plate 2); unit tests for the shape and per-plate validation.
 
+## Steps 2-7 design (2026-10-20, chosen while building; revise in place)
+
+Decisions here are mine unless marked; the user can overrule any of them.
+
+### Step 2: print outcomes
+
+- **Lines.** What a print holds, one line per kind of part: FarmSlicer
+  jobs group the plate's parts by model (`plate_json`, names from
+  `job_models`); uploaded projects group the plate's objects by name
+  (`slice_info.config` `<object name skipped>`, new `Plate.objects`);
+  anything else is one line, "the plate", 1 copy. Lines carry an
+  `item_id` once projects exist (step 3).
+- **Storage.** `print_outcomes(print_id, line, item_id, model_idx, name,
+  planned, good, failed, reason, note)`; on `prints`: `outcome` (NULL =
+  not recorded, `good` | `partial` | `failed`), `outcome_by`,
+  `outcome_at`, `outcome_note`.
+- **Automatic.** A print the printer ends as failed or cancelled gets
+  every copy recorded failed (by "printer", reason `printer_error` /
+  `cancelled`). A finished print stays unrecorded ("unchecked") unless the
+  site setting `finished_outcome` is `good` (solo farms). People can
+  always correct a record.
+- **Reasons** (`src/outcomes.rs`): spaghetti, adhesion, warping,
+  layer_shift, under_extrusion, stringing, surface, dimensions, supports,
+  filament (runout/tangle), clog, cancelled, printer_error, other.
+- **Who.** Whoever may control the print (sender, the group's managers,
+  admins), plus operators of the printer's pools (step 5).
+- **API.** `POST /api/prints/{id}/outcome` (`{all: "good"|"failed",
+  reason, note}` or `{lines: [{line, good, failed, reason}], note}`);
+  `GET /api/prints/{id}` and the list carry `outcome` and `lines`;
+  `GET /api/prints?unchecked=1`; `GET /api/outcome-reasons`.
+
+### Step 3: projects and items
+
+- `projects(id, name, group_id, user_id, client_ref, external_ref,
+  status, priority, due_at, notes, created/updated/completed/shipped)`.
+  Status: `open` → `printed` (automatic, when every item has enough good
+  copies) → `ready` → `shipped`; also `on_hold` (its queue entries wait)
+  and `cancelled`. `external_ref` is unique per group: creating again with
+  the same one returns the existing project (idempotent ordering).
+- `project_items(id, project_id, name, quantity, job_id, model_idx,
+  notes)`: the part, how many, and the *recipe*: a job and one of its
+  models (the model, the profiles, the overrides, its rotation).
+- `job_items(job_id, plate, item_id, copies)`: which items a job's plates
+  carry. Written when a job is made for a project (the Slice page's
+  Project field, the API, the auto-plater); a print's outcome lines take
+  their `item_id` from it.
+- **Progress per item** (computed, never stored per copy): wanted, good,
+  failed, unchecked (finished prints without a record), printing (active
+  prints), queued (entries not sent), missing = wanted - good -
+  unchecked - printing - queued (>= 0). Done = good >= wanted.
+- **Visibility:** creator, admins, the group's managers, its active
+  members. Editing: creator, managers, admins.
+- **Reprints:** an item with missing copies gets a proposal: queue an
+  existing plate that carries it again (enough times), or (step 7) a new
+  plate with only the missing copies.
+
+### Step 4: the queue
+
+- `queue_entries(id, job_id, plate, status, priority, printer_id (pin),
+  pool_id, print_id, created_by, created/updated/sent)`. Status `queued` →
+  `sent` → `printed` | `failed`; `cancelled`. One entry = the plate
+  printed once; "print this plate 5 times" = 5 entries.
+- Order: entry priority, then project priority, project due date, age.
+  Entries of `on_hold` projects are skipped.
+- Eligibility per printer: `printing::incompatibility`, the pin, the
+  pool, the G-code check (blocked/review), print rules (entries that
+  need approval are sent as requests); filament mismatches are shown,
+  not refused (the operator swaps spools).
+- `GET /api/queue?printer=&pool=`, `POST /api/queue` (job, plate, count,
+  priority, pin), `PATCH`/`DELETE /api/queue/{id}`,
+  `POST /api/queue/{id}/send` (printer), `POST /api/printers/{id}/send-next`.
+  Sending goes through the same code as `POST /api/jobs/{id}/print`
+  (refactored into `prints_api::send_plate`). A direct send of a plate
+  claims a queued entry of that plate.
+- A failed print's entry ends `failed`; the item shows missing copies.
+  Site setting `requeue_failed` (default off) puts the plate straight back.
+
+### Step 5: pools and operators
+
+- `pools(id, name, settings)`, `pool_printers(pool_id, printer_id)`,
+  `pool_operators(pool_id, user_id)`. Admins manage them.
+- An operator may, for printers in their pools: see the queue, send
+  entries, record outcomes, control prints, confirm the bed is clear.
+  With no pools at all, admins work everything (the implicit pool).
+- Pool setting `mixing`: `none` | `group` | `any` (site default
+  `group`): which projects may share a plate (the auto-plater, and a
+  warning when a hand-made job mixes them).
+
+### Step 6: integration
+
+- **Scoped API keys** (`api_keys.scope`: group, optional `client_ref`,
+  permissions `projects:read`, `projects:write`, `usage:read`), made by
+  admins and the group's managers. A scoped key reaches only
+  `/api/projects*`, `/api/usage/*` and `/api/outcome-reasons`, and only
+  that group's (and client_ref's) projects. Still LAN-only, like every
+  API key (remote use is an open question).
+- **Webhooks** (admins): url, events, a secret; deliveries signed
+  `X-FarmSlicer-Signature: sha256=<hex HMAC of the body>`, retried with
+  backoff (1 min, 5 min, 30 min, 2 h, 12 h), logged
+  (`webhook_deliveries`), shown on the Integrations page. Events:
+  `print.started`, `print.finished`, `print.failed`, `print.outcome`,
+  `item.completed`, `project.printed`, `project.status`.
+- **Fulfillment:** `POST /api/projects/{id}/status` (`ready`, `shipped`,
+  `on_hold`, `cancelled`, `open`), with an optional tracking note.
+- **Usage:** `GET /api/usage/prints?group=&client_ref=&project=&from=&to=`:
+  per project (and totals): prints, printer hours, grams by material
+  (failed prints count by how far they got), good/failed copies,
+  estimated cost. FarmSlicer reports; it never invoices.
+
+### Step 7: auto-plating and send modes
+
+- **Send modes** (`printers.send_mode`): `manual` (default), `confirm`
+  (when the printer is free and someone has confirmed the bed is clear,
+  the next eligible entry goes out), `yolo` (next entry as soon as the
+  printer is idle and its last print ended, no confirmation). A
+  dispatcher task does it; YOLO shows on the printer card.
+- **Auto-plate:** for missing copies, a new job from the item's recipe
+  whose plates hold only those copies, arranged by libslic3r's own
+  arrange (a bridge call, so the server packs real shapes), queued.
+  Items of other projects with the same recipe settings share plates when
+  `mixing` allows.
+
+
 ## Findings / gotchas
 
 - Uploaded multi-plate projects now count every plate in the job's totals
@@ -210,7 +333,6 @@ the summary is here).
   tests, 14 e2e suites; the viewer checked in a browser (tabs, move to
   plate, Arrange spilling onto a new plate).
 
-- (none yet)
 
 ## Progress log
 
