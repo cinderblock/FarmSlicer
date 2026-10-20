@@ -657,6 +657,11 @@ async fn create_my_api_key(
     Json(body): Json<CreateApiKey>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     auth::require_full(&user)?;
+    // The stand-in user of FARMSLICER_NO_AUTH has no account to own a key
+    // (and keys aren't checked then anyway).
+    if auth::auth_disabled() {
+        return Err(err(StatusCode::CONFLICT, "authentication is disabled (FARMSLICER_NO_AUTH): API keys aren't used"));
+    }
     if body.name.trim().is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "name is required"));
     }
