@@ -69,6 +69,11 @@ pub const NOT_APPROVED_REMOTE: &str =
 #[derive(Clone, Debug)]
 pub struct CurrentUser(pub User);
 
+/// What the request's integration key may reach (src/integration.rs); None
+/// for sessions and unscoped keys. Every authenticated request carries one.
+#[derive(Clone, Debug)]
+pub struct KeyScope(pub Option<crate::integration::Scope>);
+
 pub fn auth_disabled() -> bool {
     std::env::var_os("FARMSLICER_NO_AUTH").is_some()
 }
@@ -438,6 +443,17 @@ pub async fn require_auth(
 ) -> Response {
     match authenticate(&state, &req) {
         Ok(user) => {
+            let scope = request_scope(&state, &req);
+            if let Some(s) = &scope {
+                let path = req.uri().path().to_string();
+                if let Err(e) = crate::integration::allows(s, req.method(), &path)
+                    .and_then(|()| crate::integration::check_data(&state, s, &path))
+                {
+                    let code = if e.ends_with("not found") { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN };
+                    return (code, axum::Json(serde_json::json!({"error": e}))).into_response();
+                }
+            }
+            req.extensions_mut().insert(KeyScope(scope));
             req.extensions_mut().insert(CurrentUser(user));
             next.run(req).await
         }
@@ -456,6 +472,24 @@ pub async fn require_auth(
                 .into_response()
         }
     }
+}
+
+/// The scope of the integration key that authenticated `req`, if one did
+/// (a session cookie wins over a key, as in [`authenticate`]). A scope that
+/// can't be read allows nothing.
+fn request_scope(state: &AppState, req: &Request) -> Option<crate::integration::Scope> {
+    if auth_disabled() {
+        return None;
+    }
+    if session_token_from_request(req).is_some_and(|t| state.db.session_user(&sha256_hex(&t)).is_some()) {
+        return None;
+    }
+    let text = state.db.api_key_scope(&sha256_hex(&bearer_from_request(req)?))?;
+    Some(serde_json::from_str(&text).unwrap_or(crate::integration::Scope {
+        group_id: Some(String::new()),
+        client_ref: None,
+        permissions: Vec::new(),
+    }))
 }
 
 /// Guests (credential-less accounts) are refused.

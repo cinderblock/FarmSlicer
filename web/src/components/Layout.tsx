@@ -23,6 +23,7 @@ const adminItems = [
   { to: "/users", label: "Users" },
   { to: "/feedback", label: "Feedback" },
   { to: "/reports", label: "Reports" },
+  { to: "/integrations", label: "Integrations" },
   { to: "/settings", label: "Settings" },
 ];
 

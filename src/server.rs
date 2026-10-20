@@ -772,6 +772,7 @@ fn model_extension(file_name: &str) -> String {
 async fn create_job(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(auth::KeyScope(scope)): Extension<auth::KeyScope>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let models_dir = state.data_dir.join("models");
@@ -848,6 +849,15 @@ async fn create_job(
     if !matches!(inputs.source.as_str(), "server" | "browser") {
         return Err(bad(&"source must be 'server' or 'browser'"));
     }
+    // An integration key's jobs are its group's.
+    if let Some(g) = scope.as_ref().and_then(|s| s.group_id.clone()) {
+        match &inputs.group_id {
+            Some(given) if *given != g => {
+                return Err(api_err(StatusCode::FORBIDDEN, "this key makes jobs for its own group only"));
+            }
+            _ => inputs.group_id = Some(g),
+        }
+    }
     if !models.is_empty() && !local_models.is_empty() {
         return Err(bad(&"send the models or name local ones, not both"));
     }
@@ -864,6 +874,14 @@ async fn create_job(
     // The group the job is charged to, and every quota on the way.
     let (tree, viewer) = groups_api::context(&state, &user);
     match &inputs.group_id {
+        // A key's own group: its maker (an admin or the group's manager) may.
+        Some(g) if scope.as_ref().is_some_and(|s| s.group_id.as_deref() == Some(g.as_str()))
+            && tree.get(g).is_some()
+            && (viewer.admin || viewer.can_manage(&tree, g) || viewer.can_charge(g)) =>
+        {
+            quota::check(&state.db, &tree, &user, inputs.group_id.as_deref())
+                .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e))?
+        }
         Some(g) if tree.get(g).is_none() || !viewer.can_charge(g) => {
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
         }
@@ -903,7 +921,7 @@ async fn create_job(
         None
     } else {
         let p: JobProject = serde_json::from_str(&project_str).map_err(|e| bad(&format!("project: {e}")))?;
-        Some(p.check(&state, &tree, &viewer, &inputs, models.len()).map_err(|(c, e)| api_err(c, e))?)
+        Some(p.check(&state, &tree, &viewer, scope.as_ref(), &inputs, models.len()).map_err(|(c, e)| api_err(c, e))?)
     };
 
     let (config_json, nozzle_plan) = match inputs.filaments.first() {
@@ -1028,6 +1046,7 @@ impl JobProject {
         state: &AppState,
         tree: &crate::groups::Tree,
         viewer: &crate::groups::Viewer,
+        scope: Option<&crate::integration::Scope>,
         inputs: &JobInputs,
         models: usize,
     ) -> Result<JobProjectTarget, (StatusCode, String)> {
@@ -1037,7 +1056,7 @@ impl JobProject {
                 let p = state
                     .db
                     .get_project(&id)
-                    .filter(|p| crate::projects::can_see(tree, viewer, p))
+                    .filter(|p| crate::projects::can_see(tree, viewer, p) && scope.is_none_or(|s| s.covers(p)))
                     .ok_or((StatusCode::NOT_FOUND, "project not found".to_string()))?;
                 if !crate::projects::can_edit(tree, viewer, &p) {
                     return Err((StatusCode::FORBIDDEN, "you can't add to that project".into()));
@@ -1069,6 +1088,12 @@ impl JobProject {
                 }
                 let trim = |v: Option<String>| v.map(|s| s.trim().chars().take(200).collect::<String>()).filter(|s| !s.is_empty());
                 new.client_ref = trim(new.client_ref);
+                if let Some(c) = scope.and_then(|s| s.client_ref.clone()) {
+                    if new.client_ref.as_ref().is_some_and(|x| *x != c) {
+                        return Err((StatusCode::FORBIDDEN, "project: this key makes projects for its own client only".into()));
+                    }
+                    new.client_ref = Some(c);
+                }
                 new.external_ref = trim(new.external_ref);
                 if let Some(ext) = &new.external_ref {
                     if state.db.project_by_external_ref(inputs.group_id.as_deref(), ext).is_some() {
@@ -1781,6 +1806,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::projects_api::routes())
         .merge(crate::queue_api::routes())
         .merge(crate::pools::routes())
+        .merge(crate::integration::routes())
+        .merge(crate::webhooks::routes())
         .merge(crate::preview_api::routes())
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())

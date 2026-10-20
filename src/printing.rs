@@ -385,6 +385,7 @@ pub fn spawn_send(state: Arc<AppState>, print: PrintRecord, package_path: String
             state.db.update_print(&print.id, "failed", None, Some(&e));
             crate::incidents::print_failed(&state, &print, &e);
             crate::queue::print_ended(&state, &print, "failed");
+            crate::events::print_status(&state, &print.id, "failed");
         }
     });
 }
@@ -580,6 +581,9 @@ fn apply(state: &AppState, status: &PrinterStatus) {
                 if matches!(new_status, "finished" | "failed" | "cancelled") {
                     crate::outcomes::record_automatic(state, &print, new_status, error.as_deref());
                     crate::queue::print_ended(state, &print, new_status);
+                }
+                if new_status != "paused" && !(new_status == "printing" && print.status == "paused") {
+                    crate::events::print_status(state, &print.id, new_status);
                 }
                 println!(
                     "Print {} ({} on {}): {} -> {new_status}{}",

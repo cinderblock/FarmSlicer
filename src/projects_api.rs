@@ -11,7 +11,8 @@ use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::auth::CurrentUser;
+use crate::auth::{CurrentUser, KeyScope};
+use crate::integration::Scope;
 use crate::db::{NewProject, Project, ProjectFilter, User};
 use crate::groups::{Tree, Viewer};
 use crate::groups_api;
@@ -29,17 +30,17 @@ fn bad(msg: impl Into<String>) -> ApiError {
 }
 
 /// A project the caller may see, or 404.
-fn visible(state: &AppState, user: &User, id: &str) -> Result<(Project, Tree, Viewer), ApiError> {
+fn visible(state: &AppState, user: &User, scope: &Option<Scope>, id: &str) -> Result<(Project, Tree, Viewer), ApiError> {
     let (tree, viewer) = groups_api::context(state, user);
     match state.db.get_project(id) {
-        Some(p) if projects::can_see(&tree, &viewer, &p) => Ok((p, tree, viewer)),
+        Some(p) if projects::can_see(&tree, &viewer, &p) && scope.as_ref().is_none_or(|s| s.covers(&p)) => Ok((p, tree, viewer)),
         _ => Err(api_err(StatusCode::NOT_FOUND, "project not found")),
     }
 }
 
 /// A project the caller may change, or 403/404.
-fn editable(state: &AppState, user: &User, id: &str) -> Result<(Project, Tree, Viewer), ApiError> {
-    let (p, tree, viewer) = visible(state, user, id)?;
+fn editable(state: &AppState, user: &User, scope: &Option<Scope>, id: &str) -> Result<(Project, Tree, Viewer), ApiError> {
+    let (p, tree, viewer) = visible(state, user, scope, id)?;
     if !projects::can_edit(&tree, &viewer, &p) {
         return Err(api_err(StatusCode::FORBIDDEN, "only its creator, the group's managers and admins can change it"));
     }
@@ -82,6 +83,7 @@ struct ListQuery {
 async fn list_projects(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Query(q): Query<ListQuery>,
 ) -> Json<Value> {
     let (tree, viewer) = groups_api::context(&state, &user);
@@ -108,7 +110,7 @@ async fn list_projects(
         .db
         .list_projects(&filter, if viewer.admin { limit } else { 5000 })
         .into_iter()
-        .filter(|p| projects::can_see(&tree, &viewer, p))
+        .filter(|p| projects::can_see(&tree, &viewer, p) && scope.as_ref().is_none_or(|s| s.covers(p)))
         .take(limit as usize)
         .map(|p| {
             let items = projects::item_views(&state, &p.id);
@@ -206,13 +208,29 @@ fn add_item(state: &AppState, user: &User, project: &Project, body: &ItemBody) -
 async fn create_project(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Json(body): Json<CreateProject>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (tree, viewer) = groups_api::context(&state, &user);
     let name = text(Some(&body.name), "name", 200)?.ok_or_else(|| bad("a project needs a name"))?;
-    let group = body.group_id.as_deref().filter(|g| !g.is_empty());
+    let mut group = body.group_id.as_deref().filter(|g| !g.is_empty());
+    let mut client_ref = text(body.client_ref.as_deref(), "client_ref", 200)?;
+    // An integration key's projects are its group's and client's.
+    if let Some(s) = &scope {
+        if s.group_id.is_some() {
+            if group.is_some() && group != s.group_id.as_deref() {
+                return Err(api_err(StatusCode::FORBIDDEN, "this key makes projects for its own group only"));
+            }
+            group = s.group_id.as_deref();
+        }
+        if let Some(c) = &s.client_ref {
+            if client_ref.as_ref().is_some_and(|x| x != c) {
+                return Err(api_err(StatusCode::FORBIDDEN, "this key makes projects for its own client only"));
+            }
+            client_ref = Some(c.clone());
+        }
+    }
     check_group(&tree, &viewer, group)?;
-    let client_ref = text(body.client_ref.as_deref(), "client_ref", 200)?;
     let external_ref = text(body.external_ref.as_deref(), "external_ref", 200)?;
     let due = body.due_at.as_deref().filter(|d| !d.trim().is_empty()).map(projects::parse_due).transpose().map_err(bad)?;
     let priority = check_priority(body.priority)?;
@@ -222,7 +240,7 @@ async fn create_project(
     }
     if let Some(ext) = &external_ref {
         if let Some(existing) = state.db.project_by_external_ref(group, ext) {
-            if !projects::can_see(&tree, &viewer, &existing) {
+            if !projects::can_see(&tree, &viewer, &existing) || scope.as_ref().is_some_and(|s| !s.covers(&existing)) {
                 return Err(api_err(StatusCode::CONFLICT, "a project with this external_ref exists"));
             }
             return Ok((StatusCode::OK, Json(project_json(&state, &tree, &viewer, &existing))));
@@ -264,9 +282,10 @@ async fn create_project(
 async fn get_project(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let (p, tree, viewer) = visible(&state, &user, &id)?;
+    let (p, tree, viewer) = visible(&state, &user, &scope, &id)?;
     let mut v = project_json(&state, &tree, &viewer, &p);
     // Per job: its plates, what each carries for this project, its prints.
     let mut jobs: BTreeMap<String, Vec<crate::db::JobItem>> = BTreeMap::new();
@@ -333,10 +352,11 @@ struct UpdateProject {
 async fn update_project(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
     Json(body): Json<UpdateProject>,
 ) -> Result<Json<Value>, ApiError> {
-    let (p, tree, viewer) = editable(&state, &user, &id)?;
+    let (p, tree, viewer) = editable(&state, &user, &scope, &id)?;
     let name = match &body.name {
         Some(n) => text(Some(n), "name", 200)?.ok_or_else(|| bad("a project needs a name"))?,
         None => p.name.clone(),
@@ -356,6 +376,12 @@ async fn update_project(
         }
     };
     let client_ref = opt(&body.client_ref, &p.client_ref, "client_ref")?;
+    if let Some(s) = &scope {
+        let moved = Project { group_id: group.clone(), client_ref: client_ref.clone(), ..p.clone() };
+        if !s.covers(&moved) {
+            return Err(api_err(StatusCode::FORBIDDEN, "this key keeps projects in its own group and client"));
+        }
+    }
     let external_ref = opt(&body.external_ref, &p.external_ref, "external_ref")?;
     let due = match &body.due_at {
         Some(Some(d)) if !d.trim().is_empty() => Some(projects::parse_due(d).map_err(bad)?),
@@ -391,10 +417,11 @@ struct StatusBody {
 async fn set_status(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
     Json(body): Json<StatusBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let (p, tree, viewer) = editable(&state, &user, &id)?;
+    let (p, tree, viewer) = editable(&state, &user, &scope, &id)?;
     if !projects::SETTABLE.contains(&body.status.as_str()) {
         return Err(bad(format!(
             "status: one of {} (printed is set when every item is done)",
@@ -416,9 +443,10 @@ async fn set_status(
 async fn delete_project(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    editable(&state, &user, &id)?;
+    editable(&state, &user, &scope, &id)?;
     state.db.delete_project(&id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -427,10 +455,11 @@ async fn delete_project(
 async fn create_item(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
     Json(body): Json<ItemBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let (p, _, _) = editable(&state, &user, &id)?;
+    let (p, _, _) = editable(&state, &user, &scope, &id)?;
     if state.db.project_items(&id).len() >= projects::MAX_ITEMS {
         return Err(bad(format!("a project holds at most {} items", projects::MAX_ITEMS)));
     }
@@ -452,10 +481,11 @@ struct UpdateItem {
 async fn update_item(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path((id, item_id)): Path<(String, String)>,
     Json(body): Json<UpdateItem>,
 ) -> Result<Json<Value>, ApiError> {
-    editable(&state, &user, &id)?;
+    editable(&state, &user, &scope, &id)?;
     let item = state
         .db
         .get_item(&item_id)
@@ -481,9 +511,10 @@ async fn update_item(
 async fn delete_item(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path((id, item_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    editable(&state, &user, &id)?;
+    editable(&state, &user, &scope, &id)?;
     if !state.db.get_item(&item_id).is_some_and(|i| i.project_id == id) {
         return Err(api_err(StatusCode::NOT_FOUND, "no such item"));
     }
@@ -506,10 +537,11 @@ struct LinkBody {
 async fn link_job(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
     Json(body): Json<LinkBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let (p, tree, viewer) = editable(&state, &user, &id)?;
+    let (p, tree, viewer) = editable(&state, &user, &scope, &id)?;
     let (job, _, _) = crate::prints_api::visible_job(&state, &user, &body.job_id)?;
     projects::link_job(&state, &p, &job, &body.items).map_err(|e| api_err(StatusCode::CONFLICT, e))?;
     let p = state.db.get_project(&id).expect("project exists");
@@ -520,9 +552,10 @@ async fn link_job(
 async fn unlink_job(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path((id, job_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let (p, tree, viewer) = editable(&state, &user, &id)?;
+    let (p, tree, viewer) = editable(&state, &user, &scope, &id)?;
     if state.db.unlink_job(&id, &job_id) == 0 {
         return Err(api_err(StatusCode::NOT_FOUND, "the job carries nothing for this project"));
     }
@@ -536,6 +569,7 @@ async fn unlink_job(
 async fn job_parts(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let (job, tree, viewer) = crate::prints_api::visible_job(&state, &user, &id)?;
@@ -552,7 +586,8 @@ async fn job_parts(
                 .and_then(|j| state.db.get_item(&j.item_id))
                 .and_then(|i| {
                     let p = state.db.get_project(&i.project_id)?;
-                    projects::can_see(&tree, &viewer, &p).then(|| json!({"id": i.id, "name": i.name, "project_id": p.id, "project_name": p.name}))
+                    (projects::can_see(&tree, &viewer, &p) && scope.as_ref().is_none_or(|s| s.covers(&p)))
+                        .then(|| json!({"id": i.id, "name": i.name, "project_id": p.id, "project_name": p.name}))
                 });
             let mut v = json!(part);
             v["copies"] = json!(part.copies());

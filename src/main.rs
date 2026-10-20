@@ -15,6 +15,7 @@ mod gcode;
 mod groups;
 mod groups_api;
 mod incidents;
+mod integration;
 mod join_api;
 mod moonraker;
 mod nozzles;
@@ -44,6 +45,7 @@ mod safety;
 mod sdcp;
 mod server;
 mod slicer;
+mod webhooks;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -133,6 +135,7 @@ async fn main() {
 
     // Follow sent prints through their printers' reports.
     tokio::spawn(printing::track(state.clone()));
+    tokio::spawn(webhooks::run(state.clone()));
     // Check stored packages the current G-code checker hasn't seen.
     safety::spawn_recheck(state.clone());
 

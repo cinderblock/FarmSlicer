@@ -322,6 +322,19 @@ what the printers do next (the queue).
   A print that never started puts its entry back; one that failed ends
   it (or queues the plate again, with `requeue_failed`). A project's
   missing copies are queued again with one button.
+- **Integrations** (Integrations page): keys for ordering software reach
+  one group's projects (optionally one client's: `client_ref`), with
+  `projects:read`, `projects:write` (create projects, upload sliced
+  files, set fulfillment status) and `usage:read`, and nothing else
+  (not printers, not the queue); LAN only, like every API key. Webhooks
+  POST signed events (`print.started`, `print.finished`, `print.failed`,
+  `print.outcome`, `item.completed`, `project.printed`,
+  `project.status`): `X-FarmSlicer-Signature: sha256=<hex>` is the
+  HMAC-SHA256 of `<X-FarmSlicer-Timestamp>.<body>` with the webhook's
+  secret; failures are retried (1 min … 12 h) and logged. The usage
+  report (`/api/usage/prints`) says what prints used per project
+  (printer hours, grams by material, copies, cost estimate) for billing
+  tools; FarmSlicer never invoices.
 - **Pools** (Settings page, admins) are sets of printers with the people
   who run them. An operator sees the queue for their pools' printers in
   full, sends to them, controls their prints (anyone's) and records
@@ -428,6 +441,9 @@ summary prints the `pin.json` to paste there.
 | `POST /api/projects/{id}/jobs`, `DELETE /api/projects/{id}/jobs/{job}`, `GET /api/jobs/{id}/parts` | count a job's parts for the project's items (`items: [{model \| part, item_id \| name, quantity}]`, omitted = each part a new item); a job's parts and what they count for. `POST /api/jobs` takes `project` (`{project_id \| new: {name, ...}, items}`) to do the same as it creates the job |
 | `GET/POST /api/queue`, `PATCH/DELETE /api/queue/{id}`, `POST /api/queue/{id}/send`, `POST /api/printers/{id}/send-next` | the queue (`?status=queued\|sent\|done&printer=`: entries in order, each with `fits` per printer, and per printer the entry it would take `next`); queue `{job_id, plate \| plates, count, priority, printer_id, note}`; change priority (`position: "top"`), pin, note; send one entry, or a printer's next (admins, the printer's operators) |
 | `GET/POST /api/pools`, `PATCH/DELETE /api/pools/{id}` | printer pools (admins; operators see their own): `{name, printer_ids, operator_ids, settings: {mixing: none\|group\|any}}` |
+| `GET/POST /api/integrations/keys`, `DELETE /api/integrations/keys/{id}` | integration keys (admins; managers for their groups): `{name, group_id, client_ref, permissions: [projects:read, projects:write, usage:read]}`, the key returned once |
+| `GET/POST /api/integrations/webhooks`, `PATCH/DELETE /api/integrations/webhooks/{id}`, `GET …/{id}/deliveries`, `POST …/{id}/test`, `POST /api/integrations/deliveries/{id}/retry` | webhooks (admins): `{url, events: ["*"] \| [...], group_id, description, enabled, rotate_secret}` (the secret returned once), their delivery log |
+| `GET /api/usage/prints?group=&client_ref=&project=&from=&to=` | what prints that ended in the period used, per project and in total: prints, printer hours, grams by material, good/failed copies, estimated cost (admins, a group's managers, keys with `usage:read`) |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}` or `{material}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament or a material, or cool it |
 | `GET /api/printers/{id}/thumbnail` | picture of the job the printer runs or ran (fetched from the printer for prints started elsewhere) |
@@ -479,6 +495,8 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 projects.rs + projects_api.rs + db/projects.rs (projects),
                 queue.rs + queue_api.rs + db/queue.rs (the print queue),
                 pools.rs + db/pools.rs (printer pools, operators),
+                integration.rs (integration keys, usage), webhooks.rs +
+                db/webhooks.rs (signed event delivery),
                 events.rs (what happened, for webhooks),
                 preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,

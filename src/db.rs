@@ -8,10 +8,12 @@ mod outcomes;
 mod projects;
 mod pools;
 mod queue;
+mod webhooks;
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
 pub use projects::{Item, JobItem, NewProject, Progress, Project, ProjectFilter};
 pub use pools::Pool;
 pub use queue::QueueEntry;
+pub use webhooks::{Delivery, Webhook};
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -296,6 +298,9 @@ pub struct ApiKey {
     pub prefix: String,
     pub created_at: String,
     pub last_used: Option<String>,
+    /// What an integration key may reach (src/integration.rs `Scope`, JSON);
+    /// None = everything its owner may.
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -464,6 +469,10 @@ impl Db {
         if conn.prepare("SELECT method FROM sessions LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE sessions ADD COLUMN method TEXT;").ok();
         }
+        // Integration keys: what the key may reach (src/integration.rs).
+        if conn.prepare("SELECT scope FROM api_keys LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE api_keys ADD COLUMN scope TEXT;").ok();
+        }
 
         // Groups (see src/groups.rs): a tree; members, join links, and
         // site-wide runtime settings. Settings and quotas are JSON.
@@ -568,6 +577,7 @@ impl Db {
         projects::migrate(&conn);
         queue::migrate(&conn);
         pools::migrate(&conn);
+        webhooks::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (
@@ -1021,29 +1031,74 @@ impl Db {
             prefix: row.get(3)?,
             created_at: row.get(4)?,
             last_used: row.get(5)?,
+            scope: row.get(6)?,
         })
     }
 
     pub fn create_api_key(&self, user_id: &str, name: &str, prefix: &str, key_hash: &str) -> ApiKey {
+        self.create_scoped_api_key(user_id, name, prefix, key_hash, None)
+    }
+
+    /// An API key; `scope` (JSON) limits what it reaches.
+    pub fn create_scoped_api_key(&self, user_id: &str, name: &str, prefix: &str, key_hash: &str, scope: Option<&str>) -> ApiKey {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO api_keys (id, user_id, name, prefix, key_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, user_id, name.trim(), prefix, key_hash],
+            "INSERT INTO api_keys (id, user_id, name, prefix, key_hash, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, user_id, name.trim(), prefix, key_hash, scope],
         )
         .unwrap();
         conn.query_row(
-            "SELECT id, user_id, name, prefix, created_at, last_used FROM api_keys WHERE id = ?1",
+            "SELECT id, user_id, name, prefix, created_at, last_used, scope FROM api_keys WHERE id = ?1",
             params![id],
             Self::api_key_from_row,
         )
         .unwrap()
     }
 
+    /// Every integration key (with a scope), newest first.
+    pub fn list_scoped_api_keys(&self) -> Vec<ApiKey> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, user_id, name, prefix, created_at, last_used, scope FROM api_keys
+                 WHERE scope IS NOT NULL ORDER BY created_at DESC",
+            )
+            .unwrap();
+        stmt.query_map([], Self::api_key_from_row).unwrap().filter_map(|r| r.ok()).collect()
+    }
+
+    pub fn get_api_key(&self, id: &str) -> Option<ApiKey> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, user_id, name, prefix, created_at, last_used, scope FROM api_keys WHERE id = ?1",
+            params![id],
+            Self::api_key_from_row,
+        )
+        .ok()
+    }
+
+    pub fn delete_api_key_by_id(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM api_keys WHERE id = ?1", params![id]).unwrap_or(0) > 0
+    }
+
+    /// The scope of the key with this hash (None: unscoped or unknown).
+    pub fn api_key_scope(&self, key_hash: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT scope FROM api_keys WHERE key_hash = ?1", params![key_hash], |r| r.get(0))
+            .ok()
+            .flatten()
+    }
+
+    /// A user's own keys (integration keys are listed with the integrations).
     pub fn list_api_keys(&self, user_id: &str) -> Vec<ApiKey> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, user_id, name, prefix, created_at, last_used FROM api_keys WHERE user_id = ?1 ORDER BY created_at")
+            .prepare(
+                "SELECT id, user_id, name, prefix, created_at, last_used, scope FROM api_keys
+                 WHERE user_id = ?1 AND scope IS NULL ORDER BY created_at",
+            )
             .unwrap();
         stmt.query_map(params![user_id], Self::api_key_from_row)
             .unwrap()

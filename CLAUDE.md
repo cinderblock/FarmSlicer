@@ -255,8 +255,21 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   outcomes, seeing the prints. Admins aren't operators by default:
   callers check `viewer.admin` too. `mixing` (site setting and per pool)
   is for the auto-plater
-- `src/events.rs` — every event (`print.outcome`, `project.status`, ...)
-  goes through `emit`; `src/dispatch.rs` is filled in by step 7 of
+- `src/integration.rs` — integration keys: `api_keys.scope` (JSON
+  `Scope`: group, client_ref, permissions); `auth::require_auth` puts a
+  `KeyScope` extension on every request and runs `integration::allows`
+  (route allowlist) and `check_data` for scoped keys; handlers that care
+  (`projects_api`, `create_job`, `upload_package`, usage) read
+  `Extension<KeyScope>`. Also `GET /api/usage/prints` (a plate's usage is
+  split between projects by copies). `src/webhooks.rs` — webhooks
+  (`db/webhooks.rs`), hand-rolled HMAC-SHA256 (RFC 4231 vectors in its
+  tests), a delivery task (`webhooks::run`) on its own reqwest client
+  with Mozilla's roots (`webpki-roots`; the printers' client accepts any
+  certificate), retries per `RETRY_AFTER`
+- `src/events.rs` — every event goes through `emit` → `webhooks::enqueue`
+  (print status from `printing::apply` and the send task, outcomes from
+  `outcomes::after_record`, item/project from `projects::refresh` via
+  `project_items.done_at`); `src/dispatch.rs` is filled in by step 7 of
   `plans/plates-and-print-queue.md`
 - `src/printing.rs` — sending: compatibility (package format per protocol,
   model, nozzle), AMS mapping where the protocol maps filaments, dispatch to

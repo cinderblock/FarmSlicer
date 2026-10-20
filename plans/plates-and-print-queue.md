@@ -373,13 +373,27 @@ Decisions here are mine unless marked; the user can overrule any of them.
   pool, `mixing` setting (site + pool; used by step 7), Settings page
   pools editor, Queue pool filter; `tests/pools-e2e.mjs`; 18 e2e suites
   green; Settings page checked in a browser.
-- [ ] Step 6: integration (current).
+- [x] Step 6: integration: scoped integration keys (route allowlist in
+  `auth::require_auth`, scope in project/job/upload/usage handlers),
+  webhooks (signed, retried, logged; events from prints, outcomes,
+  items, projects), usage report, Integrations page;
+  `tests/integration-e2e.mjs` with a signature-checking receiver; 19 e2e
+  suites green; page checked in a browser.
+- [ ] Step 7: send modes and auto-plating (current).
 
 - The queue's order needs result-column aliases (`held`, `due`,
   `project_priority`) in ORDER BY: a number inside an expression
   (`COALESCE(19, 0)`) is a literal to SQLite, not a column.
 - Tests that stop a print need a fake print long enough to still be
   running (4 s): a 1.5 s one finished before the stop arrived.
+
+- `FARMSLICER_NO_AUTH`'s stand-in user has no users row: anything it
+  owns through a foreign key (API keys) panics the insert and poisons the
+  database mutex for every later request. Keys are refused in that mode
+  now (`2175925`); other `user_id` columns avoid FKs on purpose.
+- The usage report splits a plate's print between the projects on it by
+  copies: a plate with 3 of a project's brackets and 1 unassigned clip is
+  0.75 of a print for the project, 0.25 unassigned.
 
 ## Things not to do
 

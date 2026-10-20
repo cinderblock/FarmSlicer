@@ -108,6 +108,11 @@ pub fn item_views(state: &AppState, project_id: &str) -> Vec<ItemView> {
 pub fn refresh(state: &AppState, project_id: &str) {
     let Some(project) = state.db.get_project(project_id) else { return };
     let items = item_views(state, project_id);
+    for i in &items {
+        if state.db.set_item_done(&i.item.id, i.done) && i.done {
+            crate::events::item_completed(state, project_id, i);
+        }
+    }
     let all_done = !items.is_empty() && items.iter().all(|i| i.done);
     let next = match (project.status.as_str(), all_done) {
         ("open", true) => "printed",
@@ -410,6 +415,7 @@ mod tests {
                 model_idx: None,
                 notes: String::new(),
                 created_at: String::new(),
+                done_at: None,
             },
             progress: Progress { good, ..Default::default() },
             missing: (q - good).max(0),

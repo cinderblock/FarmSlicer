@@ -8,6 +8,7 @@ import JobPage from "./pages/Job";
 import PrintsPage from "./pages/Prints";
 import ProjectsPage from "./pages/Projects";
 import QueuePage from "./pages/Queue";
+import IntegrationsPage from "./pages/Integrations";
 import ProjectPage from "./pages/Project";
 import GuidePage from "./pages/Guide";
 import PrintersPage from "./pages/Printers";
@@ -97,6 +98,7 @@ function Gate() {
         <Route path="settings" element={isAdmin ? <SettingsPage /> : <Navigate to="/" replace />} />
         <Route path="feedback" element={<FeedbackPage />} />
         <Route path="reports" element={isAdmin ? <ReportsPage /> : <Navigate to="/" replace />} />
+        <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

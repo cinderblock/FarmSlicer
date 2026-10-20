@@ -54,6 +54,7 @@ pub(crate) fn visible_job(state: &AppState, user: &User, id: &str) -> Result<(Jo
 async fn upload_package(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(auth::KeyScope(scope)): Extension<auth::KeyScope>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let mut file: Option<(String, axum::body::Bytes)> = None;
@@ -81,10 +82,21 @@ async fn upload_package(
     let Some((name, data)) = file else {
         return Err(api_err(StatusCode::BAD_REQUEST, "no file"));
     };
+    // An integration key's uploads are its group's.
+    if let Some(g) = scope.as_ref().and_then(|s| s.group_id.clone()) {
+        match &group_id {
+            Some(given) if *given != g => {
+                return Err(api_err(StatusCode::FORBIDDEN, "this key uploads for its own group only"));
+            }
+            _ => group_id = Some(g),
+        }
+    }
 
     let (tree, viewer) = groups_api::context(&state, &user);
     if let Some(g) = &group_id {
-        if tree.get(g).is_none() || !viewer.can_charge(g) {
+        let keys_own = scope.as_ref().is_some_and(|s| s.group_id.as_deref() == Some(g.as_str()))
+            && (viewer.admin || viewer.can_manage(&tree, g));
+        if tree.get(g).is_none() || (!viewer.can_charge(g) && !keys_own) {
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
         }
     }

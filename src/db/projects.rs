@@ -58,6 +58,10 @@ pub(super) fn migrate(conn: &Connection) {
         CREATE INDEX IF NOT EXISTS job_items_item ON job_items(item_id);",
     )
     .expect("failed to create project tables");
+    // When an item last got enough good copies (item.completed fires once).
+    if conn.prepare("SELECT done_at FROM project_items LIMIT 0").is_err() {
+        conn.execute_batch("ALTER TABLE project_items ADD COLUMN done_at TEXT;").ok();
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -92,6 +96,8 @@ pub struct Item {
     pub model_idx: Option<i64>,
     pub notes: String,
     pub created_at: String,
+    /// Since when it has had enough good copies.
+    pub done_at: Option<String>,
 }
 
 /// Where an item's copies stand, counted from prints, outcomes and the
@@ -160,7 +166,7 @@ fn project_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
 }
 
 const ITEM_SELECT: &str =
-    "SELECT id, project_id, idx, name, quantity, job_id, model_idx, notes, created_at FROM project_items";
+    "SELECT id, project_id, idx, name, quantity, job_id, model_idx, notes, created_at, done_at FROM project_items";
 
 fn item_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -173,6 +179,7 @@ fn item_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
         model_idx: r.get(6)?,
         notes: r.get(7)?,
         created_at: r.get(8)?,
+        done_at: r.get(9)?,
     })
 }
 
@@ -374,6 +381,18 @@ impl Db {
             > 0
     }
 
+    /// Stamp (or clear) when an item got done; true if that changed.
+    pub fn set_item_done(&self, id: &str, done: bool) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE project_items SET done_at = CASE WHEN ?2 THEN datetime('now') ELSE NULL END
+             WHERE id = ?1 AND (done_at IS NULL) = ?2",
+            params![id, done],
+        )
+        .unwrap()
+            > 0
+    }
+
     pub fn delete_item(&self, id: &str) -> bool {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM project_items WHERE id = ?1", params![id]).unwrap() > 0
@@ -497,6 +516,22 @@ impl Db {
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
+    }
+
+    /// Prints that ended (finished, or failed/cancelled after starting) in
+    /// [from, to), oldest first; bounds in the database's time format.
+    pub fn prints_ended_between(&self, from: Option<&str>, to: Option<&str>) -> Vec<super::PrintRecord> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(&format!(
+                "{} WHERE (p.status = 'finished' OR (p.status IN ('failed', 'cancelled') AND p.started_at IS NOT NULL))
+                   AND p.finished_at IS NOT NULL
+                   AND (?1 IS NULL OR p.finished_at >= ?1) AND (?2 IS NULL OR p.finished_at < ?2)
+                 ORDER BY p.finished_at, p.rowid",
+                Self::PRINT_SELECT
+            ))
+            .unwrap();
+        stmt.query_map(params![from, to], Self::print_from_row).unwrap().filter_map(|r| r.ok()).collect()
     }
 
     /// Every print of a job, oldest first.
