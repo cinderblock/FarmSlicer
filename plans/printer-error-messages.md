@@ -50,7 +50,10 @@ into the PTFE tube until it can not be pushed any farther."
 - [x] Printer card: text, code beside it
 - [x] Checks: web build + tests; on buildhost `cargo test` and
       `tests/run-e2e.sh` (exit 0). Not clippy: it isn't installed there.
-- [ ] Deploy (ops pins the new image) and confirm on a real error
+- [x] Deployed 2026-10-20: FarmSlicer `22c7a71`, image
+      `sha256:9d4c60003ba1153893bd7615fa8c19c625622598a7bdcbb0bda7b4d663c844ff`,
+      ops `fe2c47f`, deploy run 39393090848 green, sentinel healthy
+- [ ] Confirm the text on a printer card with a live error (Albert's)
 
 ## Findings
 

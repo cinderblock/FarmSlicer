@@ -54,8 +54,15 @@ The check's overall design is in `plans/gcode-safety.md`.
 - [x] Reported package passes (`FARMSLICER_SAMPLE_PACKAGES`), 145 unit
       tests, e2e exit 0. (clippy isn't installed on buildhost.)
 - [x] Committed
-- [ ] Push/deploy (user); stored checks refresh themselves (the fingerprint
-      covers the data), then answer feedback report `5fb033b8`
+- [x] Deployed 2026-10-20: FarmSlicer `22c7a71`, image
+      `sha256:9d4c60003ba1153893bd7615fa8c19c625622598a7bdcbb0bda7b4d663c844ff`,
+      ops `fe2c47f`, deploy run 39393090848 green, sentinel healthy. Startup re-check: the reported job and two others
+      now clean; no job in production is blocked
+- [x] Feedback `5fb033b8` resolved with a note; `451b69fc` (one Firefox
+      NetworkError on /api/discovery) won't fix. Done with a direct
+      `UPDATE` (same as `PUT /api/feedback/{id}`) from a throwaway
+      `python:3-alpine` container on the `farmslicer_data` volume as uid
+      1000: no admin credential is available to agents
 
 ## Regenerate
 
