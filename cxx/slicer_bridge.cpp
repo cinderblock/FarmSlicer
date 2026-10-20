@@ -13,6 +13,32 @@ namespace farmslicer {
 
 namespace {
 std::string to_std(rust::Str s) { return std::string(s.data(), s.size()); }
+
+// The models as the pipeline takes them. Placed copies: 9 rotation and 2
+// offset numbers and a plate each (the server checked them); anything else
+// is one copy, centred.
+std::vector<core::ModelInput> to_core(const rust::Vec<ModelInput>& models)
+{
+    std::vector<core::ModelInput> inputs;
+    for (const ModelInput& m : models) {
+        core::ModelInput in;
+        in.path = std::string(m.path);
+        in.name = std::string(m.name);
+        const size_t copies = m.rotations.size() / 9;
+        if (m.rotations.size() == copies * 9 && m.offsets.size() == copies * 2 && m.plates.size() == copies) {
+            for (size_t c = 0; c < copies; ++c) {
+                core::Placement p;
+                p.set = true;
+                p.plate = m.plates[c];
+                std::copy(m.rotations.begin() + c * 9, m.rotations.begin() + (c + 1) * 9, p.rotation);
+                std::copy(m.offsets.begin() + c * 2, m.offsets.begin() + (c + 1) * 2, p.offset);
+                in.parts.push_back(p);
+            }
+        }
+        inputs.push_back(std::move(in));
+    }
+    return inputs;
+}
 }
 
 Slicer::Slicer(std::string resources_dir) : resources_dir_(std::move(resources_dir))
@@ -46,27 +72,7 @@ SliceResult Slicer::slice(
     opts.overlay.logo_height = options.logo_height;
     opts.overlay.font_path = std::string(options.font_path);
 
-    std::vector<core::ModelInput> inputs;
-    for (const ModelInput& m : models) {
-        core::ModelInput in;
-        in.path = std::string(m.path);
-        in.name = std::string(m.name);
-        // Placed copies: 9 rotation and 2 offset numbers and a plate each
-        // (the server checked them); anything else is one copy, centred.
-        const size_t copies = m.rotations.size() / 9;
-        if (m.rotations.size() == copies * 9 && m.offsets.size() == copies * 2 && m.plates.size() == copies) {
-            for (size_t c = 0; c < copies; ++c) {
-                core::Placement p;
-                p.set = true;
-                p.plate = m.plates[c];
-                std::copy(m.rotations.begin() + c * 9, m.rotations.begin() + (c + 1) * 9, p.rotation);
-                std::copy(m.offsets.begin() + c * 2, m.offsets.begin() + (c + 1) * 2, p.offset);
-                in.parts.push_back(p);
-            }
-        }
-        inputs.push_back(std::move(in));
-    }
-
+    const std::vector<core::ModelInput> inputs = to_core(models);
     const core::Outcome out = core::slice_models(inputs, to_std(config_json), to_std(output_path), cb, opts);
 
     SliceResult result;
@@ -81,6 +87,25 @@ SliceResult Slicer::slice(
     result.filament_used_mm = out.filament_used_mm;
     result.layer_count = out.layer_count;
     result.plates = out.plates;
+    return result;
+}
+
+ArrangeResult Slicer::arrange(const rust::Vec<ModelInput>& models, rust::Str config_json, double spacing_mm) const
+{
+    const core::ArrangeOutcome out = core::arrange_models(to_core(models), to_std(config_json), spacing_mm);
+    ArrangeResult result;
+    result.success = out.ok;
+    result.error = rust::String(out.error);
+    result.plates = out.plates;
+    for (const core::Arranged& a : out.parts) {
+        ArrangedPart p;
+        p.model = uint32_t(a.model);
+        p.part = uint32_t(a.part);
+        p.plate = a.plate;
+        p.offset_x = a.offset[0];
+        p.offset_y = a.offset[1];
+        result.parts.push_back(p);
+    }
     return result;
 }
 

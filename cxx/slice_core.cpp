@@ -26,6 +26,10 @@
 #include <libslic3r/GCode/ThumbnailData.hpp>
 #include <libslic3r/Format/bbs_3mf.hpp>
 #include <libslic3r/ProjectTask.hpp>
+#ifdef FARMSLICER_ARRANGE
+#include <libslic3r/Arrange.hpp>
+#include <libslic3r/Geometry/ConvexHull.hpp>
+#endif
 
 #include <array>
 #include <atomic>
@@ -380,12 +384,20 @@ using PlateParts = std::vector<std::vector<std::pair<int, int>>>;
 // the same objects, so libslic3r slices identical copies once.
 // (ModelObject::ensure_on_bed would drop every instance by the lowest one;
 // each copy here rests on the bed by itself.)
-Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::Vec2d& center, PlateParts& plates)
+/// Per copy, its instances (`groups`) and whose copy it is (model, part).
+struct CopyGroups {
+    std::vector<std::vector<std::pair<int, int>>> groups;
+    std::vector<std::pair<size_t, size_t>> owners;
+};
+
+Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::Vec2d& center, PlateParts& plates,
+                           CopyGroups* copies = nullptr)
 {
     using namespace Slic3r;
     Model plate;
     plates.clear();
-    for (const ModelInput& in : inputs) {
+    for (size_t model_index = 0; model_index < inputs.size(); ++model_index) {
+        const ModelInput& in = inputs[model_index];
         Model src = Model::read_from_file(in.path);
         const std::string what = in.name.empty() ? std::string("a model file") : "\"" + in.name + "\"";
         if (src.objects.empty()) throw std::runtime_error(what + " contains no objects");
@@ -407,8 +419,13 @@ Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::
         }
 
         const std::vector<Placement> parts = in.parts.empty() ? std::vector<Placement>{Placement{}} : in.parts;
-        for (const Placement& part : parts) {
+        for (size_t part_index = 0; part_index < parts.size(); ++part_index) {
+            const Placement& part = parts[part_index];
             if (plates.size() <= part.plate) plates.resize(part.plate + 1);
+            if (copies) {
+                copies->groups.emplace_back();
+                copies->owners.emplace_back(model_index, part_index);
+            }
             Transform3d rotation = Transform3d::Identity();
             if (part.set)
                 for (int r = 0; r < 3; ++r)
@@ -422,6 +439,7 @@ Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::
                     box.merge(objects[k]->instance_bounding_box(*inst));
                     group.push_back(inst);
                     plates[part.plate].emplace_back(object_index[k], int(objects[k]->instances.size()) - 1);
+                    if (copies) copies->groups.back().emplace_back(object_index[k], int(objects[k]->instances.size()) - 1);
                 }
             const Vec2d target = center + (part.set ? Vec2d(part.offset[0], part.offset[1]) : Vec2d::Zero());
             const Vec3d shift(target.x() - box.center().x(), target.y() - box.center().y(), -box.min.z());
@@ -799,3 +817,121 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 }
 
 } // namespace farmslicer::core
+
+#ifdef FARMSLICER_ARRANGE
+namespace farmslicer::core {
+
+// Plates the exclusion area is laid out on (a job has at most 50:
+// placement::MAX_PLATES).
+constexpr int kMaxArrangePlates = 50;
+
+ArrangeOutcome arrange_models(const std::vector<ModelInput>& models,
+                              const std::string& config_json,
+                              double spacing_mm)
+{
+    using namespace Slic3r;
+    ArrangeOutcome out;
+    try {
+        DynamicPrintConfig config;
+        std::vector<std::string> warnings;
+        load_config(config, config_json, warnings);
+        const Vec2d center = bed_center(config);
+
+        // Every copy where build_plates puts it (rotated, on the bed
+        // centre): only its silhouette matters here.
+        PlateParts plates;
+        CopyGroups copies;
+        Model model = build_plates(models, center, plates, &copies);
+
+        // One arrange item per copy: the convex hull of all its instances
+        // (a file of several objects stays one rigid part), around its
+        // bounding-box centre, which `translation` then places.
+        arrangement::ArrangePolygons items;
+        for (size_t g = 0; g < copies.groups.size(); ++g) {
+            Points points;
+            for (const auto& [o, i] : copies.groups[g]) {
+                const ModelObject* obj = model.objects[size_t(o)];
+                const Polygon hull = obj->convex_hull_2d(obj->instances[size_t(i)]->get_matrix());
+                points.insert(points.end(), hull.points.begin(), hull.points.end());
+            }
+            Polygon hull = Geometry::convex_hull(points);
+            if (hull.points.size() < 3) throw std::runtime_error("a part has no footprint to arrange");
+            const Point c = hull.bounding_box().center();
+            hull.translate(-c.x(), -c.y());
+            arrangement::ArrangePolygon ap;
+            ap.poly.contour = std::move(hull);
+            ap.translation = Vec2crd(c.x(), c.y());
+            // Not UNARRANGED: libnest2d's first-fit skips items whose bin is
+            // -1, which is also its "unfit" mark. The desktop app starts
+            // the items it arranges on bed 0 too (ArrangeJob).
+            ap.bed_idx = 0;
+            ap.itemid = int(g);
+            const ModelInput& in = models[copies.owners[g].first];
+            ap.name = in.name.empty() ? in.path : in.name;
+            items.push_back(std::move(ap));
+        }
+
+        // As the desktop app arranges (OrcaSlicer's CLI, step 2): the bed
+        // less the skirt, copies kept `spacing_mm` apart by inflating each
+        // by half of it, no rotation (the copies keep the recipe's).
+        arrangement::ArrangeParams params;
+        params.allow_rotations = false;
+        params.parallel = true;
+        params.min_obj_distance = scaled(std::max(0.0, spacing_mm));
+        params.progressind = [](unsigned, std::string) {};
+        arrangement::update_arrange_params(params, &config, items);
+        arrangement::update_selected_items_inflation(items, &config, params);
+        const Points bed = arrangement::get_shrink_bedpts(&config, params);
+
+        // The bed's exclusion area (Bambu's calibration corner) is in the
+        // way on every plate, a millimetre wider (as the desktop app has it:
+        // PartPlateList::preprocess_exclude_areas); libslic3r refuses parts
+        // that touch it.
+        arrangement::ArrangePolygons excluded;
+        if (const auto* area = config.option<ConfigOptionPoints>("bed_exclude_area"); area && area->values.size() >= 3) {
+            Polygon region;
+            for (const Vec2d& p : area->values) region.points.emplace_back(scaled(p.x()), scaled(p.y()));
+            for (int plate = 0; plate < kMaxArrangePlates; ++plate) {
+                arrangement::ArrangePolygon ex;
+                ex.poly.contour = region;
+                ex.translation = Vec2crd(0, 0);
+                ex.is_virt_object = true;
+                ex.bed_idx = plate;
+                ex.height = 1;
+                ex.name = "ExcludedRegion";
+                ex.inflation = scaled(1.0);
+                excluded.push_back(ex);
+            }
+        }
+        arrangement::arrange(items, excluded, bed, params);
+
+        for (const arrangement::ArrangePolygon& ap : items) {
+            if (!ap.is_arranged()) {
+                const BoundingBox part = ap.poly.contour.bounding_box();
+                const BoundingBox usable = Polygon(bed).bounding_box();
+                char size[160];
+                std::snprintf(size, sizeof size, " (%.0f x %.0f mm) doesn't fit on the bed (%.0f x %.0f mm usable)",
+                              unscale<double>(part.size().x()), unscale<double>(part.size().y()),
+                              unscale<double>(usable.size().x()), unscale<double>(usable.size().y()));
+                throw std::runtime_error("\"" + ap.name + "\"" + size);
+            }
+            Arranged a;
+            a.model = copies.owners[size_t(ap.itemid)].first;
+            a.part = copies.owners[size_t(ap.itemid)].second;
+            a.plate = unsigned(ap.bed_idx);
+            a.offset[0] = unscale<double>(ap.translation.x()) - center.x();
+            a.offset[1] = unscale<double>(ap.translation.y()) - center.y();
+            out.plates = std::max(out.plates, a.plate + 1);
+            out.parts.push_back(a);
+        }
+        out.ok = true;
+    } catch (const std::exception& e) {
+        out.error = e.what();
+    } catch (...) {
+        out.error = "arranging failed";
+    }
+    return out;
+}
+
+} // namespace farmslicer::core
+#endif

@@ -42,7 +42,10 @@ fn main() {
         .define("USE_TBB", None)
         .define("TBB_USE_CAPTURED_EXCEPTION", "0")
         .define("BOOST_ALL_NO_LIB", None)
-        .define("BOOST_SYSTEM_USE_UTF8", None);
+        .define("BOOST_SYSTEM_USE_UTF8", None)
+        // slice_core's arrange_models (libnest2d is linked here, not in the
+        // WebAssembly engine).
+        .define("FARMSLICER_ARRANGE", None);
 
     if is_windows {
         build

@@ -270,6 +270,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (print status from `printing::apply` and the send task, outcomes from
   `outcomes::after_record`, item/project from `projects::refresh` via
   `project_items.done_at`)
+- `src/autoplate.rs` — plates for missing copies: `candidate` (an item
+  with a FarmSlicer recipe whose model is on the server), `batches` (same
+  config, mixing rule), `plate_batch` (`AppState::arrange` →
+  `slicer::Slicer::arrange` → slice_core, a new server job with copied
+  model files, `job_items` per plate, a queue entry per plate,
+  `run_slice`). A job that fails to slice cancels its queued entries
 - `src/dispatch.rs` — send modes (`printer_dispatch`: manual | confirm |
   yolo, `set_by`, `bed_clear_at`): `ready()` (pure, tested) decides,
   `run` ticks every 15 s and on `poke` (queue changes, prints ending),
@@ -311,7 +317,14 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   export_gcode (plate N to `plate_gcode_path`: `<job>.plateN.gcode`, plate
   1 the job's own) → stats (totals), its `PlateData` and thumbnail → one
   package with every plate (with libslic3r's filament-to-nozzle map);
-  errors and warnings say "plate N:" when there are several. On multi-nozzle printers the prime
+  errors and warnings say "plate N:" when there are several.
+  `arrange_models` (native only: `FARMSLICER_ARRANGE`, set by build.rs;
+  libnest2d isn't in the wasm engine) packs copies with libslic3r's
+  arrange as the desktop app does: per copy the convex hull of its
+  instances (`build_plates`' `CopyGroups`), inflation = spacing / 2, the
+  bed less the skirt (`get_shrink_bedpts`), `bed_exclude_area` as fixed
+  obstacles on every plate. Items must start on bed 0: libnest2d's
+  first-fit skips bin -1, which is also its "unfit" mark On multi-nozzle printers the prime
   tower goes where the desktop app puts it (x 165, y 250, then inside the
   area every nozzle reaches: `place_wipe_tower`, `fit_wipe_tower`). With a Manual map, a filament the
   export's G-code check says its nozzle can't reach moves to the other

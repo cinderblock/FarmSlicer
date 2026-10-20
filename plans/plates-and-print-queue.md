@@ -383,7 +383,13 @@ Decisions here are mine unless marked; the user can overrule any of them.
   confirm / YOLO (acknowledged; stops after a failure), bed-clear (Queue
   page, outcome dialog), mode picker and badges; `tests/dispatch-e2e.mjs`;
   20 e2e suites green; Queue and Printers pages checked in a browser.
-- [ ] Step 7b: auto-plating with libslic3r's arrange (current).
+- [x] Step 7b: auto-plating: `slice_core::arrange_models` (native only),
+  `Slicer::arrange` bridge, `src/autoplate.rs` (per project and
+  farm-wide, settings and mixing batches), Project/Queue buttons; stub e2e
+  checks the refusals; `tests/native-autoplate.mjs` against a native
+  image: 40 × 60 mm cubes on a Voron 350 → 25 + 15, 70 × 30 mm on an X1C
+  → 48 + 22 around the exclusion corner, mixing group vs any; wasm st
+  still builds, smoke single/--plate/--plates pass.
 
 - The queue's order needs result-column aliases (`held`, `due`,
   `project_priority`) in ORDER BY: a number inside an expression
@@ -407,6 +413,14 @@ Decisions here are mine unless marked; the user can overrule any of them.
 - Dispatch tests must follow specific print ids: in YOLO a new print
   starts the moment one finishes, so "wait for the newest print to
   finish" waits through the next one too.
+
+- libnest2d's first-fit skips items whose bin id is -1, and -1 is both
+  "unset" and "unfit" (`BIN_ID_UNSET == BIN_ID_UNFIT`): arrange items must
+  start with `bed_idx = 0`, as the desktop app's ArrangeJob does. With
+  `UNARRANGED` every item came back unarranged in 3 ms ("doesn't fit").
+- Bambu beds' `bed_exclude_area` must go to arrange as fixed obstacles on
+  every plate, or the slice fails: "cube.stl is too close to exclusion
+  area, there may be collisions when printing."
 
 ## Things not to do
 

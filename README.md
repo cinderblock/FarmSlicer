@@ -322,6 +322,16 @@ what the printers do next (the queue).
   A print that never started puts its entry back; one that failed ends
   it (or queues the plate again, with `requeue_failed`). A project's
   missing copies are queued again with one button.
+- **Auto-plating**: "Plate the missing parts" (a project's page) or
+  "Plate missing parts" (the Queue page, every open project) makes a job
+  of only the missing copies, each from its item's recipe (model,
+  rotation, settings), packed by libslic3r's own arrange (the desktop
+  app's; it keeps out of the bed's exclusion area) onto as few plates as
+  fit, sliced on the server and queued. Parts share a job only when they
+  slice with the same settings, and different projects share plates as
+  the mixing rule allows (`none`, `group`: same group and client, `any`;
+  site setting, or the pool's). Needs a server with libslic3r, and
+  models kept on the server (not uploaded sliced files).
 - **Send modes** (per printer, Queue page; admins and its operators):
   *by hand* (the default); *when the bed is cleared* (someone says so, on
   the Queue page or while recording a print's outcome, and the next
@@ -449,6 +459,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/projects/{id}/jobs`, `DELETE /api/projects/{id}/jobs/{job}`, `GET /api/jobs/{id}/parts` | count a job's parts for the project's items (`items: [{model \| part, item_id \| name, quantity}]`, omitted = each part a new item); a job's parts and what they count for. `POST /api/jobs` takes `project` (`{project_id \| new: {name, ...}, items}`) to do the same as it creates the job |
 | `GET/POST /api/queue`, `PATCH/DELETE /api/queue/{id}`, `POST /api/queue/{id}/send`, `POST /api/printers/{id}/send-next` | the queue (`?status=queued\|sent\|done&printer=`: entries in order, each with `fits` per printer, and per printer the entry it would take `next`); queue `{job_id, plate \| plates, count, priority, printer_id, note}`; change priority (`position: "top"`), pin, note; send one entry, or a printer's next (admins, the printer's operators) |
 | `GET/POST /api/pools`, `PATCH/DELETE /api/pools/{id}` | printer pools (admins; operators see their own): `{name, printer_ids, operator_ids, settings: {mixing: none\|group\|any}}` |
+| `POST /api/projects/{id}/autoplate`, `POST /api/queue/autoplate` | plates for missing copies (`{items, spacing}`; farm-wide `{pool_id, spacing}`: admins, operators): `{jobs: [{job_id, plates, copies, projects, queued}], skipped}` |
 | `POST /api/printers/{id}/send-mode`, `POST /api/printers/{id}/bed-clear` | how a printer takes the queue (`{mode: manual\|confirm\|yolo, acknowledge}`; YOLO needs `acknowledge: true`); the bed is clear. Printers carry `dispatch` (`send_mode`, `waiting_for: "bed"`) |
 | `GET/POST /api/integrations/keys`, `DELETE /api/integrations/keys/{id}` | integration keys (admins; managers for their groups): `{name, group_id, client_ref, permissions: [projects:read, projects:write, usage:read]}`, the key returned once |
 | `GET/POST /api/integrations/webhooks`, `PATCH/DELETE /api/integrations/webhooks/{id}`, `GET …/{id}/deliveries`, `POST …/{id}/test`, `POST /api/integrations/deliveries/{id}/retry` | webhooks (admins): `{url, events: ["*"] \| [...], group_id, description, enabled, rotate_secret}` (the secret returned once), their delivery log |
@@ -505,6 +516,7 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 queue.rs + queue_api.rs + db/queue.rs (the print queue),
                 pools.rs + db/pools.rs (printer pools, operators),
                 dispatch.rs + db/dispatch.rs (printers taking the queue),
+                autoplate.rs (plates for missing copies, libslic3r's arrange),
                 integration.rs (integration keys, usage), webhooks.rs +
                 db/webhooks.rs (signed event delivery),
                 events.rs (what happened, for webhooks),

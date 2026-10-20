@@ -8,6 +8,7 @@ namespace farmslicer {
 struct SliceResult;
 struct SliceOptions;
 struct ModelInput;
+struct ArrangeResult;
 
 /// Thin wrapper over libslic3r's Model → Print → G-code pipeline.
 ///
@@ -27,6 +28,8 @@ public:
         rust::Str output_path,
         const SliceOptions& options
     ) const;
+
+    ArrangeResult arrange(const rust::Vec<ModelInput>& models, rust::Str config_json, double spacing_mm) const;
 
 private:
     std::string resources_dir_;

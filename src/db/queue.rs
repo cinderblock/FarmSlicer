@@ -216,6 +216,17 @@ impl Db {
             > 0
     }
 
+    /// End a job's queued entries (it can't be printed).
+    pub fn cancel_queued_for_job(&self, job_id: &str, note: &str) -> usize {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE queue_entries SET status = 'cancelled', note = ?2, updated_at = datetime('now')
+             WHERE job_id = ?1 AND status = 'queued'",
+            params![job_id, note],
+        )
+        .unwrap()
+    }
+
     /// Entries per status, for the queue's header.
     pub fn queue_counts(&self) -> Vec<(String, i64)> {
         let conn = self.conn.lock().unwrap();

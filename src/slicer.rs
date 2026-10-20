@@ -65,6 +65,23 @@ mod ffi {
         layer_count: u32,
     }
 
+    /// Where `Slicer::arrange` put one copy: which model and which of its
+    /// copies, its plate (0-based) and its offset from the bed centre.
+    struct ArrangedPart {
+        model: u32,
+        part: u32,
+        plate: u32,
+        offset_x: f64,
+        offset_y: f64,
+    }
+
+    struct ArrangeResult {
+        success: bool,
+        error: String,
+        parts: Vec<ArrangedPart>,
+        plates: u32,
+    }
+
     extern "Rust" {
         fn slice_progress(job_id: &str, percent: i32, message: &str);
         fn slice_cancelled(job_id: &str) -> bool;
@@ -90,6 +107,10 @@ mod ffi {
             output_path: &str,
             options: &SliceOptions,
         ) -> SliceResult;
+
+        /// Pack every copy of `models` (their rotations kept) onto as few
+        /// plates as libslic3r's arrange manages, `spacing_mm` apart.
+        fn arrange(&self, models: &Vec<ModelInput>, config_json: &str, spacing_mm: f64) -> ArrangeResult;
     }
 }
 
@@ -139,6 +160,22 @@ mod stub {
         pub layer_count: u32,
     }
 
+    pub struct ArrangedPart {
+        pub model: u32,
+        #[allow(dead_code)]
+        pub part: u32,
+        pub plate: u32,
+        pub offset_x: f64,
+        pub offset_y: f64,
+    }
+
+    pub struct ArrangeResult {
+        pub success: bool,
+        pub error: String,
+        pub parts: Vec<ArrangedPart>,
+        pub plates: u32,
+    }
+
     pub struct Slicer;
 
     pub type SlicerBox = Box<Slicer>;
@@ -169,6 +206,15 @@ mod stub {
                 filament_used_g: 0.0,
                 filament_used_mm: 0.0,
                 layer_count: 0,
+            }
+        }
+
+        pub fn arrange(&self, _models: &Vec<ModelInput>, _config_json: &str, _spacing_mm: f64) -> ArrangeResult {
+            ArrangeResult {
+                success: false,
+                error: "this server was built without libslic3r (FARMSLICER_SKIP_CXX): it can't arrange plates".into(),
+                parts: Vec::new(),
+                plates: 0,
             }
         }
     }

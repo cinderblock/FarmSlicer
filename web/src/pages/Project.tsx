@@ -27,6 +27,7 @@ export default function ProjectPage() {
   const loaded = useJson<ProjectDetail>(`/api/projects/${id}`, rev);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
+  const [notice, setNotice] = useState("");
   const p = loaded.data;
   const reload = () => setRev((r) => r + 1);
 
@@ -133,7 +134,26 @@ export default function ProjectPage() {
       )}
       {p.notes && !editing && <p className="project-notes">{p.notes}</p>}
 
-      <h3>Parts</h3>
+      <div className="page-header">
+        <h3>Parts</h3>
+        {p.can_edit && p.items.some((i) => i.missing > 0) && (
+          <button
+            className="btn-sm"
+            title="FarmSlicer packs every missing copy onto as few plates as fit (the slicer's own arrange), slices them and queues them"
+            onClick={() =>
+              act(async () => {
+                const r = await apiJson<{ jobs: { plates: number; copies: number }[]; skipped: string[] }>(`/api/projects/${p.id}/autoplate`, "POST", {});
+                const plates = r.jobs.reduce((n, j) => n + j.plates, 0);
+                const copies = r.jobs.reduce((n, j) => n + j.copies, 0);
+                setNotice(`${copies} cop${copies === 1 ? "y" : "ies"} on ${plates} new plate${plates === 1 ? "" : "s"}, slicing and queued.${r.skipped.length ? ` Not plated: ${r.skipped.join("; ")}` : ""}`);
+              })
+            }
+          >
+            Plate the missing parts
+          </button>
+        )}
+      </div>
+      {notice && <p className="job-alert">{notice}</p>}
       {p.items.length === 0 && <p className="empty-state">No parts yet.</p>}
       {p.items.length > 0 && (
         <table className="data-table cards">

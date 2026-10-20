@@ -26,6 +26,7 @@ export default function QueuePage() {
   const [checking, setChecking] = useState<PrintRecord | null>(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [notice, setNotice] = useState("");
   const reload = () => setRev((r) => r + 1);
 
   // Printers come free and prints end: keep it current.
@@ -63,10 +64,29 @@ export default function QueuePage() {
     <div className="page">
       <div className="page-header">
         <h2>Queue</h2>
-        <span className="hint">
-          {view?.counts.queued ?? 0} waiting · {view?.counts.sent ?? 0} on printers
+        <span className="print-controls">
+          <span className="hint">
+            {view?.counts.queued ?? 0} waiting · {view?.counts.sent ?? 0} on printers
+          </span>
+          {printers.some((p) => p.operates) && (
+            <button
+              className="btn-sm"
+              title="Plates for every open project's missing copies: packed by the slicer's arrange, sliced and queued (projects share plates as the mixing rule allows)"
+              disabled={busyId === "autoplate"}
+              onClick={() =>
+                act("autoplate", async () => {
+                  const r = await apiJson<{ jobs: { plates: number }[]; skipped: string[] }>("/api/queue/autoplate", "POST", pool ? { pool_id: pool } : {});
+                  const plates = r.jobs.reduce((n, j) => n + j.plates, 0);
+                  setNotice(`${plates} new plate${plates === 1 ? "" : "s"} slicing and queued.${r.skipped.length ? ` Not plated: ${r.skipped.join("; ")}` : ""}`);
+                })
+              }
+            >
+              Plate missing parts
+            </button>
+          )}
         </span>
       </div>
+      {notice && <p className="job-alert">{notice}</p>}
       <p className="hint">
         Plates waiting for a printer, most urgent first: an entry's priority, then its project's priority and due
         date, then age. Queue a job's plates from its page, or a project's missing parts from the project.

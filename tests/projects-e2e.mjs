@@ -215,6 +215,19 @@ fd4.append("project", JSON.stringify({ new: { name: "x", external_ref: "ORD-1001
 r = await alice.call("POST", "/api/jobs", fd4);
 check(r.status === 409, "a new project can't take an external_ref in use", json(r));
 
+// ---- auto-plating: what can't be re-plated says why ---------------------------------------
+r = await alice.post(`/api/projects/${kit.id}/autoplate`);
+check(r.status === 409 && /stayed in the browser/.test(r.json.error), "models kept in a browser can't be auto-plated", json(r));
+r = await alice.post("/api/projects", { name: "More clips", items: [{ job_id: job, part: "Clip", quantity: 9 }] });
+r = await alice.post(`/api/projects/${r.json.id}/autoplate`);
+check(r.status === 409 && /uploaded sliced file/.test(r.json.error), "nor parts of an uploaded sliced file", json(r));
+r = await alice.post(`/api/projects/${kit.id}/autoplate`, { spacing: 500 });
+check(r.status === 400, "spacing is bounded", json(r));
+r = await bob.post(`/api/projects/${kit.id}/autoplate`);
+check(r.status === 404, "bob can't plate alice's project", json(r));
+r = await alice.post("/api/queue/autoplate");
+check(r.status === 403, "farm-wide plating is for admins and operators", json(r));
+
 r = await alice.del(`/api/projects/${second}`);
 check(r.status === 204, "a project can be deleted", json(r));
 r = await alice.get(`/api/jobs/${job}`);

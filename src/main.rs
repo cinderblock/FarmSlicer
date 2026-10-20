@@ -1,4 +1,5 @@
 mod auth;
+mod autoplate;
 mod auth_api;
 mod cost;
 mod bambu;

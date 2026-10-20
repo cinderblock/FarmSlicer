@@ -54,6 +54,13 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Pack `models`' copies onto plates with libslic3r's arrange (waits for
+    /// the slicer: one engine call at a time).
+    pub fn arrange(&self, models: &Vec<slicer::ModelInput>, config_json: &str, spacing_mm: f64) -> slicer::ArrangeResult {
+        let handle = self.slicer.lock().unwrap();
+        handle.0.arrange(models, config_json, spacing_mm)
+    }
+
     pub fn new(
         db: Arc<Db>,
         data_dir: std::path::PathBuf,
@@ -1464,7 +1471,7 @@ pub(crate) fn record_package(state: &AppState, job_id: &str, path: &str, own_fil
     }
 }
 
-fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
+pub(crate) fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
     // One slice at a time: wait for the engine before leaving "queued".
     let handle = state.slicer.lock().unwrap();
 
@@ -1483,6 +1490,7 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
             drop(handle);
             progress::clear(job_id);
             state.db.fail_job(job_id, &e);
+            state.db.cancel_queued_for_job(job_id, "its job failed to slice");
             println!("job {job_id}: failed: {e}");
             return;
         }
@@ -1523,6 +1531,7 @@ fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) {
         println!("job {job_id}: cancelled");
     } else {
         state.db.fail_job(job_id, &result.error);
+        state.db.cancel_queued_for_job(job_id, "its job failed to slice");
         println!("job {job_id}: failed: {}", result.error);
         crate::feedback::slice_failed(&state.db, job_id, &result.error, "server");
     }
@@ -1809,6 +1818,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::integration::routes())
         .merge(crate::webhooks::routes())
         .merge(crate::dispatch::routes())
+        .merge(crate::autoplate::routes())
         .merge(crate::preview_api::routes())
         .merge(overlay::routes())
         .merge(crate::farm_api::routes())

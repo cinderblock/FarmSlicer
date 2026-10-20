@@ -98,4 +98,31 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                      const Callbacks& callbacks,
                      const Options& options = {});
 
+/// Where `arrange_models` put one copy.
+struct Arranged {
+    /// Which model and which of its parts.
+    size_t model = 0;
+    size_t part = 0;
+    /// The plate (0-based) and the offset of the copy's bounding-box centre
+    /// from the bed centre (mm), as `Placement` has them.
+    unsigned plate = 0;
+    double offset[2] = {0, 0};
+};
+
+struct ArrangeOutcome {
+    bool ok = false;
+    std::string error;
+    std::vector<Arranged> parts;
+    unsigned plates = 0;
+};
+
+/// Pack every copy of `models` onto as few plates as libslic3r's arrange
+/// (the desktop app's) manages, each copy keeping its rotation (offsets and
+/// plates are ignored), at least `spacing_mm` apart, inside the bed less the
+/// skirt the config prints. Native builds only (FARMSLICER_ARRANGE: libnest2d
+/// isn't in the WebAssembly engine). Never throws.
+ArrangeOutcome arrange_models(const std::vector<ModelInput>& models,
+                              const std::string& config_json,
+                              double spacing_mm);
+
 } // namespace farmslicer::core
