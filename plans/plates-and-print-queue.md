@@ -334,6 +334,33 @@ Decisions here are mine unless marked; the user can overrule any of them.
   `mixing` allows.
 
 
+## Step 8: hands-off dispatch (user, 2026-10-20; design in progress)
+
+The user's direction: "If there is a pending print, it should take
+minimal human interaction to get the next one starting automatically.
+Ideally the human clearing the plate doesn't need to do anything. If we
+accidentally start a print and the plate hasn't been cleared, it's not
+the end of the world: it usually detects it and throws an error."
+
+So the bed-clear signal should come from the printer, not a button:
+
+- **Door cycle**: a door opened (and closed) after the print ended means
+  someone attended to it. Enclosed printers report the door over their
+  LAN API (Bambu: from the `stat` flags, being confirmed; others: being
+  researched).
+- **Plate off and back on**, where the printer reports plate presence.
+- The button (Queue page, or with an outcome) stays as the fallback for
+  printers that report neither.
+- **A start on an uncleared bed** that the printer refuses (its error
+  right at the start) is not a failure of the plate: the entry goes back
+  to the queue and the printer waits for the next clear signal, so it
+  never loops.
+- YOLO stays as is for printers that clear themselves; whether it should
+  also go on after a failed print rides on the same printer-side
+  detection.
+
+Signals per printer family: research running; results go here.
+
 ## Findings / gotchas
 
 - Uploaded multi-plate projects now count every plate in the job's totals
