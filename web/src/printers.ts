@@ -69,6 +69,9 @@ export interface DispatchState {
   bed_clear_at: string | null;
   /** "bed": someone has to say the bed is clear before the next plate. */
   waiting_for: "bed" | null;
+  /** How the printer itself says its bed was cleared: its door opened and
+   *  closed, or set to READY on its screen; null = only the button. */
+  clear_signal: "door" | "ready" | null;
 }
 
 /** `printers.nozzle_priority` choices ("" = the first). */

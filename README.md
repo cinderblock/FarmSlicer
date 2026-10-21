@@ -333,9 +333,14 @@ what the printers do next (the queue).
   site setting, or the pool's). Needs a server with libslic3r, and
   models kept on the server (not uploaded sliced files).
 - **Send modes** (per printer, Queue page; admins and its operators):
-  *by hand* (the default); *when the bed is cleared* (someone says so, on
-  the Queue page or while recording a print's outcome, and the next
-  plate that fits goes out); *YOLO* (the next plate goes out as soon as
+  *by hand* (the default); *when the bed is cleared* (the next plate that
+  fits goes out once the bed counts as clear: the printer's door opened
+  and closed after the print (Bambu X1 / X1E / H2 / P2S; Klipper with a
+  `gcode_button` or `filament_switch_sensor` named "door"), a Prusa set
+  to READY on its screen, or the button on the Queue page or with a
+  print's outcome); a start the printer refuses because its bed wasn't
+  ready (objects detected, no plate, door open) puts the plate back in
+  the queue, it isn't counted as failed; *YOLO* (the next plate goes out as soon as
   the printer is free and its last print finished, nobody asked; marked
   on the printer card; after a failed print it waits for the bed). Sends
   go out as whoever chose the mode, through the usual checks; a plate

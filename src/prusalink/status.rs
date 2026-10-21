@@ -100,6 +100,7 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
         ams: Vec::new(),
         external: Vec::new(),
         active_slot: None,
+        door_open: None,
     }
 }
 

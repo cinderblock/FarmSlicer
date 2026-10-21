@@ -165,6 +165,7 @@ pub fn summarize(connected: bool, error: Option<String>, updated_at: Option<Stri
         ams: Vec::new(),
         external: Vec::new(),
         active_slot: None,
+        door_open: None,
     }
 }
 

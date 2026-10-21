@@ -82,6 +82,17 @@ pub fn next_for(state: &AppState, printer: &Printer) -> Option<(QueueEntry, Fit)
     })
 }
 
+/// The printer refused a print because its bed wasn't ready (src/printing.rs
+/// `bed_not_ready`): the entry waits in the queue again, nothing is counted
+/// against the plate, and the printer waits for the bed to be cleared
+/// (dispatch compares the clear signal with the print's end).
+pub fn bed_not_ready(state: &AppState, print: &PrintRecord) {
+    if let Some(entry) = state.db.queue_entry_of_print(&print.id).filter(|e| e.status == "sent") {
+        state.db.release_queue_entry(&entry.id);
+        println!("Queue entry {}: the printer's bed wasn't ready; queued again", entry.id);
+    }
+}
+
 /// A print has ended (or will never happen): move its queue entry along.
 pub fn print_ended(state: &AppState, print: &PrintRecord, status: &str) {
     let Some(entry) = state.db.queue_entry_of_print(&print.id) else { return };

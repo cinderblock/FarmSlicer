@@ -119,7 +119,11 @@ export default function QueuePage() {
                 )}
                 {p.dispatch?.waiting_for === "bed" && (
                   <div className="queue-bed">
-                    Waiting for the bed to be cleared
+                    {p.dispatch.clear_signal === "door"
+                      ? "Clear the bed: opening and closing the door starts the next plate"
+                      : p.dispatch.clear_signal === "ready"
+                        ? "Clear the bed and set the printer to Ready"
+                        : "Waiting for the bed to be cleared"}
                     {p.operates && (
                       <button className="btn-sm" disabled={busyId === p.printer_id} onClick={() => bedClear(p.printer_id)}>
                         Bed is clear

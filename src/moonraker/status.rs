@@ -30,9 +30,30 @@ pub fn subscription(available: &[String]) -> Map<String, Value> {
                 || o.starts_with("extruder")
                 || ((o.starts_with("temperature_sensor ") || o.starts_with("heater_generic "))
                     && o.to_ascii_lowercase().contains("chamber"))
+                || is_door(o)
         })
         .map(|o| (o.clone(), Value::Null))
         .collect()
+}
+
+/// A door switch: Klipper has no door object, so a `gcode_button` or a
+/// `filament_switch_sensor` with "door" in its name is taken for one.
+fn is_door(object: &str) -> bool {
+    (object.starts_with("gcode_button ") || object.starts_with("filament_switch_sensor "))
+        && object.to_ascii_lowercase().contains("door")
+}
+
+/// The door from a door switch: a closed door presses the switch
+/// (`gcode_button` PRESSED, `filament_switch_sensor` detected). Wired the
+/// other way round, opening and closing still counts as a door cycle.
+fn door_open(objects: &Map<String, Value>) -> Option<bool> {
+    objects.iter().find(|(k, _)| is_door(k)).and_then(|(k, v)| {
+        if k.starts_with("gcode_button ") {
+            v["state"].as_str().map(|s| s != "PRESSED")
+        } else {
+            v["filament_detected"].as_bool().map(|d| !d)
+        }
+    })
 }
 
 /// Fold a `notify_status_update` delta into the merged objects.
@@ -205,6 +226,7 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
         ams: Vec::new(),
         external: Vec::new(),
         active_slot: None,
+        door_open: door_open(o),
     }
 }
 
@@ -227,6 +249,18 @@ mod tests {
             objects,
             file,
         })
+    }
+
+    #[test]
+    fn door_switches() {
+        let list: Vec<String> = ["gcode_button door", "filament_switch_sensor runout", "heater_bed"].iter().map(|s| s.to_string()).collect();
+        assert!(subscription(&list).contains_key("gcode_button door"));
+        assert!(!subscription(&list).contains_key("filament_switch_sensor runout"));
+        let objects = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(door_open(&objects(json!({"gcode_button Door": {"state": "PRESSED"}}))), Some(false));
+        assert_eq!(door_open(&objects(json!({"gcode_button Door": {"state": "RELEASED"}}))), Some(true));
+        assert_eq!(door_open(&objects(json!({"filament_switch_sensor door": {"filament_detected": false}}))), Some(true));
+        assert_eq!(door_open(&objects(json!({"heater_bed": {}}))), None);
     }
 
     #[test]

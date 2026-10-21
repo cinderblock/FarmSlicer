@@ -237,7 +237,9 @@ impl Shared {
         let mut summary = {
             let mut state = self.state.lock().unwrap();
             change(&mut state);
-            status::summarize(state.online, state.error.clone(), state.updated_at.clone(), &state.report)
+            let mut s = status::summarize(state.online, state.error.clone(), state.updated_at.clone(), &state.report);
+            s.door_open = status::door_open(&state.report, &self.config.serial);
+            s
         };
         hms::describe(&mut summary, &self.config.serial);
         self.sink.publish(summary);

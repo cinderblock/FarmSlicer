@@ -359,7 +359,21 @@ So the bed-clear signal should come from the printer, not a button:
   also go on after a failed print rides on the same printer-side
   detection.
 
-Signals per printer family: research running; results go here.
+Signals per printer family (researched 2026-10-20, sources in the
+findings): built 2026-10-20.
+
+- Bambu X1 / X1C / X1E: door = bit 23 of `print.home_flag`; H2D / H2S /
+  P2S / H2 family: bit 23 of the hex `print.stat`; P1 and A1 have no door
+  sensor. No field says the plate is empty; H2 / P2S cameras check for
+  objects at the start and raise foreign-object codes.
+- Klipper: no standard door object; a `gcode_button` or
+  `filament_switch_sensor` with "door" in its name is used (closed door
+  presses it).
+- PrusaLink: the Core One door isn't in the API; the READY state (set on
+  the printer) stands in.
+- OctoPrint, Elegoo SDCP: nothing; the button.
+- Commercial farms (SimplyPrint, Bambu Farm Manager) use a button, a
+  clearing mechanism or a camera check; none documents a door cycle.
 
 ## Findings / gotchas
 
@@ -459,6 +473,16 @@ Signals per printer family: research running; results go here.
 - Bambu beds' `bed_exclude_area` must go to arrange as fixed obstacles on
   every plate, or the slice fails: "cube.stl is too close to exclusion
   area, there may be collisions when printing."
+
+- Door sources (2026-10-20 research): ha-bambulab `pybambu/models.py`
+  (feature gate ~L237, parsing ~L2821; X1 firmware >= 01.07.00.00, X1E >=
+  01.01.02.00), `const.py` `Home_Flag_Values.DOOR_OPEN`; Klipper Status
+  Reference (`gcode_button`, `filament_switch_sensor`); PrusaLink OpenAPI
+  (no door; `READY`). OrcaSlicer v2.4.2 reads only the door-check
+  *setting* (`cfg` bits 20-21), not the live door.
+- Not tried on hardware yet: the door bits on a real X1C / H2D, and what
+  a Bambu printer does when a print starts on an uncleared bed (the
+  foreign-object codes are from the HMS tables, not from a test).
 
 ## Things not to do
 

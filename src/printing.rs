@@ -563,6 +563,16 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
     }
 }
 
+/// Printer errors that say the bed or the door wasn't ready for a print
+/// (objects left on the plate, no plate, the door open), not that the plate
+/// failed. Bambu codes (src/bambu/data/hms.json): 0300_404B the front door
+/// or top cover was open; 0C00_8017 / 0500_806E / 0300_8017 foreign objects
+/// on the plate; 0300_8019 no build plate.
+pub fn bed_not_ready(print_error: i64) -> bool {
+    const CODES: &[i64] = &[0x0300_404B, 0x0C00_8017, 0x0500_806E, 0x0300_8017, 0x0300_8019];
+    CODES.contains(&print_error)
+}
+
 fn apply(state: &AppState, status: &PrinterStatus) {
     for print in state.db.list_prints(Some(&status.printer_id), true, 20) {
         // The background task owns uploads.
@@ -578,7 +588,11 @@ fn apply(state: &AppState, status: &PrinterStatus) {
                 crate::incidents::print_failed(state, &print, error.as_deref().unwrap_or("the print failed"));
             }
             if state.db.update_print(&print.id, new_status, progress, error.as_deref()) && new_status != print.status {
-                if matches!(new_status, "finished" | "failed" | "cancelled") {
+                if new_status == "failed" && status.print_error.is_some_and(bed_not_ready) {
+                    // Not the plate's failure: it goes back in the queue,
+                    // and the printer waits for its bed to be cleared.
+                    crate::queue::bed_not_ready(state, &print);
+                } else if matches!(new_status, "finished" | "failed" | "cancelled") {
                     crate::outcomes::record_automatic(state, &print, new_status, error.as_deref());
                     crate::queue::print_ended(state, &print, new_status);
                     crate::dispatch::poke(state);
@@ -836,6 +850,13 @@ mod tests {
             "PETG isn't allowed (allowed: pla, PLA-CF)".to_string(),
         ]);
         assert!(rule_violations(&PrintRules::default(), &p).is_empty());
+    }
+
+    #[test]
+    fn a_bed_that_wasnt_ready_isnt_a_failed_plate() {
+        assert!(bed_not_ready(0x0300_404B), "door open at the start");
+        assert!(bed_not_ready(0x0C00_8017), "foreign objects on the plate");
+        assert!(!bed_not_ready(0x0500_4038), "a real failure");
     }
 
     #[test]

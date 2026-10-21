@@ -48,7 +48,7 @@ function metadataOf(path, content) {
   return { meta, thumbFiles: files };
 }
 
-export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds = 6, host = "127.0.0.1" } = {}) {
+export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds = 6, host = "127.0.0.1", door = false } = {}) {
   const files = new Map(); // gcodes path → Buffer
   const metadata = new Map(); // path → metadata
   const thumbs = new Map(); // gcodes path → Buffer
@@ -64,6 +64,9 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
     extruder: { temperature: 24, target: 0, power: 0 },
     heater_bed: { temperature: 23, target: 0, power: 0 },
     fan: { speed: 0 },
+    // A door switch, as people configure one (`[gcode_button door]`): the
+    // closed door presses it.
+    ...(door ? { "gcode_button door": { state: "PRESSED" } } : {}),
   };
   let dirty = {};
   const clients = new Set();
@@ -282,6 +285,10 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
     objects,
     files,
     scripts,
+    /** Open or close the door (with `door: true`). */
+    setDoor(open) {
+      set("gcode_button door", { state: open ? "RELEASED" : "PRESSED" });
+    },
     async close() {
       clearInterval(timer);
       for (const c of clients) c.close();

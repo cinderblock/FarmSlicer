@@ -123,6 +123,7 @@ pub(super) fn summarize(snap: &Snapshot) -> PrinterStatus {
         ams: Vec::new(),
         external: Vec::new(),
         active_slot: None,
+        door_open: None,
     }
 }
 

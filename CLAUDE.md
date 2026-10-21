@@ -281,7 +281,13 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `run` ticks every 15 s and on `poke` (queue changes, prints ending),
   sends through `queue_api::send_entry` as the mode setter, skips refused
   plates for 10 min (in memory). YOLO stops after a failed/stopped print
-  until the bed is cleared
+  until the bed is cleared. The bed counts as cleared (`watch`, on every
+  printer report) when `PrinterStatus.door_open` goes open → closed
+  (Bambu: `bambu::status::door_open` by serial prefix, `home_flag` /
+  `stat` bit 23; Klipper: a `gcode_button`/`filament_switch_sensor` named
+  "door") or a PrusaLink printer turns READY. `printing::bed_not_ready`
+  (Bambu codes for foreign objects, no plate, door open) sends a refused
+  start back to the queue (`queue::bed_not_ready`), no outcome recorded
 - `src/printing.rs` — sending: compatibility (package format per protocol,
   model, nozzle), AMS mapping where the protocol maps filaments, dispatch to
   the driver's send, and `track()` moving prints along from printer

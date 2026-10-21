@@ -122,6 +122,10 @@ pub struct PrinterStatus {
     pub external: Vec<Tray>,
     /// Slot feeding the nozzle now (see [`Tray::slot`]).
     pub active_slot: Option<i64>,
+    /// The door (front door or top cover) is open; `None` when the printer
+    /// doesn't say. A door opened and closed after a print is the sign
+    /// someone cleared the bed (src/dispatch.rs).
+    pub door_open: Option<bool>,
 }
 
 impl PrinterStatus {

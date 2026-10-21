@@ -138,13 +138,60 @@ async fn tick(state: &Arc<AppState>) {
     }
 }
 
-/// Run the dispatcher: on every poke, and every 15 s.
+/// What the last report of each printer said, for spotting changes.
+type Seen = HashMap<String, (Option<bool>, Option<String>)>;
+
+/// Signs, in a printer's reports, that someone cleared its bed: the door
+/// closed after being open (the person reached in), or a Prusa set to
+/// READY on its screen. Each counts as "the bed is clear" from then on;
+/// a door cycle during a print doesn't, as the print ends after it.
+fn watch(state: &AppState, status: &crate::printer::status::PrinterStatus, seen: &mut Seen) -> bool {
+    let now = (status.door_open, status.vendor_state.clone());
+    let Some((door, vendor)) = seen.insert(status.printer_id.clone(), now) else { return false };
+    let closed = door == Some(true) && status.door_open == Some(false);
+    let ready = vendor.as_deref() != Some("READY") && status.vendor_state.as_deref() == Some("READY");
+    if !(closed || ready) {
+        return false;
+    }
+    state.db.set_bed_clear(&status.printer_id, true);
+    if let Some(p) = state.db.get_printer(&status.printer_id) {
+        println!("Dispatch: {} {}: the bed counts as clear", p.name, if closed { "door opened and closed" } else { "set to READY" });
+    }
+    true
+}
+
+/// Run the dispatcher: on every poke, every printer report (doors), and
+/// every 15 s.
 pub async fn run(state: Arc<AppState>) {
+    let mut events = state.printers.subscribe();
+    let mut seen = Seen::new();
+    for s in state.printers.statuses() {
+        watch(&state, &s, &mut seen);
+    }
     loop {
         tick(&state).await;
-        tokio::select! {
-            _ = wake().notified() => {}
-            _ = tokio::time::sleep(Duration::from_secs(15)) => {}
+        loop {
+            tokio::select! {
+                _ = wake().notified() => break,
+                _ = tokio::time::sleep(Duration::from_secs(15)) => break,
+                event = events.recv() => match event {
+                    Ok(status) => {
+                        if watch(&state, &status, &mut seen) {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        for s in state.printers.statuses() {
+                            watch(&state, &s, &mut seen);
+                        }
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        tokio::time::sleep(Duration::from_secs(15)).await;
+                        break;
+                    }
+                },
+            }
         }
     }
 }
@@ -166,7 +213,19 @@ pub fn view(state: &AppState, printer_id: &str) -> Value {
         "set_at": d.set_at,
         "bed_clear_at": d.bed_clear_at,
         "waiting_for": waiting_for(state, &d),
+        // How the printer can say its bed was cleared: "door" (opened and
+        // closed), "ready" (set READY on its screen), else only the button.
+        "clear_signal": clear_signal(state, printer_id),
     })
+}
+
+/// How a printer tells us its bed was cleared, when it can.
+fn clear_signal(state: &AppState, printer_id: &str) -> Option<&'static str> {
+    let printer = state.db.get_printer(printer_id)?;
+    if state.printers.status(printer_id).is_some_and(|s| s.door_open.is_some()) {
+        return Some("door");
+    }
+    (crate::printer::protocol_of(&printer) == Some(crate::printer::Protocol::PrusaLink)).then_some("ready")
 }
 
 #[derive(Deserialize)]

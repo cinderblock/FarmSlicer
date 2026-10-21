@@ -105,6 +105,33 @@ l = await printsBecome(5);
 check(l.length === 5, "cleared: it goes on", JSON.stringify(l));
 await lastEnds();
 
+// ---- the door says the bed was cleared -----------------------------------------------------
+// A printer with a door switch: opening and closing the door after a print
+// counts as clearing the bed; nobody presses anything.
+const doorFake = await startFakeMoonraker({ printSeconds: 2, door: true });
+const doored = await addVoron(owner, doorFake, "Voron Door");
+r = await owner.post("/api/queue", { job_id: job, plate: 2, count: 2, printer_id: doored });
+check(r.status === 201, "two plates for the door printer", json(r));
+r = await owner.post(`/api/printers/${doored}/send-mode`, { mode: "confirm" });
+check(r.status === 200 && r.json.clear_signal === "door" && r.json.waiting_for === "bed", "it reports its door, and waits for the bed", json(r));
+const doorPrints = async () => (await owner.get(`/api/prints?printer=${doored}`)).json;
+doorFake.setDoor(true);
+await sleep(500);
+doorFake.setDoor(false);
+let dl = await until(owner, `/api/prints?printer=${doored}`, (x) => x?.length === 1);
+check(dl.length === 1, "door opened and closed: the next plate starts by itself", JSON.stringify(dl));
+await until(owner, `/api/prints/${dl[0].id}`, (x) => x?.status === "finished", 120);
+await sleep(2500);
+check((await doorPrints()).length === 1, "after it, nothing until the door moves again", "");
+doorFake.setDoor(true);
+await sleep(500);
+doorFake.setDoor(false);
+dl = await until(owner, `/api/prints?printer=${doored}`, (x) => x?.length === 2);
+check(dl.length === 2, "another door cycle: the next plate", JSON.stringify(dl));
+await until(owner, `/api/prints/${dl[0].id}`, (x) => x?.status === "finished", 120);
+await owner.post(`/api/printers/${doored}/send-mode`, { mode: "manual" });
+await doorFake.close();
+
 // ---- manual ------------------------------------------------------------------------------
 r = await owner.post(`/api/printers/${printer}/send-mode`, { mode: "manual" });
 check(r.status === 200 && r.json.send_mode === "manual", "back to manual", json(r));

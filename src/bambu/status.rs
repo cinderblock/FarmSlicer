@@ -184,6 +184,26 @@ pub fn summarize(
         external,
         // 255 = nothing loaded.
         active_slot: int(&r["ams"]["tray_now"]).filter(|&s| s != 255),
+        // Set by the link, which knows the model (`door_open`).
+        door_open: None,
+    }
+}
+
+/// The door, for models that report it, by serial prefix: X1 / X1C / X1E
+/// in bit 23 of `home_flag` (a signed integer), H2 and P2S models in bit 23
+/// of `stat` (a hex string); P1 and A1 have no door sensor. (As the Home
+/// Assistant integration reads them: ha-bambulab `pybambu/models.py`.)
+pub fn door_open(report: &Value, serial: &str) -> Option<bool> {
+    const DOOR: i64 = 0x0080_0000;
+    let prefix = serial.get(..3)?;
+    match prefix {
+        // X1C, X1E.
+        "00M" | "03W" => int(&report["home_flag"]).map(|f| f & DOOR != 0),
+        // H2D, H2S, P2S and the H2 family's newer members.
+        "093" | "094" | "22E" | "239" | "31B" => text(&report["stat"])
+            .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .map(|f| f & DOOR != 0),
+        _ => None,
     }
 }
 
@@ -262,6 +282,20 @@ pub fn status_push(message: &Value) -> Option<&Map<String, Value>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doors_by_model() {
+        // Values seen from real printers (ha-bambulab's examples).
+        let x1 = |flag: i64| json!({ "home_flag": flag });
+        assert_eq!(door_open(&x1(-1066934785), "00M09A381800803"), Some(false));
+        assert_eq!(door_open(&x1(-1058546177), "00M09A381800803"), Some(true));
+        let h2 = |stat: &str| json!({ "stat": stat });
+        assert_eq!(door_open(&h2("46258008"), "0948AD550300669"), Some(false));
+        assert_eq!(door_open(&h2("46A58008"), "0948AD550300669"), Some(true));
+        // P1S / A1: no door sensor, whatever the flags say.
+        assert_eq!(door_open(&x1(-1058546177), "01P00A000000000"), None);
+        assert_eq!(door_open(&json!({}), "00M09A381800803"), None);
+    }
     use serde_json::json;
 
     #[test]
