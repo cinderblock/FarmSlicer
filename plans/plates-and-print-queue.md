@@ -1,6 +1,6 @@
 # Plates and print queues: demand (projects) and supply (printers)
 
-Status: all seven steps built and committed (2026-10-20); step 1 pushed, steps 2-7 local (`9b93c0e`..`903f27d`), not pushed, not deployed. Started 2026-10-20.
+Status: steps 1-8 built, pushed (`a20a800`) and deployed 2026-10-21 (ops `3de43e35`, image `sha256:38c5fc68...`, healthy on the build host). Left: checks on real printers (see the progress log). Started 2026-10-20.
 
 ## Goal
 
@@ -394,8 +394,14 @@ findings): built 2026-10-20.
 - [x] Step 1: several plates per job: slicer core, both engines, server,
   sending plates of projects to other firmware, viewer tabs, Slice result
   tabs, tests (e2e, `smoke.mjs --plates` in CI), docs.
+- [x] Step 8: hands-off dispatch (door cycle / Prusa READY = bed cleared,
+  refused starts go back to the queue), YOLO goes on after failures,
+  integration keys allowed from outside per key (`8199c57`, `a20a800`).
+- [x] Pushed and deployed 2026-10-21 (CI run 39533128286, ops deploy run
+  39534684133).
 - [ ] Not on hardware yet: a real print of plate 2 of a multi-plate job
-  (Bambu and a Klipper printer).
+  (Bambu and a Klipper printer); the door bits on a real X1C and H2D; a
+  Bambu start on an uncleared bed; auto-plated jobs on a printer.
 - [x] Step 2: print outcomes: lines per print (plate_json by model,
   uploads' slice_info objects), `POST /api/prints/{id}/outcome`,
   automatic failed records for prints that started, `finished_outcome`
