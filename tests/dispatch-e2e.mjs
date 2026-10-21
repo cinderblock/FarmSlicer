@@ -3,7 +3,7 @@
 // (src/dispatch.rs) on a fake Klipper printer: `confirm` waits for someone
 // to say the bed is clear before each plate; `yolo` (only when
 // acknowledged) sends the next plate as soon as the last one finished,
-// and stops after a failure until the bed is cleared; `manual` sends
+// even after a stopped print (the printer checks its bed); `manual` sends
 // nothing; only admins and operators choose.
 //
 //   node tests/dispatch-e2e.mjs http://localhost:9337
@@ -96,14 +96,11 @@ r = await owner.post(`/api/prints/${fourth}/control`, { action: "stop" });
 check(r.status === 200, "stop it while it prints", json(r));
 p = await until(owner, `/api/prints/${fourth}`, (x) => x?.status === "cancelled");
 check(p.status === "cancelled", "it ends cancelled", JSON.stringify(p));
-await sleep(2500);
-l = await prints();
 const d = await dispatchOf();
-check(l.length === 4 && d.waiting_for === "bed", "after a stopped print, YOLO waits for the bed", JSON.stringify({ n: l.length, d }));
-await owner.post(`/api/printers/${printer}/bed-clear`);
+check(d.waiting_for === null, "after a stopped print YOLO doesn't wait (the printer checks its bed)", JSON.stringify(d));
 l = await printsBecome(5);
-check(l.length === 5, "cleared: it goes on", JSON.stringify(l));
-await lastEnds();
+check(l.length === 5, "it goes on with the next plate", JSON.stringify(l));
+await until(owner, `/api/prints/${l[0].id}`, (x) => x?.status === "finished", 120);
 
 // ---- the door says the bed was cleared -----------------------------------------------------
 // A printer with a door switch: opening and closing the door after a print

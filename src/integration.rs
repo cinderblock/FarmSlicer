@@ -130,6 +130,7 @@ fn key_json(state: &AppState, tree: &Tree, key: &crate::db::ApiKey) -> Value {
         "group_name": scope.group_id.as_deref().map(|g| tree.display_path(g)),
         "client_ref": scope.client_ref,
         "permissions": scope.permissions,
+        "remote": state.db.api_key_is_remote(&key.id),
     })
 }
 
@@ -206,6 +207,31 @@ async fn create_key(
     );
     println!("Integration key {} ({name}): made by {}", record.id, user.username);
     Ok((StatusCode::CREATED, Json(json!({"key": key, "api_key": key_json(&state, &tree, &record)}))))
+}
+
+#[derive(Deserialize)]
+struct RemoteBody {
+    allowed: bool,
+}
+
+/// `POST /api/integrations/keys/{id}/remote` (admins): let the key in from
+/// outside the network (still only to its scoped routes), or stop.
+async fn set_remote(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Extension(KeyScope(caller)): Extension<KeyScope>,
+    Path(id): Path<String>,
+    Json(body): Json<RemoteBody>,
+) -> Result<Json<Value>, ApiError> {
+    if caller.is_some() {
+        return Err(api_err(StatusCode::FORBIDDEN, "integration keys can't change keys"));
+    }
+    auth::require_admin(&user)?;
+    let key = state.db.get_api_key(&id).filter(|k| k.scope.is_some()).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such key"))?;
+    state.db.set_api_key_remote(&id, body.allowed);
+    println!("Integration key {} ({}): {} by {}", key.id, key.name, if body.allowed { "allowed from outside" } else { "local network only" }, user.username);
+    let (tree, _) = groups_api::context(&state, &user);
+    Ok(Json(key_json(&state, &tree, &state.db.get_api_key(&id).expect("key exists"))))
 }
 
 async fn delete_key(
@@ -436,6 +462,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/integrations/keys", get(list_keys).post(create_key))
         .route("/api/integrations/keys/{id}", axum::routing::delete(delete_key))
+        .route("/api/integrations/keys/{id}/remote", axum::routing::post(set_remote))
         .route("/api/usage/prints", get(usage))
 }
 

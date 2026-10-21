@@ -133,16 +133,12 @@ Plate (bridge)                a sliced job plate holding k copies of one or more
 
 (1–5 answered 2026-10-20; folded into the decisions above.)
 
-6. **Integration keys from the internet.** Every API key is LAN-only
-   (`auth::authenticate`), integration keys included, so ordering software
-   outside the network can't reach FarmSlicer yet. Options: keep it so
-   (a tool on the LAN relays), or let an admin mark one integration key
-   as allowed from outside (only its scoped routes). Recommendation: the
-   per-key opt-in, off by default; it's a security change, so it waits
-   for your yes.
-7. **YOLO after a failure** waits for someone to clear the bed (my call,
-   see Findings). Say if YOLO should carry on regardless.
-8. **Push and deploy** steps 2-7: waiting for your go-ahead.
+6. Integration keys from the internet: answered 2026-10-20 ("sure"):
+   per-key opt-in by an admin, off by default, scoped routes only. Built.
+7. YOLO after a failure: answered 2026-10-20 ("yes"): it carries on (the
+   printer checks its bed); only after a start the printer refused does
+   it wait for the bed. Built.
+8. Push and deploy: answered 2026-10-20 ("yes" to both).
 
 ## Plan / steps (draft order, revise once questions are answered)
 

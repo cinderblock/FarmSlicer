@@ -573,6 +573,17 @@ pub fn bed_not_ready(print_error: i64) -> bool {
     CODES.contains(&print_error)
 }
 
+/// Did a print end because the printer refused to start on a bed that
+/// wasn't ready? (Its error as `transition` writes it: "printer error
+/// XXXX_YYYY...".)
+pub fn refused_start(error: Option<&str>) -> bool {
+    error
+        .and_then(|e| e.strip_prefix("printer error "))
+        .and_then(|e| e.get(..9))
+        .and_then(|code| i64::from_str_radix(&code.replace('_', ""), 16).ok())
+        .is_some_and(bed_not_ready)
+}
+
 fn apply(state: &AppState, status: &PrinterStatus) {
     for print in state.db.list_prints(Some(&status.printer_id), true, 20) {
         // The background task owns uploads.
@@ -857,6 +868,9 @@ mod tests {
         assert!(bed_not_ready(0x0300_404B), "door open at the start");
         assert!(bed_not_ready(0x0C00_8017), "foreign objects on the plate");
         assert!(!bed_not_ready(0x0500_4038), "a real failure");
+        assert!(refused_start(Some("printer error 0300_404B: the front door is open")));
+        assert!(!refused_start(Some("printer error 0500_4038")));
+        assert!(!refused_start(Some("the upload was interrupted")));
     }
 
     #[test]

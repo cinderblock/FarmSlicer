@@ -48,7 +48,7 @@ export default function QueuePage() {
     }
   };
   const setMode = (printerId: string, name: string, mode: string) => {
-    if (mode === "yolo" && !window.confirm(`YOLO: ${name} will start the next plate as soon as it is free, with nobody checking the bed. Only for printers that clear their own bed (or when you accept the risk). After a failed print it waits for you.`)) return;
+    if (mode === "yolo" && !window.confirm(`YOLO: ${name} will start the next plate as soon as it is free, with nobody checking the bed. Only for printers that clear their own bed, or when you accept the risk; it goes on after failed prints too (printers that check their bed refuse to start on a cluttered one, and then it waits for you).`)) return;
     act(printerId, () => apiJson(`/api/printers/${printerId}/send-mode`, "POST", { mode, acknowledge: mode === "yolo" }));
   };
   const bedClear = (printerId: string) => act(printerId, () => apiJson(`/api/printers/${printerId}/bed-clear`, "POST", {}));

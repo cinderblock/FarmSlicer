@@ -113,6 +113,31 @@ keyWan.bearer = key;
 r = await keyWan.get("/api/me");
 check(r.status === 403 && r.json?.remote_denied === true, "the API key is refused from the internet", `${r.status} ${JSON.stringify(r.json)}`);
 
+// An integration key: refused outside until an admin lets it out, then
+// only to its projects (src/integration.rs).
+r = await owner.post("/api/groups", { name: "Shop", description: "orders" });
+const shop = r.json.id;
+r = await owner.post("/api/integrations/keys", { name: "Shop orders", group_id: shop, permissions: ["projects:write"] });
+check(r.status === 201 && r.json.api_key.remote === false, "an integration key starts local only", JSON.stringify(r.json));
+const shopKey = wan();
+shopKey.bearer = r.json.key;
+const shopKeyId = r.json.api_key.id;
+r = await shopKey.get("/api/projects");
+check(r.status === 403 && r.json?.remote_denied === true, "it is refused from the internet", `${r.status} ${JSON.stringify(r.json)}`);
+r = await aliceLan.post(`/api/integrations/keys/${shopKeyId}/remote`, { allowed: true });
+check(r.status === 403 || r.status === 404, "only admins let keys out", `${r.status} ${JSON.stringify(r.json)}`);
+r = await owner.post(`/api/integrations/keys/${shopKeyId}/remote`, { allowed: true });
+check(r.status === 200 && r.json.remote === true, "the owner lets it in from outside", JSON.stringify(r.json));
+r = await shopKey.get("/api/projects");
+check(r.status === 200, "now it works from the internet", `${r.status} ${JSON.stringify(r.json)}`);
+r = await shopKey.get("/api/printers");
+check(r.status === 403, "still only its scoped routes", `${r.status} ${JSON.stringify(r.json)}`);
+r = await keyWan.get("/api/me");
+check(r.status === 403, "personal keys stay local only", `${r.status} ${JSON.stringify(r.json)}`);
+r = await owner.post(`/api/integrations/keys/${shopKeyId}/remote`, { allowed: false });
+r = await shopKey.get("/api/projects");
+check(r.status === 403, "and it can be taken back", `${r.status} ${JSON.stringify(r.json)}`);
+
 // A session made with a recovery code (on the LAN) doesn't count outside.
 const recovered = lan();
 r = await register(

@@ -341,15 +341,18 @@ what the printers do next (the queue).
   print's outcome); a start the printer refuses because its bed wasn't
   ready (objects detected, no plate, door open) puts the plate back in
   the queue, it isn't counted as failed; *YOLO* (the next plate goes out as soon as
-  the printer is free and its last print finished, nobody asked; marked
-  on the printer card; after a failed print it waits for the bed). Sends
+  the printer is free, nobody asked; marked
+  on the printer card; it goes on after failed prints too, as printers
+  that check their bed refuse to start on one that isn't clear, and only
+  after such a refusal it waits for the bed). Sends
   go out as whoever chose the mode, through the usual checks; a plate
   they refuse is skipped for ten minutes.
 - **Integrations** (Integrations page): keys for ordering software reach
   one group's projects (optionally one client's: `client_ref`), with
   `projects:read`, `projects:write` (create projects, upload sliced
   files, set fulfillment status) and `usage:read`, and nothing else
-  (not printers, not the queue); LAN only, like every API key. Webhooks
+  (not printers, not the queue); LAN only unless an admin lets that key
+  in from outside (Integrations page; personal keys never are). Webhooks
   POST signed events (`print.started`, `print.finished`, `print.failed`,
   `print.outcome`, `item.completed`, `project.printed`,
   `project.status`): `X-FarmSlicer-Signature: sha256=<hex>` is the
@@ -466,7 +469,7 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/pools`, `PATCH/DELETE /api/pools/{id}` | printer pools (admins; operators see their own): `{name, printer_ids, operator_ids, settings: {mixing: none\|group\|any}}` |
 | `POST /api/projects/{id}/autoplate`, `POST /api/queue/autoplate` | plates for missing copies (`{items, spacing}`; farm-wide `{pool_id, spacing}`: admins, operators): `{jobs: [{job_id, plates, copies, projects, queued}], skipped}` |
 | `POST /api/printers/{id}/send-mode`, `POST /api/printers/{id}/bed-clear` | how a printer takes the queue (`{mode: manual\|confirm\|yolo, acknowledge}`; YOLO needs `acknowledge: true`); the bed is clear. Printers carry `dispatch` (`send_mode`, `waiting_for: "bed"`) |
-| `GET/POST /api/integrations/keys`, `DELETE /api/integrations/keys/{id}` | integration keys (admins; managers for their groups): `{name, group_id, client_ref, permissions: [projects:read, projects:write, usage:read]}`, the key returned once |
+| `GET/POST /api/integrations/keys`, `DELETE /api/integrations/keys/{id}`, `POST /api/integrations/keys/{id}/remote` | integration keys (admins; managers for their groups): `{name, group_id, client_ref, permissions: [projects:read, projects:write, usage:read]}`, the key returned once; `remote: {allowed}` (admins) lets one be used from the internet, still only to its scoped routes |
 | `GET/POST /api/integrations/webhooks`, `PATCH/DELETE /api/integrations/webhooks/{id}`, `GET …/{id}/deliveries`, `POST …/{id}/test`, `POST /api/integrations/deliveries/{id}/retry` | webhooks (admins): `{url, events: ["*"] \| [...], group_id, description, enabled, rotate_secret}` (the secret returned once), their delivery log |
 | `GET /api/usage/prints?group=&client_ref=&project=&from=&to=` | what prints that ended in the period used, per project and in total: prints, printer hours, grams by material, good/failed copies, estimated cost (admins, a group's managers, keys with `usage:read`) |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |

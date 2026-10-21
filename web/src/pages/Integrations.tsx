@@ -18,6 +18,8 @@ interface IntegrationKey {
   group_name: string | null;
   client_ref: string | null;
   permissions: string[];
+  /** An admin let it in from outside the local network. */
+  remote: boolean;
 }
 
 interface Webhook {
@@ -118,6 +120,15 @@ function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boo
       setError(errorText(e));
     }
   };
+  const setRemote = async (k: IntegrationKey, allowed: boolean) => {
+    if (allowed && !window.confirm(`Let ${k.name} be used from the internet? Anyone holding the key can then reach its projects${k.permissions.includes("usage:read") ? " and usage" : ""} from anywhere.`)) return;
+    try {
+      await apiJson(`/api/integrations/keys/${k.id}/remote`, "POST", { allowed });
+      setRev((x) => x + 1);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
   const toggle = (p: string) =>
     setForm((f) => ({ ...f, permissions: f.permissions.includes(p) ? f.permissions.filter((x) => x !== p) : [...f.permissions, p] }));
 
@@ -125,7 +136,8 @@ function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boo
     <>
       <p className="hint">
         A key reaches one group's projects (and, with a client reference, only that client's), creates them and follows
-        their progress; it can't touch printers, the queue or anything else. Keys work on the local network only.
+        their progress; it can't touch printers, the queue or anything else. Keys work on the local network unless an
+        admin lets one in from outside (still only to its projects and usage).
       </p>
       {keys && keys.length > 0 && (
         <table className="data-table cards">
@@ -135,6 +147,7 @@ function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boo
               <th>Reaches</th>
               <th>May</th>
               <th>Last used</th>
+              <th>From outside</th>
               <th></th>
             </tr>
           </thead>
@@ -153,6 +166,23 @@ function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boo
                 </td>
                 <td data-label="May">{k.permissions.join(", ")}</td>
                 <td data-label="Last used">{localDateTime(k.last_used)}</td>
+                <td data-label="From outside">
+                  {isAdmin ? (
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={k.remote}
+                        aria-label={`Let ${k.name} in from outside the network`}
+                        onChange={() => setRemote(k, !k.remote)}
+                      />
+                      {k.remote ? "Allowed" : "Local only"}
+                    </label>
+                  ) : k.remote ? (
+                    "Allowed"
+                  ) : (
+                    "Local only"
+                  )}
+                </td>
                 <td className="cell-actions">
                   <button className="btn-sm btn-danger" onClick={() => revoke(k)}>
                     Revoke

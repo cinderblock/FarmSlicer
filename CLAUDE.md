@@ -280,8 +280,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   yolo, `set_by`, `bed_clear_at`): `ready()` (pure, tested) decides,
   `run` ticks every 15 s and on `poke` (queue changes, prints ending),
   sends through `queue_api::send_entry` as the mode setter, skips refused
-  plates for 10 min (in memory). YOLO stops after a failed/stopped print
-  until the bed is cleared. The bed counts as cleared (`watch`, on every
+  plates for 10 min (in memory). YOLO goes on after failed prints (the
+  printer checks its bed), but after a start the printer refused
+  (`printing::refused_start`) it waits for the bed. The bed counts as cleared (`watch`, on every
   printer report) when `PrinterStatus.door_open` goes open → closed
   (Bambu: `bambu::status::door_open` by serial prefix, `home_flag` /
   `stat` bit 23; Klipper: a `gcode_button`/`filament_switch_sensor` named
@@ -468,7 +469,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   "remote" (fail closed). `auth::remote_gate` limits the public routes to
   health, status, passkey login/logout and invites; `auth::authenticate`
   accepts from the internet only `sessions.method = 'passkey'` sessions of
-  full accounts with `users.remote_access`, never API keys. Every
+  full accounts with `users.remote_access`, and API keys only when they
+  are integration keys an admin let out (`api_keys.remote`, scoped routes
+  only via `integration::allows`), never personal keys. Every
   `start_session` call names its method (`auth::VIA_*`). The proxy (ops
   Caddy) must be updated only after an app that knows the header is live.
 - Groups (`src/groups.rs`): a tree; direct memberships (`member`/`manager`,

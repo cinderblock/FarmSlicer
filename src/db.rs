@@ -475,6 +475,10 @@ impl Db {
         if conn.prepare("SELECT scope FROM api_keys LIMIT 0").is_err() {
             conn.execute_batch("ALTER TABLE api_keys ADD COLUMN scope TEXT;").ok();
         }
+        // An admin let this integration key in from outside the network.
+        if conn.prepare("SELECT remote FROM api_keys LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE api_keys ADD COLUMN remote INTEGER NOT NULL DEFAULT 0;").ok();
+        }
 
         // Groups (see src/groups.rs): a tree; members, join links, and
         // site-wide runtime settings. Settings and quotas are JSON.
@@ -1084,6 +1088,31 @@ impl Db {
     pub fn delete_api_key_by_id(&self, id: &str) -> bool {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM api_keys WHERE id = ?1", params![id]).unwrap_or(0) > 0
+    }
+
+    /// May the key with this hash be used from outside the network? Only an
+    /// integration key (with a scope) an admin allowed.
+    pub fn api_key_remote(&self, key_hash: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT remote FROM api_keys WHERE key_hash = ?1 AND scope IS NOT NULL",
+            params![key_hash],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
+    }
+
+    pub fn api_key_is_remote(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT remote FROM api_keys WHERE id = ?1", params![id], |r| r.get::<_, bool>(0))
+            .unwrap_or(false)
+    }
+
+    pub fn set_api_key_remote(&self, id: &str, remote: bool) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE api_keys SET remote = ?2 WHERE id = ?1 AND scope IS NOT NULL", params![id, remote])
+            .unwrap_or(0)
+            > 0
     }
 
     /// The scope of the key with this hash (None: unscoped or unknown).

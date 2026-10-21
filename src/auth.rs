@@ -408,8 +408,10 @@ pub fn authenticate(state: &AppState, req: &Request) -> Result<User, Refusal> {
         }
     }
     if let Some(key) = bearer_from_request(req) {
-        if remote {
-            return Err(Refusal::Remote("API keys only work on the local network"));
+        // From the internet only integration keys an admin let out, and
+        // only to their scoped routes (integration::allows).
+        if remote && !state.db.api_key_remote(&sha256_hex(&key)) {
+            return Err(Refusal::Remote("API keys only work on the local network (an admin can let an integration key in from outside)"));
         }
         if let Some(user) = state.db.api_key_user(&sha256_hex(&key)) {
             return Ok(user);

@@ -5,11 +5,11 @@
 //! - `confirm`: when the printer is free and someone has said its bed is
 //!   clear since its last print (the Queue page, or "the bed is clear" with
 //!   a print's outcome), the next plate that fits goes out.
-//! - `yolo`: the next plate goes out as soon as the printer is free and its
-//!   last print finished, with no confirmation (auto-ejecting and belt
-//!   printers, or an operator who accepts the risk). After a print that
-//!   failed or was stopped it waits for someone to clear the bed, so a new
-//!   plate never lands on a failed one.
+//! - `yolo`: the next plate goes out as soon as the printer is free, with
+//!   no confirmation (auto-ejecting and belt printers, or an operator who
+//!   accepts the risk), after failed prints too: printers that check their
+//!   bed refuse to start on one that isn't clear. After such a refusal it
+//!   waits for the bed, so it never retries in a loop.
 //!
 //! The queue's sends go out as whoever set the mode (an admin or an
 //! operator of the printer), through the same checks as any send; a plate
@@ -68,7 +68,7 @@ pub fn waiting_for(state: &AppState, d: &Dispatch) -> Option<&'static str> {
     let last = state.db.list_prints(Some(&d.printer_id), false, 1).into_iter().next();
     let ready = ready(
         &d.send_mode,
-        last.as_ref().map(|p| p.status.as_str()),
+        last.as_ref().is_some_and(|p| p.status == "failed" && crate::printing::refused_start(p.error.as_deref())),
         last.as_ref().and_then(|p| p.finished_at.as_deref()),
         d.bed_clear_at.as_deref(),
     );
@@ -78,14 +78,16 @@ pub fn waiting_for(state: &AppState, d: &Dispatch) -> Option<&'static str> {
 /// May a printer in `mode` take a plate, its last print having ended as
 /// `last` at `ended_at` (None: it has never printed) and the bed last said
 /// clear at `cleared_at`? (Times in the database's sortable format.)
-pub fn ready(mode: &str, last: Option<&str>, ended_at: Option<&str>, cleared_at: Option<&str>) -> bool {
+pub fn ready(mode: &str, refused: bool, ended_at: Option<&str>, cleared_at: Option<&str>) -> bool {
     let cleared_since_last = match (cleared_at, ended_at) {
         (Some(c), Some(e)) => c >= e,
         (Some(_), None) => true,
         (None, _) => false,
     };
     match mode {
-        "yolo" => matches!(last, None | Some("finished")) || cleared_since_last,
+        // On whatever the last print left (the printer checks the bed and
+        // refuses when it must), except after such a refusal.
+        "yolo" => !refused || cleared_since_last,
         "confirm" => cleared_since_last,
         _ => false,
     }
@@ -272,7 +274,8 @@ fn auth_less(user: &crate::db::User) -> bool {
 }
 
 /// `POST /api/printers/{id}/bed-clear`: the bed is clear; a printer in
-/// `confirm` mode (or `yolo` after a failure) takes the next plate.
+/// `confirm` mode (or `yolo` after the printer refused a start) takes the
+/// next plate.
 async fn bed_clear(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -306,23 +309,23 @@ mod tests {
 
     #[test]
     fn confirm_waits_for_the_bed() {
-        assert!(!ready("confirm", None, None, None), "even a new printer needs a yes");
-        assert!(ready("confirm", None, None, Some("2026-10-20 10:00:00")));
-        assert!(!ready("confirm", Some("finished"), Some("2026-10-20 11:00:00"), Some("2026-10-20 10:00:00")), "cleared before the last print");
-        assert!(ready("confirm", Some("finished"), Some("2026-10-20 11:00:00"), Some("2026-10-20 11:05:00")));
+        assert!(!ready("confirm", false, None, None), "even a new printer needs a yes");
+        assert!(ready("confirm", false, None, Some("2026-10-20 10:00:00")));
+        assert!(!ready("confirm", false, Some("2026-10-20 11:00:00"), Some("2026-10-20 10:00:00")), "cleared before the last print");
+        assert!(ready("confirm", false, Some("2026-10-20 11:00:00"), Some("2026-10-20 11:05:00")));
     }
 
     #[test]
-    fn yolo_stops_after_a_failure() {
-        assert!(ready("yolo", None, None, None));
-        assert!(ready("yolo", Some("finished"), Some("2026-10-20 11:00:00"), None));
-        assert!(!ready("yolo", Some("failed"), Some("2026-10-20 11:00:00"), None));
-        assert!(!ready("yolo", Some("cancelled"), Some("2026-10-20 11:00:00"), Some("2026-10-20 10:00:00")));
-        assert!(ready("yolo", Some("failed"), Some("2026-10-20 11:00:00"), Some("2026-10-20 11:01:00")));
+    fn yolo_goes_on_unless_the_printer_refused() {
+        assert!(ready("yolo", false, None, None));
+        assert!(ready("yolo", false, Some("2026-10-20 11:00:00"), None), "after a print, failed or not");
+        assert!(!ready("yolo", true, Some("2026-10-20 11:00:00"), None), "the printer said the bed wasn't ready");
+        assert!(!ready("yolo", true, Some("2026-10-20 11:00:00"), Some("2026-10-20 10:00:00")));
+        assert!(ready("yolo", true, Some("2026-10-20 11:00:00"), Some("2026-10-20 11:01:00")), "until it's cleared");
     }
 
     #[test]
     fn manual_never_sends() {
-        assert!(!ready("manual", None, None, Some("2026-10-20 11:01:00")));
+        assert!(!ready("manual", false, None, Some("2026-10-20 11:01:00")));
     }
 }
