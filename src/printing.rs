@@ -245,9 +245,19 @@ pub fn send_problems(plate: &Plate, printer: &Printer, mapping: &[i64], status: 
     problems
 }
 
+/// External spool holders' slots.
+fn is_external(slot: i64) -> bool {
+    slot == 254 || slot == 255
+}
+
 /// A tray for each filament the plate uses: same material, nearest colour,
 /// each tray used once while unused ones remain. Index = filament id - 1;
 /// -1 = not used by this plate (or nothing suitable is loaded).
+///
+/// An external spool only when no unused AMS tray fits: Bambu printers keep
+/// reporting the external spool's last filament type with nothing loaded,
+/// and a print mapped to an empty holder stops asking for filament
+/// (07FF_2000_0002_0002, "External filament is missing").
 pub fn suggest_mapping(plate: &Plate, status: Option<&PrinterStatus>) -> Vec<i64> {
     let len = plate.filaments.iter().map(|f| f.id as usize).max().unwrap_or(0);
     let mut mapping = vec![-1i64; len];
@@ -262,8 +272,10 @@ pub fn suggest_mapping(plate: &Plate, status: Option<&PrinterStatus>) -> Vec<i64
         });
         let best = candidates
             .map(|t| {
+                // Colour distances stay below 1e3.
+                let external_penalty = if is_external(t.slot) { 1e3 } else { 0.0 };
                 let reuse_penalty = if used.contains(&t.slot) { 1e6 } else { 0.0 };
-                (t.slot, color_distance(&f.color, t.color.as_deref().unwrap_or("")) + reuse_penalty)
+                (t.slot, color_distance(&f.color, t.color.as_deref().unwrap_or("")) + external_penalty + reuse_penalty)
             })
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((slot, _)) = best {
@@ -735,6 +747,27 @@ mod tests {
         let problems = check_mapping(&p, &m, Some(&s));
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(problems[0].contains("ABS"));
+    }
+
+    #[test]
+    fn mapping_prefers_the_ams_to_the_external_spool() {
+        // An X1C that reports grey PLA on its empty external holder: green
+        // PLA is nearer grey than the AMS's white, but goes to the AMS.
+        let mut s = status_with(vec![
+            tray(0, "PLA", "#FFFFFF"),
+            tray(1, "PETG", "#000000"),
+            tray(2, "PLA-S", "#FFFFFF"),
+        ]);
+        s.external = vec![tray(255, "PLA", "#8E9089")];
+        let p = plate(vec![(1, "PLA", "#00AE42"), (2, "PLA-S", "#FFFF00")]);
+        assert_eq!(suggest_mapping(&p, Some(&s)), vec![0, 2]);
+        // A second PLA: the external spool before sharing the AMS's tray.
+        let p = plate(vec![(1, "PLA", "#00AE42"), (2, "PLA", "#FFFFFF")]);
+        assert_eq!(suggest_mapping(&p, Some(&s)), vec![0, 255]);
+        // Nothing in the AMS: the external spool.
+        let p = plate(vec![(1, "PETG", "#000000"), (2, "PLA", "#00AE42")]);
+        s.ams.clear();
+        assert_eq!(suggest_mapping(&p, Some(&s)), vec![-1, 255]);
     }
 
     #[test]
