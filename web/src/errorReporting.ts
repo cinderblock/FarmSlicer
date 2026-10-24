@@ -27,10 +27,10 @@
 // `/api/feedback` requests are never reported, and errors raised while it
 // is capturing are ignored.
 
-declare const __BUILD_VERSION__: string;
+import { BUILD_VERSION } from "./build";
 
-/** The web app's build, as the auto-refresh compares it. */
-export const BUILD_VERSION: string = __BUILD_VERSION__;
+/** The web app's build (its commit): what reports carry as their version. */
+export { BUILD_VERSION };
 
 export type Source = "window" | "promise" | "console" | "react" | "api" | "resource";
 

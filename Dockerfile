@@ -83,8 +83,11 @@ WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY web ./
+# The commit the web build names as its version (the context has no .git).
+# After the install so a new commit doesn't redo it.
+ARG GIT_SHA=""
 # vite.config.ts writes to ../dist/web
-RUN bun run build
+RUN GIT_SHA="${GIT_SHA}" bun run build
 
 # ---------------------------------------------------------------------------
 FROM cxx-base AS server

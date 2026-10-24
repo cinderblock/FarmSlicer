@@ -195,6 +195,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.licenses=AGPL-3.0-or-later
+          # The web app's version (version.json, error reports) is this commit.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           # Registry build cache: the deps and libslic3r stages take ~1 h cold
           # and only change when the submodule moves. GHA's cache is too small.
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
