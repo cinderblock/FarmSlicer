@@ -84,3 +84,14 @@ logs both: `FARMSLICER_REGEN_GCODE_DATA=1 BAMBUSTUDIO_PROFILES=...`).
 02.08.04.57's X2D template has the `;`. A multi-filament X2D plate from
 those releases would be blocked as "unreadable" by the G-code check. Why it
 matters: Bambu's own G-code must pass; no X2D in the farm yet.
+
+## The G-code check reads a third of a multi-filament H2D project's filament and time
+
+A Bambu Studio H2D project with 7 filaments (one plate, 6 copies,
+3.78M lines; uploaded 2026-10-23 5:14 PM PDT (00:14Z), since deleted)
+checked clean, but its stats said 110,463 s and 1,027 g where the
+package says 443,074 s and 2,351 g; per filament 0.35-0.5x (filament 1:
+212.7 g vs 601.2 g). Single-filament X1C uploads read about 0.83x
+(25,689 s vs 31,049 s). Why it matters: print rules (`max_minutes`) use
+`gcode::effective_time`, and grams feed costs; CLAUDE.md already notes
+multi-material H2D files hadn't been through the check.
