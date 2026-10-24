@@ -3373,6 +3373,267 @@ a.btn-sm {
   }
 }
 
+/* Recent slices (components/SliceHistory.tsx) */
+.slice-history {
+  flex-shrink: 0;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.slice-result-waiting .slice-history {
+  width: min(640px, 92%);
+}
+
+.slice-history summary {
+  cursor: pointer;
+}
+
+.slice-history ul {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 9.5rem;
+  overflow-y: auto;
+}
+
+.slice-history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 4px;
+}
+
+.slice-history-row.current {
+  background: rgba(74, 158, 255, 0.12);
+}
+
+.slice-history-row.compared {
+  background: rgba(61, 139, 253, 0.08);
+  box-shadow: inset 3px 0 0 #3d8bfd;
+}
+
+.slice-history-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.25rem 0.4rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slice-history-pick:disabled {
+  cursor: default;
+}
+
+.slice-history-pick:not(:disabled):hover {
+  color: var(--accent);
+}
+
+.slice-history-when {
+  flex-shrink: 0;
+  min-width: 5.5rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.slice-history-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slice-history-stats {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.slice-history-actions {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.slice-history-actions .btn-sm {
+  padding: 0.15rem 0.5rem;
+}
+
+.btn-sm.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(74, 158, 255, 0.15);
+}
+
+.slice-history-limits {
+  margin-top: 0.4rem;
+}
+
+.slice-history-limits input {
+  width: 4.5em;
+  padding: 0.1rem 0.3rem;
+}
+
+.slice-again {
+  margin-top: 0.4rem;
+}
+
+/* Two slices compared (components/preview/SliceCompare.tsx) */
+.cmp-a {
+  color: #f0a030;
+}
+
+.cmp-b {
+  color: #3d8bfd;
+}
+
+.cmp-side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  height: 100%;
+  /* The layer slider sits over the right pane's edge. */
+  padding-right: 6rem;
+}
+
+.cmp-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: #0d1117;
+}
+
+.cmp-pane-label {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(13, 17, 23, 0.8);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.cmp-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cmp-sides {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cmp-sides > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cmp-sides > .cmp-b {
+  text-align: right;
+}
+
+.cmp-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.cmp-numbers h4,
+.cmp-settings h4 {
+  margin: 0 0 0.4rem;
+}
+
+.cmp-numbers table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-numbers th,
+.cmp-numbers td {
+  padding: 0.15rem 0.25rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cmp-numbers th[scope="row"] {
+  text-align: left;
+  font-weight: normal;
+  white-space: normal;
+}
+
+.cmp-numbers tr.cmp-sub th[scope="row"] {
+  padding-left: 0.75rem;
+  color: var(--text-dim);
+}
+
+.cmp-numbers .cmp-more {
+  color: var(--warning);
+}
+
+.cmp-numbers .cmp-less {
+  color: var(--success);
+}
+
+.cmp-settings ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cmp-settings li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 0.4rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cmp-settings li .cmp-setting {
+  grid-column: 1 / -1;
+}
+
+.cmp-settings li .cmp-a,
+.cmp-settings li .cmp-b {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-settings li [aria-hidden] {
+  display: none;
+}
+
+.cmp-settings details {
+  margin-top: 0.4rem;
+}
+
+@media (max-width: 800px) {
+  .slice-history-when {
+    min-width: 0;
+  }
+
+  .slice-history-stats {
+    display: none;
+  }
+
+  .cmp-side-by-side {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+
 /* Job page (pages/Job.tsx) */
 .job-header {
   display: flex;

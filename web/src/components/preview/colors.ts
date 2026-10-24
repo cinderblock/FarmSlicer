@@ -63,6 +63,12 @@ export interface Gradient {
   max: number;
 }
 
+/** Two files' gradient ranges as one (null when the mode has none). */
+export function unionRange(a: Gradient | null, b: Gradient | null): Gradient | null {
+  if (!a || !b) return a ?? b;
+  return { min: Math.min(a.min, b.min), max: Math.max(a.max, b.max) };
+}
+
 /** The value range a gradient mode spreads its colours over. */
 export function gradientRange(p: ParsedGcode, mode: ColorMode): Gradient | null {
   if (mode === "speed") return { min: p.info.speedRange[0], max: p.info.speedRange[1] };
@@ -83,9 +89,10 @@ export function gradientRange(p: ParsedGcode, mode: ColorMode): Gradient | null 
 /**
  * Fill `out` ((count + 1) * 4 bytes): segment i's colour at (i + 1) * 4,
  * alpha = its feature index. The first entry is padding, so that in the line
- * renderer each segment's colour sits on its last point.
+ * renderer each segment's colour sits on its last point. Gradients spread
+ * over `range` when given (two files on one scale), else the file's own.
  */
-export function fillColors(out: Uint8Array, p: ParsedGcode, mode: ColorMode, filamentColors: string[]): void {
+export function fillColors(out: Uint8Array, p: ParsedGcode, mode: ColorMode, filamentColors: string[], range0?: Gradient): void {
   const { count, feature, tool, speed } = p.extrusions;
   out[0] = out[1] = out[2] = 0;
   out[3] = GAP;
@@ -105,7 +112,7 @@ export function fillColors(out: Uint8Array, p: ParsedGcode, mode: ColorMode, fil
     }
     return;
   }
-  const range = gradientRange(p, mode)!;
+  const range = range0 ?? gradientRange(p, mode)!;
   const span = range.max - range.min;
   const index = (v: number) => (span > 0 ? Math.max(0, Math.min(255, Math.round(((v - range.min) / span) * 255))) : 128);
   if (mode === "speed") {

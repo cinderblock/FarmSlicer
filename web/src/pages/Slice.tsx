@@ -23,7 +23,10 @@ import {
   type FilamentOption,
   type SupportMaterials,
 } from "../supports";
-import { loadLocalModel, saveLocalModel } from "../localModels";
+import { fileDigest, loadLocalModel, saveLocalModel } from "../localModels";
+import { deleteSlice, findSlice, putGcode, putSlice, updateSlice } from "../sliceCache";
+import { sha256Text, sliceKey, stableStringify, type SliceEntry, type SliceInputs } from "../sliceHistory";
+import { sliceTime, useSliceHistory } from "../useSliceHistory";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
 type ComputeMode = "auto" | "server" | "browser";
@@ -258,6 +261,10 @@ export default function SlicePage() {
   // (Preview: the layers, warnings, sending it).
   const [sliced, setSliced] = useState<{ jobId: string; gcode?: Uint8Array } | null>(null);
   const [view, setView] = useState<"prepare" | "preview">("prepare");
+  // The slices this browser remembers (sliceCache.ts), and the one the
+  // slice on screen is compared with.
+  const sliceEntries = useSliceHistory();
+  const [compareWith, setCompareWith] = useState<string | null>(null);
   const statuses = useJson<PrinterStatus[]>("/api/printers/status").data;
   // What the page chose by itself (for the defaults-changed report).
   const proposedPicks = useRef<{ process?: string; filament?: string }>({});
@@ -332,7 +339,7 @@ export default function SlicePage() {
   }, []);
 
   // Slicing a job again (/slice?from=<job>): its models, plate and choices.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fromJob = searchParams.get("from");
   const [initialPlate, setInitialPlate] = useState<{ key: string; files: File[]; plates: PlateLayout[] | null } | null>(null);
   const [reslice, setReslice] = useState<{ name: string; error?: string } | null>(null);
@@ -759,7 +766,90 @@ export default function SlicePage() {
     return formData;
   }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, projectChoice, newProjectName, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials]);
 
-  const sliceOnServer = useCallback(async () => {
+  // What a slice now would be made from (sliceHistory.ts): the job form's
+  // choices, the models by digest, the resolved profile, the dual-nozzle
+  // plan. Its digest finds the same slice in this browser's memory.
+  const sliceInputs = useCallback(
+    async (): Promise<SliceInputs> => ({
+      machine: resolvedMachine,
+      process,
+      filaments: filament ? supportPlan.filaments : [],
+      bed_type: plate,
+      color,
+      overrides: jobOverrides,
+      printer_id: printerId,
+      routing,
+      group_id: groupId,
+      plates: layout?.plates ?? [],
+      models: await Promise.all(modelFiles.map(async (f) => ({ name: f.name, sha256: await fileDigest(f) }))),
+      profile: resolvedConfig ? await sha256Text(stableStringify(resolvedConfig)) : "",
+      nozzle_plan: dualNozzle ? nozzlePlan : null,
+    }),
+    [resolvedMachine, process, filament, supportPlan, plate, color, jobOverrides, printerId, routing, groupId, layout, modelFiles, resolvedConfig, dualNozzle, nozzlePlan],
+  );
+  // The remembered slice of exactly this (for the project chosen), if any:
+  // Slice then shows it instead of slicing again.
+  const [remembered, setRemembered] = useState<{ of: typeof sliceInputs; entry: SliceEntry | null } | null>(null);
+  useEffect(() => {
+    if (modelFiles.length === 0) return;
+    let stale = false;
+    sliceInputs()
+      .then(sliceKey)
+      .then(findSlice)
+      .then((entry) => {
+        if (!stale) setRemembered({ of: sliceInputs, entry: entry && entry.project === projectChoice ? entry : null });
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sliceInputs, modelFiles.length, projectChoice, sliceEntries]);
+  const sameSlice = modelFiles.length > 0 && remembered?.of === sliceInputs ? remembered.entry : null;
+
+  /** Remember a slice just made: what it was made from and its job. */
+  const rememberSlice = useCallback(
+    (key: string, inputs: SliceInputs, jobId: string, project: string | null | undefined, source: SliceEntry["source"], stats: SliceEntry["stats"]) => {
+      const now = Date.now();
+      return putSlice({
+        key,
+        jobId,
+        project: project ?? (projectChoice === "new" ? "" : projectChoice),
+        source,
+        createdAt: now,
+        usedAt: now,
+        inputs,
+        stats,
+        gcodeBytes: 0,
+      });
+    },
+    [projectChoice],
+  );
+
+  /**
+   * Show the remembered slice of `key`, when there is one its job still
+   * has; false: slice it. A job deleted or failed since is forgotten.
+   */
+  const showRemembered = useCallback(
+    async (key: string): Promise<boolean> => {
+      const entry = await findSlice(key);
+      if (!entry || entry.project !== projectChoice) return false;
+      const res = await fetch(`/api/jobs/${entry.jobId}`).catch(() => null);
+      if (!res) return false;
+      const job: { status?: string } | null = res.ok ? await res.json().catch(() => null) : null;
+      if (!job || job.status === "failed" || job.status === "cancelled") {
+        await deleteSlice(key);
+        return false;
+      }
+      void updateSlice(key, { usedAt: Date.now() });
+      if (compareWith === entry.jobId) setCompareWith(null);
+      setSliced({ jobId: entry.jobId });
+      setView("preview");
+      setResult({ ok: true, message: `Sliced already at ${sliceTime(entry.createdAt)} with these settings: showing that slice.` });
+      return true;
+    },
+    [projectChoice, compareWith],
+  );
+
+  const sliceOnServer = useCallback(async (key: string, inputs: SliceInputs) => {
     if (modelFiles.length === 0) return;
     const formData = buildJobForm();
     for (const f of modelFiles) formData.append("model", f);
@@ -768,12 +858,13 @@ export default function SlicePage() {
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
     // A new project exists now: the next slice adds to it.
     if (data.project_id) setProjectChoice(data.project_id);
+    void rememberSlice(key, inputs, data.id, data.project_id, "server", null);
     setResult({ ok: true, message: "Slicing on the server" });
     setSliced({ jobId: data.id });
     setView("preview");
-  }, [modelFiles, buildJobForm]);
+  }, [modelFiles, buildJobForm, rememberSlice]);
 
-  const sliceInBrowser = useCallback(async () => {
+  const sliceInBrowser = useCallback(async (key: string, inputs: SliceInputs) => {
     if (modelFiles.length === 0) return;
     setProgress({ percent: 0, message: "Loading engine" });
 
@@ -844,6 +935,10 @@ export default function SlicePage() {
           (out.report.plates ?? 1) > 1 ? `${out.report.plates} plates` : `${out.report.stats.layers} layers`
         }, est. ${formatDuration(out.report.stats.printTimeSec)}, ${out.report.stats.filamentG.toFixed(1)} g`,
       });
+      const stats = { printTimeSec: out.report.stats.printTimeSec, filamentG: out.report.stats.filamentG, plates: out.report.plates ?? 1 };
+      void rememberSlice(key, inputs, job.id, job.project_id, "browser", stats).then(() =>
+        putGcode(job.id, 1, new Blob([out.gcode], { type: "text/plain" })),
+      );
       setSliced({ jobId: job.id, gcode: out.gcode });
       setView("preview");
     } catch (err) {
@@ -861,23 +956,27 @@ export default function SlicePage() {
     } finally {
       setBrowserJobId(null);
     }
-  }, [modelFiles, buildJobForm, keepLocal]);
+  }, [modelFiles, buildJobForm, keepLocal, rememberSlice]);
 
-  const handleSlice = useCallback(async () => {
+  /** Slice the plate, or show the remembered slice of it (unless `fresh`). */
+  const handleSlice = useCallback(async (fresh = false) => {
     if (modelFiles.length === 0) return;
     setSlicing(true);
     setResult(null);
     setProgress(null);
 
     try {
+      const inputs = await sliceInputs();
+      const key = await sliceKey(inputs);
+      if (!fresh && (await showRemembered(key))) return;
       const target = chooseTarget();
       if (target === "browser" && !browserAvailable) {
         throw new Error("The browser engine is not available here; choose Server.");
       }
       if (target === "browser") {
-        await sliceInBrowser();
+        await sliceInBrowser(key, inputs);
       } else {
-        await sliceOnServer();
+        await sliceOnServer(key, inputs);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -886,7 +985,30 @@ export default function SlicePage() {
       setSlicing(false);
       setProgress(null);
     }
-  }, [modelFiles, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
+  }, [modelFiles, sliceInputs, showRemembered, chooseTarget, browserAvailable, sliceInBrowser, sliceOnServer]);
+
+  // The Preview tab's recent slices: show one, compare, take its settings back.
+  const sliceHistory = useMemo(
+    () => ({
+      entries: sliceEntries,
+      compareWith,
+      onShow: (jobId: string) => {
+        const entry = sliceEntries.find((e) => e.jobId === jobId);
+        if (entry) void updateSlice(entry.key, { usedAt: Date.now() });
+        if (jobId === compareWith) setCompareWith(null);
+        setSliced((s) => (s?.jobId === jobId ? s : { jobId }));
+      },
+      onCompare: setCompareWith,
+      onRestore: (e: SliceEntry) => {
+        setSearchParams((p) => {
+          p.set("from", e.jobId);
+          return p;
+        });
+        setView("prepare");
+      },
+    }),
+    [sliceEntries, compareWith, setSearchParams],
+  );
 
   const bed = useMemo(() => bedFromConfig(resolvedConfig), [resolvedConfig]);
   const profileValue = (key: string): string | undefined => {
@@ -934,7 +1056,14 @@ export default function SlicePage() {
           </div>
           {sliced && view === "preview" && (
             <div className="view-pane">
-              <SliceResult key={sliced.jobId} jobId={sliced.jobId} gcode={sliced.gcode} bed={bed} onBack={() => setView("prepare")} />
+              <SliceResult
+                key={sliced.jobId}
+                jobId={sliced.jobId}
+                gcode={sliced.gcode}
+                bed={bed}
+                onBack={() => setView("prepare")}
+                history={sliceHistory}
+              />
             </div>
           )}
         </div>
@@ -1304,10 +1433,18 @@ export default function SlicePage() {
           <button
             className="btn-primary"
             disabled={modelFiles.length === 0 || slicing || offBed}
-            onClick={handleSlice}
+            onClick={() => void handleSlice()}
           >
-            {slicing ? (progress ? "Slicing in browser…" : "Submitting…") : "Slice"}
+            {slicing ? (progress ? "Slicing in browser…" : "Submitting…") : sameSlice ? "Show slice" : "Slice"}
           </button>
+          {sameSlice && !slicing && !offBed && (
+            <p className="hint slice-again">
+              Sliced at {sliceTime(sameSlice.createdAt)} with exactly these settings: Show slice opens it without slicing again.{" "}
+              <button className="btn-sm" onClick={() => void handleSlice(true)}>
+                Slice again anyway
+              </button>
+            </p>
+          )}
           {offBed && (
             <p className="hint" style={{ marginTop: "0.5rem", color: "var(--error)" }}>
               {layout?.overlaps && layout.fit === "inside"

@@ -18,7 +18,8 @@ import * as THREE from "three";
 import Bed from "../viewer/Bed";
 import { DEFAULT_BED, sceneBed, type Bed as BedShape, type SceneBed } from "../viewer/part";
 import LayerSlider from "./LayerSlider";
-import { loadGcode, type GcodeSource, type LoadProgress } from "./load";
+import type { GcodeSource } from "./load";
+import { useGcode, type GcodeLoad } from "./useGcode";
 import { BEAD_BUDGET, Toolpaths, type RenderMode, type ViewRange } from "./scene";
 import { COLOR_MODES, RANGE_COLORS, gradientRange, toolColors, type ColorMode } from "./colors";
 import { featureColors, featureOrder } from "./features";
@@ -27,6 +28,7 @@ import { GAP, type GcodeInfo, type ParsedGcode } from "./types";
 
 export type { GcodeSource } from "./load";
 export type { GcodeInfo } from "./types";
+export type { GcodeLoad } from "./useGcode";
 
 export interface GcodePreviewProps {
   /**
@@ -35,6 +37,14 @@ export interface GcodePreviewProps {
    * data object loads again; the same one doesn't.
    */
   source: GcodeSource;
+  /**
+   * Names the file: kept parsed in memory under it (load.ts), and a new
+   * `source` under the same key (the bytes kept after a download) doesn't
+   * load again.
+   */
+  cacheKey?: string;
+  /** A URL's bytes, once read (for the page to keep). */
+  onBytes?: (bytes: Blob) => void;
   /** The printer's bed, when the G-code's header doesn't carry `printable_area`. */
   bed?: BedShape | null;
   /** Filament colours (`#rrggbb` by slot) when the header has none. */
@@ -46,35 +56,8 @@ export interface GcodePreviewProps {
   className?: string;
 }
 
-type LoadState =
-  | { status: "loading"; progress: LoadProgress | null }
-  | { status: "error"; message: string }
-  | { status: "ready"; parsed: ParsedGcode; ms: number; id: number };
-
-/** Loads finished so far: a new one remounts the view, resetting its state. */
-let loads = 0;
-
-export default function GcodePreview({ source, bed, filamentColors, onLoaded, showStats, className }: GcodePreviewProps) {
-  const isUrl = "url" in source;
-  const token: unknown = isUrl ? source.url : source.data;
-  const [state, setState] = useState<{ token: unknown; load: LoadState }>({ token, load: { status: "loading", progress: null } });
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const src: GcodeSource = isUrl ? { url: token as string } : { data: token as Blob };
-    loadGcode(src, {
-      signal: ctrl.signal,
-      onProgress: (progress) => setState({ token, load: { status: "loading", progress } }),
-    })
-      .then(({ result, ms }) => setState({ token, load: { status: "ready", parsed: result, ms, id: ++loads } }))
-      .catch((err: unknown) => {
-        if (ctrl.signal.aborted) return;
-        setState({ token, load: { status: "error", message: err instanceof Error ? err.message : String(err) } });
-      });
-    return () => ctrl.abort();
-  }, [isUrl, token]);
-
-  const load: LoadState = state.token === token ? state.load : { status: "loading", progress: null };
+export default function GcodePreview({ source, cacheKey, onBytes, bed, filamentColors, onLoaded, showStats, className }: GcodePreviewProps) {
+  const load = useGcode(source, { cacheKey, onBytes });
   const parsed = load.status === "ready" ? load.parsed : null;
   useEffect(() => {
     if (parsed) onLoaded?.(parsed.info);
@@ -93,6 +76,11 @@ export default function GcodePreview({ source, bed, filamentColors, onLoaded, sh
       />
     );
   }
+  return <GcodeLoading load={load} className={className} />;
+}
+
+/** What shows while a file loads, or why it can't. */
+export function GcodeLoading({ load, className }: { load: GcodeLoad; className?: string }) {
   return (
     <div className={`gcode-preview ${className ?? ""}`}>
       <div className="gp-viewport gp-status">
@@ -115,9 +103,9 @@ export default function GcodePreview({ source, bed, filamentColors, onLoaded, sh
                 : "Starting…"}
             </p>
           </div>
-        ) : (
+        ) : load.status === "error" ? (
           <p className="login-error">Can't show the G-code: {load.message}</p>
-        )}
+        ) : null}
       </div>
     </div>
   );

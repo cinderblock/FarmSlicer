@@ -65,6 +65,17 @@ can run in the user's browser.
   Worker, so 300 MB of G-code doesn't freeze the page. The page also shows
   the slicer's warnings (a part printing in mid-air first), the G-code
   check and "Print…".
+- **Recent slices, compared:** the browser remembers the last slices
+  (10 and 1 GB of G-code by default, adjustable; IndexedDB), each with what
+  it was made from and its G-code. When the settings, models and plates
+  match one of them exactly, Slice becomes **Show slice** and opens it
+  without slicing again (a setting changed back and forth costs nothing),
+  and a remembered slice opens without downloading its G-code again.
+  **Compare** puts the slice on screen next to another: the settings that
+  differ, time, filament and layers (time per feature too), and the
+  toolpaths matched by height, either overlaid (grey where both slices
+  have the same path, amber and blue where only one has it) or side by side
+  with one camera.
 - **Compute:** each slice runs either on the server or in the browser
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
   isolated). A browser slice uploads its models with the job (or keeps
@@ -541,6 +552,7 @@ web/            React frontend (Vite, Bun); web/src/engine/ = browser engine cli
                 web/src/components/viewer/ = the Slice page's 3D view (bed, parts, gizmos,
                 plate layout, overhangs); web/src/supports.ts = support materials;
                 web/src/localModels.ts = models kept in the browser (IndexedDB);
+                web/src/sliceHistory.ts + sliceCache.ts = recent slices kept in the browser;
                 web/src/components/preview/ = the G-code preview (parser + worker, renderer);
                 web/src/errorReporting.ts = automatic error reports, console ring buffer;
                 web/test/ and web/src/*.test.ts = bun unit tests

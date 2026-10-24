@@ -49,6 +49,18 @@ export async function sha256Hex(file: Blob): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+const digests = new WeakMap<Blob, Promise<string>>();
+
+/** `sha256Hex`, worked out once per file object (the Slice page asks on every change). */
+export function fileDigest(file: Blob): Promise<string> {
+  let d = digests.get(file);
+  if (!d) {
+    d = sha256Hex(file);
+    digests.set(file, d);
+  }
+  return d;
+}
+
 /** Keep a model in this browser; returns its digest. */
 export async function saveLocalModel(file: File): Promise<string> {
   const sha256 = await sha256Hex(file);

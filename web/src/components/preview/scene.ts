@@ -19,7 +19,7 @@
 // MOVING_LINES they stand in for the beads while the camera moves.
 
 import * as THREE from "three";
-import { fillColors, type ColorMode } from "./colors";
+import { fillColors, type ColorMode, type Gradient } from "./colors";
 import { GAP, RETRACT, WIPE, type ParsedGcode } from "./types";
 
 /** Segments drawn as 3D beads; beyond this, lines (GPU memory and vertex work). */
@@ -76,6 +76,7 @@ uniform int uBase;
 uniform int uLo;
 uniform int uDim;
 uniform float uDimFactor;
+uniform vec4 uTint;
 ${HIDDEN_GLSL}
 out vec3 vColor;
 out vec3 vNormal;
@@ -104,7 +105,7 @@ void main() {
   gl_Position = projectionMatrix * mv;
   vNormal = normalize(normalMatrix * n);
   vView = -mv.xyz;
-  vec3 c = iColor.rgb;
+  vec3 c = uTint.a > 0.5 ? uTint.rgb : iColor.rgb;
   vColor = index < uDim ? c * uDimFactor : c;
 }
 `;
@@ -131,6 +132,7 @@ in vec4 aColor;
 uniform int uLo;
 uniform int uDim;
 uniform float uDimFactor;
+uniform vec4 uTint;
 ${HIDDEN_GLSL}
 flat out vec4 vColor;
 
@@ -139,7 +141,7 @@ void main() {
   // (the last vertex of a primitive provides flat values).
   int segment = gl_VertexID - 1;
   bool hidden = segment < uLo || featureHidden(uint(aColor.a * 255.0 + 0.5));
-  vec3 c = aColor.rgb;
+  vec3 c = uTint.a > 0.5 ? uTint.rgb : aColor.rgb;
   vColor = vec4(segment < uDim ? c * uDimFactor : c, hidden ? 0.0 : 1.0);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
@@ -223,6 +225,8 @@ export class Toolpaths {
     uDimFactor: { value: 0.5 },
     uHidden0: { value: 0 },
     uHidden1: { value: 0 },
+    // rgb, and a = 1 to draw every extrusion in that colour (the compare overlay).
+    uTint: { value: new THREE.Vector4(0, 0, 0, 0) },
   };
   private beads = beadTemplate();
   private moving = false;
@@ -260,9 +264,12 @@ export class Toolpaths {
     if (this.view) this.setView(this.view);
   }
 
-  /** Recolour every segment (feature, filament, speed or layer time). */
-  recolor(mode: ColorMode, filamentColors: string[]): void {
-    fillColors(this.colors, this.p, mode, filamentColors);
+  /**
+   * Recolour every segment (feature, filament, speed or layer time); a
+   * gradient over `range` instead of this file's own (two files compared).
+   */
+  recolor(mode: ColorMode, filamentColors: string[], range?: Gradient): void {
+    fillColors(this.colors, this.p, mode, filamentColors, range);
     for (const c of this.chunks) c.mesh.geometry.attributes.iColor.needsUpdate = true;
     if (this.line) this.line.geometry.attributes.aColor.needsUpdate = true;
   }
@@ -326,6 +333,32 @@ export class Toolpaths {
     // The tool head where the scrubbed path ends.
     this.head.visible = scrubbing && hi > 0;
     if (this.head.visible) this.head.position.fromArray(extrusions.points, hi * 3);
+  }
+
+  /** Draw every extrusion in one colour (null: their own colours again). */
+  setTint(color: THREE.ColorRepresentation | null): void {
+    const t = this.shared.uTint.value;
+    if (color === null) t.w = 0;
+    else {
+      const c = new THREE.Color(color);
+      t.set(c.r, c.g, c.b, 1);
+    }
+  }
+
+  /**
+   * The depth test the extrusions draw with, and whether they write depth
+   * (the compare overlay draws one file over another with `EqualDepth` to
+   * find the paths both have).
+   */
+  setDepth(func: THREE.DepthModes, write: boolean): void {
+    for (const c of this.chunks) {
+      c.mesh.material.depthFunc = func;
+      c.mesh.material.depthWrite = write;
+    }
+    if (this.line) {
+      this.line.material.depthFunc = func;
+      this.line.material.depthWrite = write;
+    }
   }
 
   /**

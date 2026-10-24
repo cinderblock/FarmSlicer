@@ -1,7 +1,8 @@
 // Web Worker: stream a G-code file (a URL, or a Blob the page already
 // holds) through the parser, report progress, and hand the typed arrays to
-// the page without copying them. One file per worker; the page terminates
-// it to cancel.
+// the page without copying them (and, when asked, the downloaded bytes as a
+// Blob, for the page to keep). One file per worker; the page terminates it
+// to cancel.
 
 import { GcodeParser, transferables } from "./parser";
 import type { ParseRequest, ParseResponse } from "./types";
@@ -33,12 +34,14 @@ self.onmessage = async (ev: MessageEvent<ParseRequest>) => {
     const { stream, total } = await open(ev.data);
     const parser = new GcodeParser();
     const reader = stream.getReader();
+    const kept: Uint8Array<ArrayBuffer>[] | null = ev.data.type === "url" && ev.data.keep ? [] : null;
     let reported = 0;
     post({ type: "progress", done: 0, total });
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       parser.push(value);
+      kept?.push(value as Uint8Array<ArrayBuffer>);
       const now = performance.now();
       if (now - reported > 100) {
         reported = now;
@@ -46,7 +49,8 @@ self.onmessage = async (ev: MessageEvent<ParseRequest>) => {
       }
     }
     const result = parser.done();
-    post({ type: "done", result, ms: performance.now() - started }, transferables(result));
+    const bytes = kept ? new Blob(kept, { type: "text/plain" }) : undefined;
+    post({ type: "done", result, ms: performance.now() - started, bytes }, transferables(result));
   } catch (err) {
     post({ type: "error", error: err instanceof Error ? err.message : String(err) });
   }

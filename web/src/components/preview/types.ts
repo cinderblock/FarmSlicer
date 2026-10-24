@@ -145,11 +145,12 @@ export interface ParsedGcode {
 
 // --- worker protocol ---------------------------------------------------------
 
+/** `keep`: hand the file's bytes back too (a URL's, for the page to keep). */
 export type ParseRequest =
-  | { type: "url"; url: string }
+  | { type: "url"; url: string; keep?: boolean }
   | { type: "blob"; blob: Blob };
 
 export type ParseResponse =
   | { type: "progress"; done: number; total: number | null }
-  | { type: "done"; result: ParsedGcode; ms: number }
+  | { type: "done"; result: ParsedGcode; ms: number; bytes?: Blob }
   | { type: "error"; error: string };

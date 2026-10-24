@@ -404,6 +404,20 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   **Compute** selector (Auto / Server / This browser), re-slicing
   (`?from=<job>`), what it proposed (`proposed`), models kept in the
   browser (`web/src/localModels.ts`, IndexedDB)
+- `web/src/sliceHistory.ts` (pure, `web/test/slice-history.test.ts`) +
+  `web/src/sliceCache.ts` — the Slice page's recent slices, kept in this
+  browser (IndexedDB `farmslicer-slices`, its own DB: `slices` by the
+  SHA-256 of everything the job form sends that changes the slice, models
+  by digest, the resolved profile, the nozzle plan; `gcode` Blobs by
+  `<job>:<plate>`), least recently used evicted past the limits. A match
+  is shown instead of sliced (same job, `Slice again anyway` forces one).
+  `components/SliceHistory.tsx` (the list), `components/sliceGcode.ts`
+  (plate source: memory, cache, else the URL with the bytes kept: the
+  parse worker hands them back with `keep`), `preview/useGcode.ts` +
+  `load.ts`'s parsed-file memory, `preview/SliceCompare.tsx` (overlay:
+  A tinted, then B with `EqualDepth` grey and `LessDepth` blue, so
+  identical paths are grey; side by side with one camera; heights by Z).
+  Plan: `plans/slice-history-and-diff.md`
 - `web/src/slicerWarnings.ts` — sorting a job's warnings: support ones,
   others, technical notes (older jobs; the server now only logs those)
 - `build.rs` — compiles the bridge + slice_core, links ~50 static libs
