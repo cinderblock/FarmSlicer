@@ -134,6 +134,11 @@ can run in the user's browser.
   Errors from before sign-in wait in the browser. Admins triage everything
   on the Feedback page (status, a note the reporter sees); everyone else
   sees their own reports there.
+- **Updates:** a new version doesn't interrupt anyone: open pages pick it
+  up when someone moves to another page or steps away (never mid-slice
+  or with unsaved edits; a banner offers it sooner), the Slice page keeps
+  its plate and settings across reloads, and "What's new" says what
+  changed. The app's version is the commit it was built from.
 - **Reports:** which of the Slice page's defaults people change (print
   quality, filament, nozzle, plate, supports, support materials, every
   Quick Setting), how often and to what, for admins (`/reports`).

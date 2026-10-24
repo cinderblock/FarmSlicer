@@ -4034,3 +4034,95 @@ a.btn-sm {
 }
 .outcome-dialog .checkbox-label { display: flex; gap: 0.5rem; align-items: center; }
 .outcome-dialog .checkbox-label input { width: auto; }
+
+/* Updates (appUpdate.ts, components/UpdateBanner.tsx) and What's new
+   (components/WhatsNewDialog.tsx) */
+.update-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  font-size: 0.9rem;
+}
+
+.update-banner .btn-sm {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+
+.sidebar-whats-new {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-bottom: 0.5rem;
+}
+
+.sidebar-whats-new .link-button {
+  text-decoration: none;
+}
+
+.whats-new-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.whats-new-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal .whats-new-entry h4 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.whats-new-entry ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.whats-new-fixes {
+  margin: 0.4rem 0 0;
+  color: var(--text-dim);
+}
+
+.whats-new-build {
+  margin: 0;
+}
+
+.whats-new-dialog .modal-actions {
+  align-items: center;
+}
+
+.whats-new-dialog .modal-actions .link-button {
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+.whats-new-dialog .modal-actions .btn-primary {
+  width: auto;
+}
+
+@media (max-width: 800px) {
+  .update-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

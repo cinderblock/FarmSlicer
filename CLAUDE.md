@@ -209,6 +209,24 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `components/ErrorBoundary.tsx`, `components/FeedbackDialog.tsx` (the
   sidebar's "Send feedback"), `pages/Feedback.tsx` (admin triage / "My
   feedback"), `feedback.ts` (types, labels)
+- `web/src/appUpdate.ts` — new builds without losing work: polls
+  `/version.json`, and a newer build reloads the page only when `decide`
+  (pure, unit-tested) allows: when someone goes to another page (`notifyLocation`,
+  the path), or when the tab is hidden or idle and no form has unsaved
+  edits (input outside `[data-autosave]`); never while `holdUpdate`
+  holds it (a browser slice) or a dialog is open (`data-update-safe`
+  ones excepted). Savers (`beforeUpdate`) run first. One reload per
+  version (`farmslicer.reloadedFor`): a stale cached page gets the banner
+  (`components/UpdateBanner.tsx`), not a loop. The version is the commit
+  (`web/src/build.ts`; `GIT_SHA` build arg in Docker, else `git`)
+- `web/src/sliceDraft.ts` — the Slice page's work in progress per tab
+  (sessionStorage id → IndexedDB `drafts`, `web/src/idb.ts`): restored
+  whenever the page opens in that tab, saved as it changes, before an
+  update reload and on leaving; the files only when they change
+- `web/src/changelog.ts` — What's new (`components/WhatsNewDialog.tsx`,
+  `whatsNew.ts`: unseen per browser in localStorage, nothing from before
+  the account, only the newest on a first visit; opens after sign-in, or
+  a dot on the sidebar link after an unattended update reload)
 - `src/config_policy.rs` — overrides/custom profiles: members get the
   settings-schema keys only (no G-code keys), nobody gets `post_process`
 - `src/package/zipcheck.rs` — refuses ambiguous zips (duplicate names,
@@ -554,6 +572,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   change: it renders the protocol's fields and capabilities.
 - Rust 2024 edition; `NDEBUG` must be defined for the C++ (Eigen 5.x).
 - JS/TS uses **Bun** (`bun.lock`; no `package-lock.json`).
+- A change people will notice gets a line in `web/src/changelog.ts` in
+  the same commit: for users, not developers; big changes as highlights,
+  small fixes summed up in the entry's one `fixes` sentence. A new entry
+  per release day (`id` = date).
 - Phones (`plans/mobile.md`): below 800 px the sidebar is a drawer behind
   `.topbar` (components/Layout.tsx). A list table is `data-table cards`, its
   cells labelled with `data-label` (`cell-title`, `cell-select`,

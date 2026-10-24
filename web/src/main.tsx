@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import Layout from "./components/Layout";
@@ -29,31 +29,12 @@ import ReportsPage from "./pages/Reports";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
+import { installUpdateWatch } from "./appUpdate";
 import "./index.css";
 
 // First, so errors while the app starts are caught too.
 installErrorReporting();
-
-declare const __BUILD_VERSION__: string;
-
-function useAutoRefresh(intervalMs = 30_000) {
-  const currentVersion = useRef(__BUILD_VERSION__);
-  useEffect(() => {
-    if (import.meta.env.DEV) return;
-    const check = () => {
-      fetch("/version.json", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.version && data.version !== currentVersion.current) {
-            window.location.reload();
-          }
-        })
-        .catch(() => {});
-    };
-    const id = setInterval(check, intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-}
+installUpdateWatch();
 
 function Splash({ text }: { text: string }) {
   return (
@@ -114,7 +95,6 @@ function useReportingAuth() {
 }
 
 function App() {
-  useAutoRefresh();
   useReportingAuth();
   return (
     <BrowserRouter>

@@ -27,6 +27,16 @@ import { fileDigest, loadLocalModel, saveLocalModel } from "../localModels";
 import { deleteSlice, findSlice, putGcode, putSlice, updateSlice } from "../sliceCache";
 import { sha256Text, sliceKey, stableStringify, type SliceEntry, type SliceInputs } from "../sliceHistory";
 import { sliceTime, useSliceHistory } from "../useSliceHistory";
+import { beforeUpdate, useUpdateHold } from "../appUpdate";
+import {
+  filesSignature,
+  loadDraft,
+  pruneDrafts,
+  saveDraftFiles,
+  saveDraftState,
+  tabDraftId,
+  type DraftState,
+} from "../sliceDraft";
 
 /** Where slicing runs. "auto" uses the browser engine when the server is busy. */
 type ComputeMode = "auto" | "server" | "browser";
@@ -35,6 +45,35 @@ const COMPUTE_KEY = "farmslicer.compute";
 const GROUP_KEY = "farmslicer.group";
 /** Browser slices keep the model in this browser instead of uploading it. */
 const KEEP_LOCAL_KEY = "farmslicer.keepLocal";
+
+/** Changes are saved to the tab's draft once they settle for this long. */
+const DRAFT_SAVE_MS = 800;
+
+/** What the page keeps in its draft (sliceDraft.ts): its choices, not what it loads. */
+interface SliceSettings {
+  printerId: string;
+  modelChoice: string;
+  nozzleChoice: string;
+  plateChoice: string;
+  process: string;
+  filament: string;
+  materialFilter: string;
+  variantFilter: string;
+  color: string;
+  overrides: Record<string, string>;
+  supports: SupportSettings;
+  materialsChoice: { part: string; value: SupportMaterials } | null;
+  routing: string;
+  groupChoice: string;
+  projectChoice: string;
+  newProjectName: string;
+  /** The job being sliced again, by name. */
+  reslice: string | null;
+  /** The last slice, for the Preview tab. */
+  sliced: string | null;
+  view: "prepare" | "preview";
+  proposed: { process?: string; filament?: string };
+}
 
 interface MeGroups {
   chargeable: { id: string; path: string }[];
@@ -343,9 +382,160 @@ export default function SlicePage() {
   const fromJob = searchParams.get("from");
   const [initialPlate, setInitialPlate] = useState<{ key: string; files: File[]; plates: PlateLayout[] | null } | null>(null);
   const [reslice, setReslice] = useState<{ name: string; error?: string } | null>(null);
+
+  // Work in progress (sliceDraft.ts): this tab's draft is restored when the
+  // page opens, saved as things change, and saved again before an update
+  // reload and when leaving the page. A draft made from another job than
+  // ?from= names is left for that job (and then overwritten).
+  const [draftId] = useState(tabDraftId);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  // The plate is being restored: until the viewer reports it, the page's
+  // empty plate mustn't be saved over the draft.
+  const [restoring, setRestoring] = useState(false);
+  // The ?from= job whose plate is on the page (loaded, or restored with
+  // the draft): the draft records it, and it isn't loaded again. Not
+  // ?from= itself: until that job has loaded, the plate is still the
+  // previous one.
+  const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
+  const savedFiles = useRef<string | null>(null);
+  useEffect(() => {
+    let stale = false;
+    void pruneDrafts(draftId);
+    loadDraft(draftId)
+      .then((draft) => {
+        if (stale || !draft) return;
+        const { state, files } = draft;
+        if (fromJob && (state.from !== fromJob || files.length === 0)) return;
+        const s = state.settings as Partial<SliceSettings>;
+        if (s.printerId !== undefined) setPrinterId(s.printerId);
+        if (s.modelChoice !== undefined) setModelChoice(s.modelChoice);
+        if (s.nozzleChoice !== undefined) setNozzleChoice(s.nozzleChoice);
+        if (s.plateChoice !== undefined) setPlateChoice(s.plateChoice);
+        if (s.process) setProcess(s.process);
+        if (s.filament) setFilament(s.filament);
+        if (s.materialFilter !== undefined) setMaterialFilter(s.materialFilter);
+        if (s.variantFilter !== undefined) setVariantFilter(s.variantFilter);
+        if (s.color !== undefined) setColor(s.color);
+        if (s.overrides) setOverrides(s.overrides);
+        if (s.supports) setSupports(s.supports);
+        if (s.materialsChoice !== undefined) setMaterialsChoice(s.materialsChoice);
+        if (s.routing) setRouting(s.routing);
+        if (s.groupChoice !== undefined) setGroupChoice(s.groupChoice);
+        // ?project= in the address says which project; else the draft's.
+        if (s.projectChoice !== undefined && !new URLSearchParams(window.location.search).has("project"))
+          setProjectChoice(s.projectChoice);
+        if (s.newProjectName !== undefined) setNewProjectName(s.newProjectName);
+        if (s.reslice) setReslice({ name: s.reslice });
+        if (s.sliced) {
+          setSliced({ jobId: s.sliced });
+          setView(s.view ?? "prepare");
+        }
+        if (s.proposed) proposedPicks.current = s.proposed;
+        setLoadedFrom(state.from);
+        if (files.length > 0) {
+          savedFiles.current = filesSignature(files);
+          setRestoring(true);
+          setInitialPlate({ key: `draft:${draftId}`, files, plates: state.plates.length > 0 ? state.plates : null });
+        }
+      })
+      .finally(() => {
+        if (!stale) setDraftLoaded(true);
+      });
+    return () => {
+      stale = true;
+    };
+    // Once, when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePlateChange = useCallback((state: PlateState | null) => {
+    setLayout(state);
+    if (state) setRestoring(false);
+  }, []);
+
+  const settings: SliceSettings = {
+    printerId,
+    modelChoice,
+    nozzleChoice,
+    plateChoice,
+    process,
+    filament,
+    materialFilter,
+    variantFilter,
+    color,
+    overrides,
+    supports,
+    materialsChoice,
+    routing,
+    groupChoice,
+    projectChoice,
+    newProjectName,
+    reslice: reslice && !reslice.error ? reslice.name : null,
+    sliced: sliced?.jobId ?? null,
+    view,
+    // Filled in when saving (a ref, not state).
+    proposed: {},
+  };
+  const draftJson = JSON.stringify({ from: loadedFrom, settings, plates: layout?.plates ?? [] } satisfies DraftState);
+  const saving = draftLoaded && !restoring;
+
+  const saveFiles = useCallback(
+    async (files: File[]) => {
+      const signature = filesSignature(files);
+      if (signature === savedFiles.current) return;
+      savedFiles.current = signature;
+      await saveDraftFiles(draftId, files).catch(() => {
+        savedFiles.current = null;
+      });
+    },
+    [draftId],
+  );
+  const saveState = useCallback(
+    async (json: string) => {
+      const state: DraftState = JSON.parse(json);
+      (state.settings as SliceSettings).proposed = proposedPicks.current;
+      await saveDraftState(draftId, state).catch(() => {});
+    },
+    [draftId],
+  );
+
+  useEffect(() => {
+    if (!saving) return;
+    const timer = setTimeout(() => {
+      void saveFiles(modelFiles).then(() => saveState(draftJson));
+    }, DRAFT_SAVE_MS);
+    return () => clearTimeout(timer);
+  }, [saving, draftJson, modelFiles, saveFiles, saveState]);
+
+  // Right away, without waiting for the debounce: before an update reload,
+  // when the tab goes away, when leaving the page.
+  const latest = useRef({ json: draftJson, files: modelFiles });
+  useEffect(() => {
+    latest.current = { json: draftJson, files: modelFiles };
+  });
+  useEffect(() => {
+    if (!saving) return;
+    const flush = async () => {
+      await saveFiles(latest.current.files);
+      await saveState(latest.current.json);
+    };
+    const unregister = beforeUpdate(flush);
+    const onHide = () => void flush();
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      unregister();
+      window.removeEventListener("pagehide", onHide);
+      void flush();
+    };
+  }, [saving, saveFiles, saveState]);
+
+  // A slice in this browser dies with the page: an update waits for it.
+  useUpdateHold(slicing, "slicing");
+
   const machineModelsLoaded = machineModels.length > 0;
   useEffect(() => {
-    if (!fromJob || !printersLoaded || !machineModelsLoaded) return;
+    if (!fromJob || !printersLoaded || !machineModelsLoaded || !draftLoaded) return;
+    if (loadedFrom === fromJob) return;
     let stale = false;
     (async () => {
       const res = await fetch(`/api/jobs/${encodeURIComponent(fromJob)}`);
@@ -400,6 +590,7 @@ export default function SlicePage() {
         setMaterialsChoice({ part: inputs.filaments[0], value: materialsFromJob(inputs.filaments, saved) });
       setOverrides(Object.fromEntries(Object.entries(saved).filter(([k]) => !SUPPORT_KEYS.includes(k))));
       setInitialPlate({ key: fromJob, files, plates: job.plates ?? (job.plate ? [job.plate] : null) });
+      setLoadedFrom(fromJob);
     })().catch((err) => {
       if (!stale) setReslice((r) => ({ name: r?.name ?? "this job", error: err instanceof Error ? err.message : String(err) }));
     });
@@ -408,7 +599,7 @@ export default function SlicePage() {
     };
     // Load once per job; the setters and lists it reads are settled by then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromJob, printersLoaded, machineModelsLoaded]);
+  }, [fromJob, printersLoaded, machineModelsLoaded, draftLoaded, loadedFrom]);
 
   const engineVariant = engineManifest ? pickVariant(engineManifest) : null;
   const browserAvailable =
@@ -1024,7 +1215,8 @@ export default function SlicePage() {
   }, []);
 
   return (
-    <div className="page slice-page">
+    // Saved as a draft: edits here don't keep an update from loading.
+    <div className="page slice-page" data-autosave>
       <h2>Slice</h2>
       <div className="slice-layout">
         <div className="viewer-panel">
@@ -1047,7 +1239,7 @@ export default function SlicePage() {
           <div className="view-pane" hidden={view !== "prepare"}>
             <ModelViewer
               bed={bed}
-              onPlateChange={setLayout}
+              onPlateChange={handlePlateChange}
               initial={initialPlate}
               supportThreshold={supportThreshold}
               supportsOn={supports.enabled}

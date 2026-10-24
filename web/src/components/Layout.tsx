@@ -5,6 +5,11 @@ import { useJson } from "../api";
 import { FEEDBACK_CHANGED, newCount, prefillFor, type Counts, type FeedbackPrefill } from "../feedback";
 import ErrorBoundary from "./ErrorBoundary";
 import FeedbackDialog from "./FeedbackDialog";
+import UpdateBanner from "./UpdateBanner";
+import WhatsNewDialog from "./WhatsNewDialog";
+import { notifyLocation, reloadedQuietly } from "../appUpdate";
+import { CHANGELOG, type ChangelogEntry } from "../changelog";
+import { localDay, markSeen, seenId, unseenEntries } from "../whatsNew";
 
 const navItems = [
   { to: "/", label: "Printers" },
@@ -47,6 +52,30 @@ export default function Layout() {
     };
   }, [isAdmin]);
   const fresh = newCount(useJson<Counts>(isAdmin ? "/api/feedback/counts" : null, poll).data);
+
+  // What's new: opens by itself with what this browser hasn't seen, unless
+  // the page was reloaded for an update nobody was watching (then the
+  // sidebar link carries a dot until someone opens it).
+  const [start] = useState(() => ({
+    entries: unseenEntries(CHANGELOG, seenId(), localDay(user?.created_at)),
+    quiet: reloadedQuietly(),
+  }));
+  const [whatsNew, setWhatsNew] = useState<{ entries: ChangelogEntry[] | null } | null>(() =>
+    start.entries.length > 0 && !start.quiet ? { entries: start.entries } : null,
+  );
+  const [unseen, setUnseen] = useState(() => start.entries.length > 0 && start.quiet);
+  const closeWhatsNew = () => {
+    if (CHANGELOG[0]) markSeen(CHANGELOG[0].id);
+    setUnseen(false);
+    setWhatsNew(null);
+  };
+
+  // A new build loads when someone goes to another page (appUpdate.ts):
+  // the path, not the query, which pages change for their own reasons
+  // (the Slice page's ?from= when taking a slice's settings back).
+  useEffect(() => {
+    notifyLocation(location.pathname);
+  }, [location.pathname]);
 
   // Narrow screens: the sidebar is a drawer behind the top bar's menu button.
   // It is open for the location it was opened at, so any navigation (a link,
@@ -103,6 +132,18 @@ export default function Layout() {
           ))}
         </ul>
         <div className="sidebar-user">
+          <div className="sidebar-whats-new">
+            <button
+              className="link-button"
+              onClick={() => {
+                setMenuAt(null);
+                setWhatsNew({ entries: null });
+              }}
+            >
+              What's new
+            </button>
+            {unseen && <span className="whats-new-dot" title="Something changed since you last looked" />}
+          </div>
           <div className="sidebar-feedback">
             <button
               className="btn-sm"
@@ -138,11 +179,13 @@ export default function Layout() {
         </div>
       </nav>
       <main className="content">
+        <UpdateBanner />
         <ErrorBoundary resetKey={location.pathname}>
           <Outlet />
         </ErrorBoundary>
       </main>
       {feedback && <FeedbackDialog prefill={feedback} onClose={() => setFeedback(null)} />}
+      {whatsNew && <WhatsNewDialog entries={whatsNew.entries} onClose={closeWhatsNew} />}
     </div>
   );
 }
