@@ -146,6 +146,7 @@ unit-tested), `components/WhatsNewDialog.tsx`, sidebar link in `Layout.tsx`.
 
 - [x] 2026-10-24: design written.
 - [x] 2026-10-24: built, tested in a browser, docs updated, committed.
+- [x] 2026-10-24: deployed to production (ops `7363f23`); `/version.json` reports `79cb3f2`.
 
 ## Open questions for the user
 
