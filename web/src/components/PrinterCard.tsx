@@ -7,6 +7,7 @@ import {
   describeState,
   formatMinutes,
   hmsCode,
+  hmsHelpUrl,
   isBusy,
   printErrorCode,
   type Printer,
@@ -241,7 +242,7 @@ export default function PrinterCard({
               {h.message && <>{h.message} </>}
               <a
                 className="printer-error-code"
-                href={`https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/${hmsCode(h)}`}
+                href={hmsHelpUrl(h)}
                 target="_blank"
                 rel="noreferrer"
                 title="Bambu's help page for this code"

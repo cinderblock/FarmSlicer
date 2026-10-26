@@ -577,7 +577,7 @@ pub fn transition(print: &PrintRecord, status: &PrinterStatus) -> Option<(&'stat
 
 /// Printer errors that say the bed or the door wasn't ready for a print
 /// (objects left on the plate, no plate, the door open), not that the plate
-/// failed. Bambu codes (src/bambu/data/hms.json): 0300_404B the front door
+/// failed. Bambu codes (their texts: src/bambu/hms.rs): 0300_404B the front door
 /// or top cover was open; 0C00_8017 / 0500_806E / 0300_8017 foreign objects
 /// on the plate; 0300_8019 no build plate.
 pub fn bed_not_ready(print_error: i64) -> bool {

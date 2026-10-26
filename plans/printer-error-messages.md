@@ -28,11 +28,20 @@ into the PTFE tube until it can not be pushed any farther."
 
 ## Decisions
 
-- Harvest the English tables of every known device type into a committed
-  file (`src/bambu/data/hms.json`): one default text per code (the most common
-  one) plus per-device-type texts where they differ. No runtime fetch from
-  Bambu (no outbound dependency, works offline). Regenerate with
-  `node src/bambu/data/harvest-hms.mjs`.
+- ~~Harvest the tables into a committed file (`src/bambu/data/hms.json`),
+  no runtime fetch.~~ **Replaced 2026-10-26** (maintainer): the texts are
+  Bambu's writing, with no licence, so FarmSlicer no longer ships them.
+  The server fetches a device type's table from `e.bambulab.com` when a
+  printer of that type first reports (as Bambu Studio and OrcaSlicer do),
+  keeps it in `data/bambu-hms/<type>.json` and refreshes it weekly (an
+  hour between failed tries). Without a table (offline, or before it
+  arrives) a code has no text, and the card shows the code with Bambu's
+  help link. The request names only the device type and the language.
+- The help link is Bambu's redirector,
+  `e.bambulab.com/index.php?e=<16 hex>&s=device_hms&lang=en` (what
+  OrcaSlicer's `get_hms_wiki_url` builds), which goes to the code's wiki
+  page or the HMS index; the old link was an X1-only wiki path.
+  `print_error` codes have no pages of their own.
 - The Bambu driver resolves texts when it summarizes a report (it knows the
   serial): `HmsCode.message`, `PrinterStatus.print_error_message`.
 - The UI shows the text, with the code beside it (HMS still linking to

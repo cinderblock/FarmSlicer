@@ -250,6 +250,13 @@ export function hmsCode(h: { attr: number; code: number }): string {
   return `${hex4(h.attr >>> 16)}_${hex4(h.attr)}_${hex4(h.code >>> 16)}_${hex4(h.code)}`;
 }
 
+/** Bambu's help page for an HMS code (src/bambu/hms.rs `help_url`): their
+ *  server sends it on to the code's wiki page, or the HMS index. */
+export function hmsHelpUrl(h: { attr: number; code: number }): string {
+  const hex8 = (n: number) => (n >>> 0).toString(16).toUpperCase().padStart(8, "0");
+  return `https://e.bambulab.com/index.php?e=${hex8(h.attr)}${hex8(h.code)}&s=device_hms&lang=en`;
+}
+
 /** `print_error` as Bambu shows it: XXXX_XXXX. */
 export function printErrorCode(e: number): string {
   return `${hex4(e >>> 16)}_${hex4(e)}`;

@@ -64,6 +64,8 @@ async fn main() {
 
     let data_dir = PathBuf::from("data");
     let db = Arc::new(db::Db::open(&data_dir));
+    // Bambu's error texts kept from earlier runs (src/bambu/hms.rs).
+    bambu::hms::init(&data_dir);
 
     // libslic3r progress ticks land in the jobs table so the UI can poll them.
     {
