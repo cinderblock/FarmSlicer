@@ -95,20 +95,3 @@ package says 443,074 s and 2,351 g; per filament 0.35-0.5x (filament 1:
 (25,689 s vs 31,049 s). Why it matters: print rules (`max_minutes`) use
 `gcode::effective_time`, and grams feed costs; CLAUDE.md already notes
 multi-material H2D files hadn't been through the check.
-
-## The server binary links OrcaSlicer's OpenSSL 1.1.1w (and libcurl) — in progress — fix/openssl-1.1.1
-
-`build.rs` (lines 159-161) statically links `libcrypto`, `libssl` and
-`libcurl` from OrcaSlicer's deps build, which pins
-`OpenSSL_1_1_1w` (`extern/OrcaSlicer/deps/OpenSSL/OpenSSL.cmake:47`).
-OpenSSL 1.1.1 has been out of support since September 2023, and its
-licence (the old OpenSSL/SSLeay one) is incompatible with the GPL/AGPL the
-binary is under. The Rust side separately builds OpenSSL 3 (vendored, for
-webauthn-rs), so the binary carries two OpenSSLs.
-
-Why it matters: unpatched crypto code in a server people expose to the
-internet, and a licence conflict in what we distribute. Found by the
-licence audit (`plans/monetization-and-licensing.md`). Worth checking
-whether libslic3r needs it at all headless (its libcurl use is for
-network features the server doesn't call), or building those deps
-against OpenSSL 3.
