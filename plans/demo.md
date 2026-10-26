@@ -47,7 +47,12 @@ it came out. Asked by the maintainer on 2026-10-26, with the project site.
    `tests/lib.mjs`): set up the owner with a software passkey kept only in
    the stack's secret storage, then the group, quotas, join link, printers,
    a sample project and a few finished prints so pages aren't empty.
-7. **Hardening checks** before going public: setup is done before the
+7. **A "Source code" link in the app first** (blocker): AGPL §13 says an
+   instance people use over a network must offer them its source. Link
+   the exact commit the build came from (`web/src/build.ts`), with the URL
+   configurable so a modified deployment points at its own source. See
+   `plans/monetization-and-licensing.md`.
+8. **Hardening checks** before going public: setup is done before the
    first request from outside; no notifications to strangers' devices
    beyond their own; upload limits; the feedback inbox doesn't fill with
    noise (maybe its own label); the G-code check stays strict.
@@ -64,6 +69,7 @@ it came out. Asked by the maintainer on 2026-10-26, with the project site.
 
 - [x] Plan written (2026-10-26)
 - [ ] Questions answered
+- [ ] "Source code" link in the app (AGPL §13; blocker)
 - [ ] Seed script + demo compose file (in this repo, generic)
 - [ ] Ops stack (staged for approval)
 - [ ] DNS for demo.farmslicer.com (staged for approval)
