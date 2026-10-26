@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-26",
+    date: "2026-10-26",
+    title: "FarmSlicer as an app",
+    highlights: [
+      "FarmSlicer can be installed as an app: “Install app” at the bottom of the menu puts it on your phone's home screen or your computer's app list, where it opens in its own window.",
+    ],
+  },
+  {
     id: "2026-10-25",
     date: "2026-10-25",
     title: "Camera fixes",

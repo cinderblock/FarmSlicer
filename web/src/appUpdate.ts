@@ -15,6 +15,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { BUILD_VERSION } from "./build";
+import { updateServiceWorker } from "./serviceWorker";
 
 /** How often the server is asked which build it serves. */
 export const VERSION_POLL_MS = 30_000;
@@ -197,6 +198,9 @@ async function checkVersion() {
     const data: { version?: string } = await res.json();
     if (data.version && data.version !== BUILD_VERSION && data.version !== state.pending) {
       set({ pending: data.version });
+      // The new build may come with a new service worker: fetch it now, so
+      // it is in place whenever this page reloads (or doesn't, for a while).
+      void updateServiceWorker();
       consider(false);
     }
   } catch {

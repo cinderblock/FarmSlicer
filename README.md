@@ -560,6 +560,8 @@ web/            React frontend (Vite, Bun); web/src/engine/ = browser engine cli
                 web/src/sliceHistory.ts + sliceCache.ts = recent slices kept in the browser;
                 web/src/components/preview/ = the G-code preview (parser + worker, renderer);
                 web/src/errorReporting.ts = automatic error reports, console ring buffer;
+                web/public/manifest.webmanifest + sw.js + icons = installable app
+                (the service worker caches nothing; web/src/serviceWorker.ts registers it);
                 web/test/ and web/src/*.test.ts = bun unit tests
 extern/OrcaSlicer   git submodule, pinned to a release tag (v2.4.2)
 docker/         CMake stubs used only by the headless image build

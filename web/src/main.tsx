@@ -30,11 +30,15 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
 import { installUpdateWatch } from "./appUpdate";
+import { registerServiceWorker } from "./serviceWorker";
+import { installAppPrompt } from "./installApp";
 import "./index.css";
 
 // First, so errors while the app starts are caught too.
 installErrorReporting();
 installUpdateWatch();
+installAppPrompt();
+void registerServiceWorker();
 
 function Splash({ text }: { text: string }) {
   return (

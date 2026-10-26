@@ -1870,24 +1870,44 @@ pub fn router(state: Arc<AppState>) -> Router {
             header::HeaderName::from_static("cross-origin-embedder-policy"),
             header::HeaderValue::from_static("require-corp"),
         ))
-        .layer(SetResponseHeaderLayer::if_not_present(
-            header::CACHE_CONTROL,
-            html_cache_control,
-        ))
+        .layer(middleware::from_fn(set_cache_control))
 }
 
-/// `Cache-Control` for the app's pages. `no-transform` keeps a proxy from
-/// rewriting them: Cloudflare's Web Analytics injects a beacon script from
-/// its own origin, which require-corp blocks on every page load. `no-cache`
-/// because index.html names the build's hashed bundles, so it is fetched
-/// again after a deploy.
-fn html_cache_control(res: &axum::response::Response) -> Option<header::HeaderValue> {
-    let html = res
+/// Adds `cache_control`'s header to responses that don't name one.
+async fn set_cache_control(
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let service_worker = req.uri().path() == "/sw.js";
+    let mut res = next.run(req).await;
+    if !res.headers().contains_key(header::CACHE_CONTROL) {
+        if let Some(value) = cache_control(service_worker, &res) {
+            res.headers_mut().insert(header::CACHE_CONTROL, value);
+        }
+    }
+    res
+}
+
+/// `Cache-Control` for what must be fetched again every time. The app's
+/// pages: `no-cache` because index.html names the build's hashed bundles,
+/// so it is fetched again after a deploy (web/src/appUpdate.ts relies on
+/// it); `no-transform` keeps a proxy from rewriting them: Cloudflare's Web
+/// Analytics injects a beacon script from its own origin, which
+/// require-corp blocks on every page load. The service worker (`/sw.js`)
+/// and the web app manifest: `no-cache`, so a new build's are picked up.
+fn cache_control(service_worker: bool, res: &axum::response::Response) -> Option<header::HeaderValue> {
+    let content_type = res
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("text/html"));
-    html.then(|| header::HeaderValue::from_static("no-cache, no-transform"))
+        .unwrap_or("");
+    if content_type.starts_with("text/html") {
+        Some(header::HeaderValue::from_static("no-cache, no-transform"))
+    } else if service_worker || content_type.starts_with("application/manifest+json") {
+        Some(header::HeaderValue::from_static("no-cache"))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1902,10 +1922,26 @@ mod tests {
             r
         };
         assert_eq!(
-            html_cache_control(&res("text/html; charset=utf-8")).unwrap(),
+            cache_control(false, &res("text/html; charset=utf-8")).unwrap(),
             "no-cache, no-transform"
         );
-        assert!(html_cache_control(&res("application/javascript")).is_none());
-        assert!(html_cache_control(&res("application/json")).is_none());
+        assert!(cache_control(false, &res("application/javascript")).is_none());
+        assert!(cache_control(false, &res("text/javascript")).is_none());
+        assert!(cache_control(false, &res("application/json")).is_none());
+    }
+
+    #[test]
+    fn service_worker_and_manifest_are_revalidated() {
+        let res = |ty: &str| {
+            let mut r = axum::response::Response::new(axum::body::Body::empty());
+            r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_str(ty).unwrap());
+            r
+        };
+        assert_eq!(cache_control(true, &res("text/javascript")).unwrap(), "no-cache");
+        assert_eq!(cache_control(false, &res("application/manifest+json")).unwrap(), "no-cache");
+        // A 304 carries no content type: the path still decides.
+        let bare = axum::response::Response::new(axum::body::Body::empty());
+        assert_eq!(cache_control(true, &bare).unwrap(), "no-cache");
+        assert!(cache_control(false, &bare).is_none());
     }
 }

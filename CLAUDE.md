@@ -219,6 +219,14 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   version (`farmslicer.reloadedFor`): a stale cached page gets the banner
   (`components/UpdateBanner.tsx`), not a loop. The version is the commit
   (`web/src/build.ts`; `GIT_SHA` build arg in Docker, else `git`)
+- `web/public/sw.js` + `manifest.webmanifest` + icons — the installable
+  app. The service worker has **no fetch handler and no cache** on purpose
+  (appUpdate.ts needs index.html from the network); `web/src/serviceWorker.ts`
+  registers it (`serviceWorkerReady()` for push), `installApp.ts` +
+  `components/InstallApp.tsx` the sidebar's "Install app". The server sends
+  `/sw.js` and the manifest with `Cache-Control: no-cache`
+  (`server::cache_control`). Icons were rendered once from favicon.svg
+  with resvg (strip its `color(display-p3 ...)` fills first)
 - `web/src/sliceDraft.ts` — the Slice page's work in progress per tab
   (sessionStorage id → IndexedDB `drafts`, `web/src/idb.ts`): restored
   whenever the page opens in that tab, saved as it changes, before an

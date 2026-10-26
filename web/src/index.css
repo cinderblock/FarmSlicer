@@ -4069,6 +4069,20 @@ a.btn-sm {
   text-decoration: none;
 }
 
+.sidebar-install {
+  margin-top: -0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.sidebar-install .link-button {
+  text-decoration: none;
+}
+
+.sidebar-install .hint {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+}
+
 .whats-new-dot {
   width: 0.5rem;
   height: 0.5rem;

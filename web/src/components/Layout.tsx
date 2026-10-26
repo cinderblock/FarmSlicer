@@ -5,6 +5,7 @@ import { useJson } from "../api";
 import { FEEDBACK_CHANGED, newCount, prefillFor, type Counts, type FeedbackPrefill } from "../feedback";
 import ErrorBoundary from "./ErrorBoundary";
 import FeedbackDialog from "./FeedbackDialog";
+import InstallApp from "./InstallApp";
 import UpdateBanner from "./UpdateBanner";
 import WhatsNewDialog from "./WhatsNewDialog";
 import { notifyLocation, reloadedQuietly } from "../appUpdate";
@@ -144,6 +145,7 @@ export default function Layout() {
             </button>
             {unseen && <span className="whats-new-dot" title="Something changed since you last looked" />}
           </div>
+          <InstallApp />
           <div className="sidebar-feedback">
             <button
               className="btn-sm"
