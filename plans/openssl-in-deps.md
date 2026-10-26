@@ -101,7 +101,12 @@ What headless libslic3r uses (read from the v2.4.2 sources):
 4. [x] Round 2: shared MD5 shim, FindOpenSSL stub, libssl-dev/openssl-sys
    out; image rebuilt and proved (below).
 5. [x] Round 2: wasm st + mt built from this tree, st smoke tests.
-6. [x] Commit round 2.
+6. [x] Commit round 2 (`ef8cdff`).
+7. [x] Merge (the user: "just merge"): origin/master (licence paperwork:
+   generated third-party notices) merged in (`fbe3323`); notices updated
+   (`d28d64a`: no OpenSSL 1.1.1/curl entries; `bdea99f`: the vendored
+   OpenSSL 3 was never listed, `openssl-src` being a build dependency);
+   merged tree re-checked; fast-forwarded to origin/master.
 
 ## Verification
 
@@ -156,11 +161,19 @@ Round 2 (2026-10-26, deps layer cached; libslic3r and server rebuilt):
 - [x] `7f41159` round 1 (Dockerfile, build.rs, Cargo.toml/lock, FindCURL
   stub, CLAUDE.md).
 - [x] `0a54da9` ISSUES entry removed, naming `7f41159`; this plan.
-- [x] Round 2 commit (no OpenSSL on the C++ side).
+- [x] `ef8cdff` round 2 (no OpenSSL on the C++ side).
+- [x] `fbe3323` merge of origin/master; `d28d64a`, `bdea99f` notices.
+- [x] Merged tree: `node scripts/third-party-notices.mjs --check` passes;
+  `bun run build` and `bun test` (74 pass) in web/; image rebuilt
+  (`BUILD EXIT 0`), the T-with-supports slice done (same 2265 s / 11.16 g),
+  the image's `/app/THIRD-PARTY-NOTICES.txt` has no 1.1.1w/SSLeay and lists
+  `openssl-src 300.6.1+3.6.3`.
 
 ## Open questions for the user
 
-1. Push the branch / open a PR? Not done; waiting on your say.
+1. (Answered: merge.) Local `master` in the main checkout is left behind
+   origin/master: that tree has another thread's uncommitted work, so it
+   wasn't touched; `git pull --ff-only` there once that work allows.
 2. Windows: the Windows link no longer names any crypto library (the C++
    side needs none). Untested, like everything on Windows since the v2.4.2
    bump.
