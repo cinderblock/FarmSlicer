@@ -462,8 +462,12 @@ place (idempotent); point `ORCA_SRC_DIR` at a separate copy if the same
 checkout also feeds a native build. The dependency handling under `wasm/`
 (find-modules, sequential-TBB shims, patch, toolchain scripts) is adapted from
 [JoshTheDerf/orcaslicer-wasm](https://github.com/JoshTheDerf/orcaslicer-wasm)
-(AGPL-3.0); the engine bridge (`wasm/bridge/`) and the slicing pipeline it
-shares with the server (`cxx/slice_core.cpp`) are FarmSlicer's.
+by Joshua Bemenderfer, a fork of
+[allanwrench28/orcaslicer-wasm](https://github.com/allanwrench28/orcaslicer-wasm)
+by Allan Wrench (AGPL-3.0-or-later; `wasm/LICENSE.orcaslicer-wasm`,
+`wasm/NOTICE.orcaslicer-wasm.md`); the engine bridge (`wasm/bridge/`) and
+the slicing pipeline it shares with the server (`cxx/slice_core.cpp`) are
+FarmSlicer's.
 
 ## Deploying
 

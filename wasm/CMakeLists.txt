@@ -6,8 +6,9 @@
 #
 # Normally driven by wasm/build.sh. The dependency handling (find-modules in
 # cmake/, sequential TBB and Boost.Thread shims in shims/, the libslic3r patch
-# in patches/) is adapted from JoshTheDerf/orcaslicer-wasm (AGPL-3.0, see
-# LICENSE.orcaslicer-wasm); the engine bridge and pipeline are FarmSlicer's.
+# in patches/) is adapted from JoshTheDerf/orcaslicer-wasm, a fork of
+# allanwrench28/orcaslicer-wasm (AGPL-3.0-or-later, see LICENSE.orcaslicer-wasm
+# and NOTICE.orcaslicer-wasm.md); the engine bridge and pipeline are FarmSlicer's.
 cmake_minimum_required(VERSION 3.22)
 project(farmslicer_wasm CXX C)
 
