@@ -1,5 +1,8 @@
 # FarmSlicer
 
+**[farmslicer.com](https://farmslicer.com)** · demo at
+[demo.farmslicer.com](https://demo.farmslicer.com) (coming soon)
+
 Web-first, headless slicing service for a small 3D print farm. Upload a model,
 pick a printer and OrcaSlicer profiles, get G-code. The slicer is
 [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)'s `libslic3r`, linked
@@ -177,16 +180,23 @@ License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
 
 ## Running it
 
-The supported deployment is the container image built by CI
-(`ghcr.io/cinderblock/farmslicer`), run by the ops repo on `buildhost` and
-reached at `https://farm.example.com` (LAN only).
+Run the container image CI builds (`ghcr.io/cinderblock/farmslicer`:
+`:latest`, or `:<commit>` to pin one). Host networking lets it discover
+printers (multicast doesn't cross Docker's bridge); without it, add
+printers by address and publish the port (`-p 9337:9337`). Set
+`FARMSLICER_ORIGINS` to the address people open it at, and put HTTPS in
+front of it: passkeys, browser slicing and notifications need a secure
+context (`localhost` counts as one).
 
 ```bash
-docker run -d --name farmslicer -p 9337:9337 \
+docker run -d --name farmslicer --network host \
   -e FARMSLICER_ORIGINS=https://farm.example.com \
   -v farmslicer_data:/app/data \
   ghcr.io/cinderblock/farmslicer:latest
 ```
+
+The maintainer's own farm runs the same image from the ops repo on
+`buildhost` (see [Deploying](#deploying)).
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
