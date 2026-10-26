@@ -37,8 +37,10 @@ Answers from the maintainer, 2026-10-26:
 - **A company already exists** (a C corp); whether to sell under it is an
   open question below.
 - **The in-app "Source code" link:** done (`69c5cd5`).
-- **The licence paperwork** (notices, licence fields, wrong credits) and
-  **the OpenSSL 1.1.1 issue** are being handled in separate threads.
+- **The licence paperwork** (notices, licence fields, wrong credits): done
+  (`e33c930`..`59b303e`, linked from the app in `2cb379e`;
+  `plans/licence-paperwork.md`). **The OpenSSL 1.1.1 issue** has its own
+  thread (branch `fix/openssl-1.1.1`).
 - **The demo** is deferred to its own thread (see `plans/demo.md`).
 
 ## Findings: licensing
