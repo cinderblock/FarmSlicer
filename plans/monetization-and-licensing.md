@@ -410,7 +410,8 @@ margin on the subscription.
    - SPDX headers on new files.
    - Move the deps build off OpenSSL 1.1.1 (gap 3).
    - Annotate or drop `wasm/NOTICE.orcaslicer-wasm.md`, and credit both orcaslicer-wasm repositories.
-   - Decide on `hms.json` (gap 7).
+   - ~~Decide on `hms.json` (gap 7).~~ Done: Bambu's texts are fetched at run
+     time, not shipped (`plans/printer-error-messages.md`).
    - A per-release source bundle with dep tarballs.
 2. **Protect the name:**
    - USPTO search, then file "FarmSlicer" in classes 9 and 42 (about $700).

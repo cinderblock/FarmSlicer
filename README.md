@@ -180,6 +180,12 @@ checks).
   someone answers there.
 - The Elegoo Centauri Carbon 2 speaks another protocol (MQTT) and isn't
   supported.
+- What a Bambu printer's error codes mean comes from Bambu's server
+  (`e.bambulab.com`, as in Bambu Studio and OrcaSlicer): the server asks for
+  a printer model's table when one first reports, keeps it in
+  `data/bambu-hms/`, and refreshes it weekly. The request names only the
+  model type. Without internet access the printer card shows the code and a
+  link to Bambu's help page instead of the text.
 - What has been tried on real printers, and what only against simulators
   or fakes: [`issues/untested-printers.md`](issues/untested-printers.md).
 - `tests/fake-*` hold a fake printer per protocol (and a Dockerfile for real

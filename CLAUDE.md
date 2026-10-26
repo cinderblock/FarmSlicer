@@ -146,8 +146,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
     delta reports merged in `status.rs`), `ftps.rs` (implicit FTPS; the data
     channel must resume the control channel's TLS session), `send.rs`
     (`project_file`, AMS mapping fields), `models.rs`, `hms.rs` (HMS
-    codes' and `print_error`'s texts per device type = serial prefix, from
-    `data/hms.json`; regenerate with `node src/bambu/data/harvest-hms.mjs`)
+    codes' and `print_error`'s texts per device type = serial prefix,
+    fetched from Bambu's server at run time like Bambu Studio does and kept
+    in `data/bambu-hms/`, refreshed weekly; not shipped: the texts are
+    Bambu's. Without one, the card shows the code and Bambu's help link)
   - `src/moonraker/` — Klipper: WebSocket JSON-RPC, objects subscribed and
     merged, HTTP upload then `printer.print.start` (refused while paused:
     Klipper would replace the job)
