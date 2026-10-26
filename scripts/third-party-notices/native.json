@@ -12,9 +12,9 @@
     "Emscripten port's cached archive), {ubuntu: package} (its",
     "/usr/share/doc/<package>/copyright in the ubuntu:24.04 image).",
     "Server versions follow extern/OrcaSlicer/deps (the Docker orca-deps stage builds",
-    "dep_Blosc dep_Boost dep_CGAL dep_CURL dep_Cereal dep_Draco dep_Eigen dep_FREETYPE",
-    "dep_GMP dep_JPEG dep_MPFR dep_NLopt dep_OCCT dep_OpenCV dep_OpenEXR dep_OpenSSL",
-    "dep_OpenVDB dep_PNG dep_Qhull dep_TBB dep_libnoise) and build.rs; wasm versions",
+    "dep_Blosc dep_Boost dep_CGAL dep_Cereal dep_Draco dep_Eigen dep_FREETYPE dep_GMP",
+    "dep_JPEG dep_MPFR dep_NLopt dep_OCCT dep_OpenCV dep_OpenEXR dep_OpenVDB dep_PNG",
+    "dep_Qhull dep_TBB dep_libnoise; no OpenSSL or curl) and build.rs; wasm versions",
     "follow wasm/toolchain/build-deps.sh and bootstrap.sh. Update this file when",
     "either changes, then run harvest-native.mjs and third-party-notices.mjs."
   ],
@@ -44,9 +44,9 @@
       "name": "orcaslicer-wasm build pieces",
       "version": "JoshTheDerf fork, 2026",
       "license": "AGPL-3.0-or-later",
-      "in": ["wasm"],
+      "in": ["server", "wasm"],
       "url": "https://github.com/JoshTheDerf/orcaslicer-wasm",
-      "note": "CMake find-modules, shims, the libslic3r patch and toolchain scripts, adapted from JoshTheDerf/orcaslicer-wasm (Joshua Bemenderfer), a fork of allanwrench28/orcaslicer-wasm (Allan Wrench). See wasm/NOTICE.orcaslicer-wasm.md.",
+      "note": "CMake find-modules, shims, the libslic3r patch and toolchain scripts, adapted from JoshTheDerf/orcaslicer-wasm (Joshua Bemenderfer), a fork of allanwrench28/orcaslicer-wasm (Allan Wrench). See wasm/NOTICE.orcaslicer-wasm.md. One shim, libslic3r's <openssl/md5.h> (cxx/shims/openssl/md5.h), is compiled into the server binary too.",
       "harvest": [{ "repo": "wasm/LICENSE.orcaslicer-wasm" }]
     },
     {
@@ -425,25 +425,6 @@
       "in": ["server", "wasm"],
       "url": "https://zlib.net/",
       "harvest": [{ "ubuntu": "zlib1g" }]
-    },
-    {
-      "id": "curl",
-      "name": "curl (libcurl)",
-      "version": "7.75.0",
-      "license": "curl",
-      "in": ["server"],
-      "url": "https://curl.se/",
-      "harvest": [{ "archive": "https://github.com/curl/curl/archive/refs/tags/curl-7_75_0.zip", "sha256": "a63ae025bb0a14f119e73250f2c923f4bf89aa93b8d4fafa4a9f5353a96a765a", "files": ["COPYING"] }]
-    },
-    {
-      "id": "openssl-1.1.1",
-      "name": "OpenSSL (OrcaSlicer's deps build)",
-      "version": "1.1.1w",
-      "license": "OpenSSL",
-      "in": ["server"],
-      "url": "https://www.openssl.org/",
-      "note": "Linked into libslic3r's dependencies by the deps superbuild. This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit (http://www.openssl.org/). This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).",
-      "harvest": [{ "archive": "https://github.com/openssl/openssl/archive/OpenSSL_1_1_1w.tar.gz", "sha256": "2130e8c2fb3b79d1086186f78e59e8bc8d1a6aedf17ab3907f4cb9ae20918c41", "files": ["LICENSE"] }]
     },
     {
       "id": "rust-std",
