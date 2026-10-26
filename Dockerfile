@@ -83,6 +83,8 @@ WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY web ./
+# The build serves these from dist/web (vite.config.ts reads them from ../).
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.txt ../
 # The commit the web build names as its version (the context has no .git).
 # After the install so a new commit doesn't redo it.
 ARG GIT_SHA=""
@@ -128,6 +130,8 @@ COPY extern/OrcaSlicer/resources/info /app/extern/OrcaSlicer/resources/info
 COPY extern/OrcaSlicer/resources/flush /app/extern/OrcaSlicer/resources/flush
 # The thumbnail label font (SIL OFL).
 COPY resources/fonts /app/resources/fonts
+# FarmSlicer's licence and everyone else's notices (also in dist/web).
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.txt /app/
 RUN mkdir -p /app/data && chown -R ubuntu:ubuntu /app/data
 USER ubuntu
 VOLUME ["/app/data"]

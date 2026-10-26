@@ -150,7 +150,10 @@ License: FarmSlicer's own code is AGPL-3.0-or-later. Builds that include
 libslic3r (the server, the Docker image, the browser engine) are AGPL-3.0,
 since OrcaSlicer licenses libslic3r under version 3 without "or later". See
 `NOTICE` for the details, `LICENSE` for the licence text and
-`THIRD-PARTY-NOTICES.txt` for the software FarmSlicer includes.
+`THIRD-PARTY-NOTICES.txt` for the software FarmSlicer includes (served by
+the app at `/THIRD-PARTY-NOTICES.txt`; regenerate it with
+`node scripts/third-party-notices.mjs` after a dependency change, which CI
+checks).
 
 ## Printers
 
