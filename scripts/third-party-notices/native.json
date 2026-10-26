@@ -1,0 +1,516 @@
+{
+  "_comment": [
+    "Hand-maintained: the C++ libraries, runtimes and data FarmSlicer distributes",
+    "outside Cargo and npm. 'in' says where each one ships: 'server' = linked into",
+    "the server binary (Docker image), 'wasm' = compiled into the browser engine,",
+    "'image' = a file in the Docker image, 'browser' = sent to browsers as data.",
+    "'harvest' says where harvest-native.mjs finds the licence texts, written to",
+    "native/<id>.txt: {orca: path} (a file in the OrcaSlicer submodule; 'header':",
+    "only its leading comment, 'lines': [first, last]), {repo: path}, {archive: url,",
+    "sha256} (the archive's top-level LICENSE/COPYING/NOTICE files, or 'files'),",
+    "{emsdk: path} (a file in emsdk/upstream/emscripten), {emport: name} (that",
+    "Emscripten port's cached archive), {ubuntu: package} (its",
+    "/usr/share/doc/<package>/copyright in the ubuntu:24.04 image).",
+    "Server versions follow extern/OrcaSlicer/deps (the Docker orca-deps stage builds",
+    "dep_Blosc dep_Boost dep_CGAL dep_CURL dep_Cereal dep_Draco dep_Eigen dep_FREETYPE",
+    "dep_GMP dep_JPEG dep_MPFR dep_NLopt dep_OCCT dep_OpenCV dep_OpenEXR dep_OpenSSL",
+    "dep_OpenVDB dep_PNG dep_Qhull dep_TBB dep_libnoise) and build.rs; wasm versions",
+    "follow wasm/toolchain/build-deps.sh and bootstrap.sh. Update this file when",
+    "either changes, then run harvest-native.mjs and third-party-notices.mjs."
+  ],
+  "components": [
+    {
+      "id": "orcaslicer",
+      "name": "OrcaSlicer libslic3r",
+      "version": "2.4.2",
+      "license": "AGPL-3.0-only",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/OrcaSlicer/OrcaSlicer",
+      "note": "The slicing library, derived from Bambu Studio, PrusaSlicer and Slic3r. Licensed by OrcaSlicer under the GNU AGPL version 3 (some files: 'or higher'). Files in it from other projects keep their own notices in the source, e.g. Geometry/ArcWelder.cpp (ArcWelderLib, AGPL-3.0-or-later). The full licence text is FarmSlicer's LICENSE. wasm/patches/orca-wasm.patch modifies it for the browser engine.",
+      "harvest": []
+    },
+    {
+      "id": "orcaslicer-resources",
+      "name": "OrcaSlicer resources (vendor profiles, filament info, flush tables)",
+      "version": "2.4.2",
+      "license": "AGPL-3.0-only",
+      "in": ["image", "browser"],
+      "url": "https://github.com/OrcaSlicer/OrcaSlicer/tree/v2.4.2/resources",
+      "note": "resources/profiles (in the image), resources/info and resources/flush (in the image and in the browser engine's .data file), as distributed in OrcaSlicer's repository. Printer and filament names are their owners' trademarks.",
+      "harvest": []
+    },
+    {
+      "id": "orcaslicer-wasm",
+      "name": "orcaslicer-wasm build pieces",
+      "version": "JoshTheDerf fork, 2026",
+      "license": "AGPL-3.0-or-later",
+      "in": ["wasm"],
+      "url": "https://github.com/JoshTheDerf/orcaslicer-wasm",
+      "note": "CMake find-modules, shims, the libslic3r patch and toolchain scripts, adapted from JoshTheDerf/orcaslicer-wasm (Joshua Bemenderfer), a fork of allanwrench28/orcaslicer-wasm (Allan Wrench). See wasm/NOTICE.orcaslicer-wasm.md.",
+      "harvest": [{ "repo": "wasm/LICENSE.orcaslicer-wasm" }]
+    },
+    {
+      "id": "sarabun",
+      "name": "Sarabun font (SemiBold)",
+      "version": "",
+      "license": "OFL-1.1",
+      "in": ["image", "wasm"],
+      "url": "https://github.com/cadsondemak/Sarabun",
+      "note": "resources/fonts/Sarabun-SemiBold.ttf: the thumbnail label font, in the image and preloaded in the browser engine's .data file.",
+      "harvest": [{ "repo": "resources/fonts/OFL.txt" }]
+    },
+    {
+      "id": "admesh",
+      "name": "ADMesh",
+      "version": "OrcaSlicer deps_src",
+      "license": "GPL-2.0-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/admesh/admesh",
+      "harvest": [{ "orca": "deps_src/admesh/stl.h", "header": true }]
+    },
+    {
+      "id": "agg",
+      "name": "Anti-Grain Geometry",
+      "version": "2.4 (OrcaSlicer deps_src)",
+      "license": "BSD-3-Clause",
+      "in": ["server", "wasm"],
+      "url": "https://agg.sourceforge.net/antigrain.com/",
+      "harvest": [{ "orca": "deps_src/agg/copying" }]
+    },
+    {
+      "id": "ankerl",
+      "name": "ankerl::unordered_dense",
+      "version": "4.5.0",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/martinus/unordered_dense",
+      "harvest": [{ "orca": "deps_src/ankerl/unordered_dense.h", "header": true }]
+    },
+    {
+      "id": "clipper",
+      "name": "Clipper",
+      "version": "6.4.2",
+      "license": "BSL-1.0",
+      "in": ["server", "wasm"],
+      "url": "https://www.angusj.com/clipper2/",
+      "harvest": [{ "orca": "deps_src/clipper/clipper.hpp", "header": true }]
+    },
+    {
+      "id": "clipper2",
+      "name": "Clipper2",
+      "version": "OrcaSlicer deps_src",
+      "license": "BSL-1.0",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/AngusJohnson/Clipper2",
+      "harvest": [{ "orca": "deps_src/clipper2/Clipper2Lib/include/clipper2/clipper.h", "header": true }]
+    },
+    {
+      "id": "expat",
+      "name": "Expat",
+      "version": "OrcaSlicer deps_src",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://libexpat.github.io/",
+      "harvest": [{ "orca": "deps_src/expat/COPYING" }]
+    },
+    {
+      "id": "fast_float",
+      "name": "fast_float",
+      "version": "OrcaSlicer deps_src",
+      "license": "Apache-2.0 OR MIT OR BSL-1.0",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/fastfloat/fast_float",
+      "harvest": [{ "orca": "deps_src/fast_float/fast_float.h", "header": true }]
+    },
+    {
+      "id": "glu-libtess",
+      "name": "GLU tessellator (libtess)",
+      "version": "OrcaSlicer deps_src",
+      "license": "SGI-B-2.0",
+      "in": ["server", "wasm"],
+      "url": "https://gitlab.freedesktop.org/mesa/glu",
+      "harvest": [{ "orca": "deps_src/glu-libtess/src/dict.c", "header": true }]
+    },
+    {
+      "id": "stb_truetype",
+      "name": "stb_truetype (Dear ImGui's imstb_truetype.h)",
+      "version": "1.20, modified",
+      "license": "MIT OR Unlicense",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/nothings/stb",
+      "note": "Used by libslic3r's Emboss.cpp and FarmSlicer's cxx/thumbnail.cpp for the thumbnail label.",
+      "harvest": [{ "orca": "deps_src/imgui/imstb_truetype.h", "tail": "This software is available under 2 licenses" }]
+    },
+    {
+      "id": "libigl",
+      "name": "libigl",
+      "version": "OrcaSlicer deps_src",
+      "license": "MPL-2.0",
+      "in": ["server", "wasm"],
+      "url": "https://libigl.github.io/",
+      "note": "Used unmodified; source at the URL and in OrcaSlicer's deps_src/libigl.",
+      "harvest": [{ "orca": "deps_src/libigl/igl/PI.h", "header": true }]
+    },
+    {
+      "id": "libnest2d",
+      "name": "libnest2d",
+      "version": "OrcaSlicer deps_src",
+      "license": "LGPL-3.0-only",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/tamasmeszaros/libnest2d",
+      "note": "Its source is part of FarmSlicer's Corresponding Source (the OrcaSlicer submodule).",
+      "harvest": [{ "orca": "deps_src/libnest2d/LICENSE.txt" }]
+    },
+    {
+      "id": "mcut",
+      "name": "MCUT",
+      "version": "OrcaSlicer deps_src",
+      "license": "GPL-3.0-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/cutdigital/mcut",
+      "note": "Dual-licensed GPL or commercial; used under the GPL. Partly based on CDT (MPL-2.0).",
+      "harvest": [{ "orca": "deps_src/mcut/LICENSE.txt" }]
+    },
+    {
+      "id": "miniz",
+      "name": "miniz",
+      "version": "OrcaSlicer deps_src",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/richgel999/miniz",
+      "harvest": [{ "orca": "deps_src/miniz/LICENSE" }]
+    },
+    {
+      "id": "nanosvg",
+      "name": "NanoSVG",
+      "version": "OrcaSlicer deps_src",
+      "license": "Zlib",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/memononen/nanosvg",
+      "harvest": [{ "orca": "deps_src/nanosvg/nanosvg.h", "header": true }]
+    },
+    {
+      "id": "nlohmann-json",
+      "name": "JSON for Modern C++",
+      "version": "3.10.4 (server), 3.12.0 (wasm)",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/nlohmann/json",
+      "harvest": [{ "orca": "deps_src/nlohmann/json.hpp", "header": true }]
+    },
+    {
+      "id": "qoi",
+      "name": "QOI",
+      "version": "OrcaSlicer deps_src",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/phoboslab/qoi",
+      "harvest": [{ "orca": "deps_src/qoi/qoi.h", "header": true }]
+    },
+    {
+      "id": "semver",
+      "name": "semver.c",
+      "version": "0.2.0",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/h2non/semver.c",
+      "harvest": [{ "orca": "deps_src/semver/semver.h", "header": true }]
+    },
+    {
+      "id": "shiny",
+      "name": "Shiny profiler",
+      "version": "OrcaSlicer deps_src",
+      "license": "MIT",
+      "in": ["server", "wasm"],
+      "url": "https://code.google.com/archive/p/shinyprofiler/",
+      "harvest": [{ "orca": "deps_src/Shiny/Shiny.h", "header": true }]
+    },
+    {
+      "id": "qhull",
+      "name": "Qhull",
+      "version": "8.0.2 (server), 7.2.0 from OrcaSlicer deps_src (wasm)",
+      "license": "Qhull",
+      "in": ["server", "wasm"],
+      "url": "http://www.qhull.org/",
+      "harvest": [{ "orca": "deps_src/qhull/COPYING.txt" }]
+    },
+    {
+      "id": "boost",
+      "name": "Boost",
+      "version": "1.84.0",
+      "license": "BSL-1.0",
+      "in": ["server", "wasm"],
+      "url": "https://www.boost.org/",
+      "harvest": [{ "archive": "https://github.com/boostorg/boost/releases/download/boost-1.84.0/boost-1.84.0.tar.gz", "sha256": "4d27e9efed0f6f152dc28db6430b9d3dfb40c0345da7342eaa5a987dde57bd95" }]
+    },
+    {
+      "id": "cgal",
+      "name": "CGAL",
+      "version": "5.6.3",
+      "license": "GPL-3.0-or-later AND LGPL-3.0-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://www.cgal.org/",
+      "note": "The kernel is LGPL-3.0-or-later; the packages libslic3r uses (Polygon_mesh_processing, Surface_mesh, Surface_mesh_segmentation, the 2D triangulations and arrangements) are GPL-3.0-or-later, with commercial licences from GeometryFactory; used under the GPL.",
+      "harvest": [{ "archive": "https://github.com/CGAL/cgal/releases/download/v5.6.3/CGAL-5.6.3.zip", "sha256": "5d577acb4a9918ccb960491482da7a3838f8d363aff47e14d703f19fd84733d4" }]
+    },
+    {
+      "id": "eigen",
+      "name": "Eigen",
+      "version": "5.0.1",
+      "license": "MPL-2.0",
+      "in": ["server", "wasm"],
+      "url": "https://eigen.tuxfamily.org/",
+      "note": "Used unmodified; source at the URL.",
+      "harvest": [{ "archive": "https://gitlab.com/libeigen/eigen/-/archive/5.0.1/eigen-5.0.1.zip", "sha256": "0dbb1f9e3aaad66f352c03227d8c983f6f0b49e0b07e71a7300f4abcc01aee12" }]
+    },
+    {
+      "id": "cereal",
+      "name": "cereal",
+      "version": "1.3.0 (server), 1.3.2 (wasm)",
+      "license": "BSD-3-Clause",
+      "in": ["server", "wasm"],
+      "url": "https://uscilab.github.io/cereal/",
+      "harvest": [{ "archive": "https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.0.zip", "sha256": "71642cb54658e98c8f07a0f0d08bf9766f1c3771496936f6014169d3726d9657" }]
+    },
+    {
+      "id": "gmp",
+      "name": "GNU MP (GMP)",
+      "version": "6.2.1 (server), 6.3.0 (wasm)",
+      "license": "LGPL-3.0-or-later OR GPL-2.0-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://gmplib.org/",
+      "note": "Statically linked; used under the LGPL. Its source and the scripts that build and link it are part of FarmSlicer's Corresponding Source (extern/OrcaSlicer/deps, wasm/toolchain), so a recipient can relink with a modified GMP.",
+      "harvest": [{ "archive": "https://github.com/SoftFever/OrcaSlicer_deps/releases/download/gmp-6.2.1/gmp-6.2.1.tar.bz2", "sha256": "eae9326beb4158c386e39a356818031bd28f3124cf915f8c5b1dc4c7a36b4d7c", "files": ["COPYING.LESSERv3"] }]
+    },
+    {
+      "id": "mpfr",
+      "name": "GNU MPFR",
+      "version": "4.2.2",
+      "license": "LGPL-3.0-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://www.mpfr.org/",
+      "note": "Statically linked under the LGPL; see GMP's note.",
+      "harvest": [{ "archive": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.bz2", "sha256": "9ad62c7dc910303cd384ff8f1f4767a655124980bb6d8650fe62c815a231bb7b", "files": ["COPYING.LESSER"] }]
+    },
+    {
+      "id": "nlopt",
+      "name": "NLopt",
+      "version": "2.5.0 (server), 2.9.1 (wasm)",
+      "license": "MIT AND LGPL-2.1-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/stevengj/nlopt",
+      "note": "The core is MIT; some algorithms are LGPL-2.1-or-later. Statically linked; see GMP's note.",
+      "harvest": [{ "archive": "https://github.com/stevengj/nlopt/archive/v2.5.0.tar.gz", "sha256": "c6dd7a5701fff8ad5ebb45a3dc8e757e61d52658de3918e38bab233e7fd3b4ae" }]
+    },
+    {
+      "id": "libnoise",
+      "name": "libnoise (OrcaSlicer's fork)",
+      "version": "1.0",
+      "license": "LGPL-2.1-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/SoftFever/Orca-deps-libnoise",
+      "note": "Statically linked; see GMP's note.",
+      "harvest": [{ "archive": "https://github.com/SoftFever/Orca-deps-libnoise/archive/refs/tags/1.0.zip", "sha256": "96ffd6cc47898dd8147aab53d7d1b1911b507d9dbaecd5613ca2649468afd8b6", "files": ["README.md"] }]
+    },
+    {
+      "id": "onetbb",
+      "name": "oneTBB",
+      "version": "2021.5.0 (server), 2022.3.0 (wasm mt)",
+      "license": "Apache-2.0",
+      "in": ["server", "wasm"],
+      "url": "https://github.com/uxlfoundation/oneTBB",
+      "harvest": [{ "archive": "https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2021.5.0.zip", "sha256": "83ea786c964a384dd72534f9854b419716f412f9d43c0be88d41874763e7bb47" }]
+    },
+    {
+      "id": "occt",
+      "name": "Open CASCADE Technology",
+      "version": "7.6.0",
+      "license": "LGPL-2.1-only WITH OCCT-exception-1.0",
+      "in": ["server"],
+      "url": "https://dev.opencascade.org/",
+      "note": "STEP import. Statically linked; see GMP's note.",
+      "harvest": [{ "archive": "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V7_6_0.zip", "sha256": "28334f0e98f1b1629799783e9b4d21e05349d89e695809d7e6dfa45ea43e1dbc", "files": ["LICENSE_LGPL_21.txt", "OCCT_LGPL_EXCEPTION.txt"] }]
+    },
+    {
+      "id": "opencv",
+      "name": "OpenCV (core, imgproc, imgcodecs)",
+      "version": "4.6.0",
+      "license": "Apache-2.0",
+      "in": ["server"],
+      "url": "https://opencv.org/",
+      "note": "Built with its bundled libpng (3rdparty/libpng).",
+      "harvest": [{ "archive": "https://github.com/opencv/opencv/archive/refs/tags/4.6.0.tar.gz", "sha256": "1ec1cba65f9f20fe5a41fda1586e01c70ea0c9a6d7b67c9e13edf0cfe2239277", "files": ["LICENSE", "3rdparty/libpng/LICENSE"] }]
+    },
+    {
+      "id": "openvdb",
+      "name": "OpenVDB (tamasmeszaros fork)",
+      "version": "a68fd58",
+      "license": "MPL-2.0",
+      "in": ["server"],
+      "url": "https://github.com/tamasmeszaros/openvdb",
+      "note": "Used unmodified; source at the URL.",
+      "harvest": [{ "archive": "https://github.com/tamasmeszaros/openvdb/archive/a68fd58d0e2b85f01adeb8b13d7555183ab10aa5.zip", "sha256": "f353e7b99bd0cbfc27ac9082de51acf32a8bc0b3e21ff9661ecca6f205ec1d81" }]
+    },
+    {
+      "id": "openexr",
+      "name": "OpenEXR / IlmBase (Half, Iex, IlmThread, Imath)",
+      "version": "2.5.5",
+      "license": "BSD-3-Clause",
+      "in": ["server"],
+      "url": "https://www.openexr.com/",
+      "harvest": [{ "archive": "https://github.com/AcademySoftwareFoundation/openexr/archive/refs/tags/v2.5.5.zip", "sha256": "0307a3d7e1fa1e77e9d84d7e9a8694583fbbbfd50bdc6884e2c96b8ef6b902de" }]
+    },
+    {
+      "id": "blosc",
+      "name": "c-blosc (tamasmeszaros fork)",
+      "version": "1.17.0_tm",
+      "license": "BSD-3-Clause",
+      "in": ["server"],
+      "url": "https://github.com/Blosc/c-blosc",
+      "harvest": [{ "archive": "https://github.com/tamasmeszaros/c-blosc/archive/refs/heads/v1.17.0_tm.zip", "sha256": "dcb48bf43a672fa3de6a4b1de2c4c238709dad5893d1e097b8374ad84b1fc3b3", "files": ["LICENSES/*"] }]
+    },
+    {
+      "id": "draco",
+      "name": "Draco",
+      "version": "1.5.7",
+      "license": "Apache-2.0",
+      "in": ["server"],
+      "url": "https://github.com/google/draco",
+      "harvest": [{ "archive": "https://github.com/google/draco/archive/refs/tags/1.5.7.zip", "sha256": "27b72ba2d5ff3d0a9814ad40d4cb88f8dc89a35491c0866d952473f8f9416b77" }]
+    },
+    {
+      "id": "freetype",
+      "name": "FreeType",
+      "version": "2.12.1 (server), 2.14.3 Emscripten port (wasm)",
+      "license": "FTL OR GPL-2.0-or-later",
+      "in": ["server", "wasm"],
+      "url": "https://freetype.org/",
+      "note": "Used under the FreeType License: portions of this software are copyright (C) The FreeType Project (www.freetype.org). All rights reserved.",
+      "harvest": [{ "archive": "https://github.com/SoftFever/orca_deps/releases/download/freetype-2.12.1.tar.gz/freetype-2.12.1.tar.gz", "sha256": "efe71fd4b8246f1b0b1b9bfca13cfff1c9ad85930340c27df469733bbb620938", "files": ["LICENSE.TXT", "docs/FTL.TXT"] }]
+    },
+    {
+      "id": "libpng",
+      "name": "libpng",
+      "version": "1.6.35 (server), 1.6.58 Emscripten port (wasm)",
+      "license": "Libpng",
+      "in": ["server", "wasm"],
+      "url": "http://www.libpng.org/pub/png/libpng.html",
+      "harvest": [{ "archive": "https://github.com/glennrp/libpng/archive/refs/tags/v1.6.35.zip", "sha256": "3d22d46c566b1761a0e15ea397589b3a5f36ac09b7c785382e6470156c04247f" }]
+    },
+    {
+      "id": "libjpeg-turbo",
+      "name": "libjpeg-turbo",
+      "version": "3.0.1",
+      "license": "IJG AND BSD-3-Clause AND Zlib",
+      "in": ["server"],
+      "url": "https://libjpeg-turbo.org/",
+      "note": "This software is based in part on the work of the Independent JPEG Group.",
+      "harvest": [{ "archive": "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.0.1.zip", "sha256": "d6d99e693366bc03897677650e8b2dfa76b5d6c54e2c9e70c03f0af821b0a52f", "files": ["LICENSE.md", "README.ijg"] }]
+    },
+    {
+      "id": "libjpeg-wasm",
+      "name": "IJG libjpeg (Emscripten port)",
+      "version": "9f",
+      "license": "IJG",
+      "in": ["wasm"],
+      "url": "https://www.ijg.org/",
+      "note": "This software is based in part on the work of the Independent JPEG Group.",
+      "harvest": [{ "emport": "libjpeg", "files": ["README"] }]
+    },
+    {
+      "id": "zlib",
+      "name": "zlib",
+      "version": "1.3 (Ubuntu 24.04, server), 1.3.2 Emscripten port (wasm)",
+      "license": "Zlib",
+      "in": ["server", "wasm"],
+      "url": "https://zlib.net/",
+      "harvest": [{ "ubuntu": "zlib1g" }]
+    },
+    {
+      "id": "curl",
+      "name": "curl (libcurl)",
+      "version": "7.75.0",
+      "license": "curl",
+      "in": ["server"],
+      "url": "https://curl.se/",
+      "harvest": [{ "archive": "https://github.com/curl/curl/archive/refs/tags/curl-7_75_0.zip", "sha256": "a63ae025bb0a14f119e73250f2c923f4bf89aa93b8d4fafa4a9f5353a96a765a", "files": ["COPYING"] }]
+    },
+    {
+      "id": "openssl-1.1.1",
+      "name": "OpenSSL (OrcaSlicer's deps build)",
+      "version": "1.1.1w",
+      "license": "OpenSSL",
+      "in": ["server"],
+      "url": "https://www.openssl.org/",
+      "note": "Linked into libslic3r's dependencies by the deps superbuild. This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit (http://www.openssl.org/). This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).",
+      "harvest": [{ "archive": "https://github.com/openssl/openssl/archive/OpenSSL_1_1_1w.tar.gz", "sha256": "2130e8c2fb3b79d1086186f78e59e8bc8d1a6aedf17ab3907f4cb9ae20918c41", "files": ["LICENSE"] }]
+    },
+    {
+      "id": "rust-std",
+      "name": "The Rust Standard Library",
+      "version": "the stable toolchain the image was built with",
+      "license": "MIT OR Apache-2.0",
+      "in": ["server"],
+      "url": "https://github.com/rust-lang/rust/tree/master/library",
+      "note": "Copyrights in the Rust Standard Library are retained by their contributors. Its full notices are COPYRIGHT-library.html in the toolchain's share/doc/rust.",
+      "harvest": []
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite (bundled by the libsqlite3-sys crate)",
+      "version": "see libsqlite3-sys",
+      "license": "blessing",
+      "in": ["server"],
+      "url": "https://www.sqlite.org/copyright.html",
+      "note": "SQLite is in the public domain. 'May you do good and not evil. May you find forgiveness for yourself and forgive others. May you share freely, never taking more than you give.'",
+      "harvest": []
+    },
+    {
+      "id": "emscripten",
+      "name": "Emscripten runtime (JavaScript glue, system libraries)",
+      "version": "6.0.10",
+      "license": "MIT OR NCSA",
+      "in": ["wasm"],
+      "url": "https://emscripten.org/",
+      "harvest": [{ "emsdk": "LICENSE" }]
+    },
+    {
+      "id": "musl",
+      "name": "musl libc (as included in Emscripten)",
+      "version": "Emscripten 6.0.10",
+      "license": "MIT",
+      "in": ["wasm"],
+      "url": "https://musl.libc.org/",
+      "harvest": [{ "emsdk": "system/lib/libc/musl/COPYRIGHT" }]
+    },
+    {
+      "id": "libcxx",
+      "name": "LLVM libc++, libc++abi and compiler-rt (as included in Emscripten)",
+      "version": "Emscripten 6.0.10",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "in": ["wasm"],
+      "url": "https://llvm.org/",
+      "harvest": [{ "emsdk": "system/lib/libcxx/LICENSE.TXT" }]
+    },
+    {
+      "id": "dlmalloc",
+      "name": "dlmalloc (as included in Emscripten)",
+      "version": "Emscripten 6.0.10",
+      "license": "CC0-1.0",
+      "in": ["wasm"],
+      "url": "https://gee.cs.oswego.edu/dl/html/malloc.html",
+      "note": "Written by Doug Lea and released to the public domain.",
+      "harvest": []
+    },
+    {
+      "id": "system-libraries",
+      "name": "System libraries and packages of the Docker image",
+      "version": "Ubuntu 24.04",
+      "license": "various",
+      "in": ["image"],
+      "url": "https://ubuntu.com/legal/open-source-licences",
+      "note": "The image is based on ubuntu:24.04. glibc and libstdc++ (LGPL / GPL with the GCC runtime library exception) and fontconfig are dynamically linked system libraries; tini, curl and ca-certificates are installed packages. Each package's licence is in the image under /usr/share/doc/<package>/copyright.",
+      "harvest": []
+    }
+  ]
+}

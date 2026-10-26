@@ -1,0 +1,10 @@
+--- deps_src/clipper2/Clipper2Lib/include/clipper2/clipper.h ---
+
+/*******************************************************************************
+* Author    :  Angus Johnson                                                   *
+* Date      :  27 April 2024                                                   *
+* Website   :  https://www.angusj.com                                          *
+* Copyright :  Angus Johnson 2010-2024                                         *
+* Purpose   :  This module provides a simple interface to the Clipper Library  *
+* License   :  https://www.boost.org/LICENSE_1_0.txt                           *
+*******************************************************************************/
