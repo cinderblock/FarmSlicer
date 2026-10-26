@@ -8,6 +8,12 @@ Before the app gets a real icon (it is about to land on people's home
 screens), decide whether "FarmSlicer" is the name to keep. The maintainer's
 concern (2026-10-26): weak search-engine prospects, though no clear conflict.
 
+## Decisions already made (don't re-ask)
+
+- **Keep the name FarmSlicer** (maintainer, 2026-10-26).
+- **Icon: the layer "F"** (concept C: an F drawn in extrusion beads on the
+  accent blue). Sources in `web/icons/`.
+
 ## Findings (2026-10-26)
 
 How names were checked: web search (3D printing, software, products),
@@ -55,15 +61,11 @@ The deployment's domain is separate from the product name, so passkeys
 
 ## Open questions for the user
 
-1. Keep FarmSlicer, or rename? If renaming: which name?
-   (Recommendation: Sliceyard, or keep FarmSlicer.)
-2. If renaming: rename everything (with fallbacks for the old env vars and
-   headers), or only what people see (UI, manifest, docs)?
+(none)
 
 ## Progress log
 
 - [x] Conflict and domain checks for ~40 candidates
-- [ ] Name decided
-- [ ] Trademark search on the chosen name
-- [ ] Icon for the chosen name (concepts from the earlier round are in
-      `%TEMP%/fs-icons/`; the barn "B1" was the pick if the name keeps "farm")
+- [x] Name decided: FarmSlicer stays
+- [x] Icon: the layer "F", `web/icons/` + `render.sh`
+- [ ] Trademark search on "FarmSlicer" (not done)

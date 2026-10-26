@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 96 320 320">
+  <!-- The F alone, for notification badges (web/icons/README.md) -->
+  <g fill="#ffffff">
+    <rect x="136" y="116" width="250" height="40" rx="20"/>
+    <rect x="136" y="164" width="250" height="40" rx="20"/>
+    <rect x="136" y="212" width="72" height="40" rx="20"/>
+    <rect x="136" y="260" width="196" height="40" rx="20"/>
+    <rect x="136" y="308" width="72" height="40" rx="20"/>
+    <rect x="136" y="356" width="72" height="40" rx="20"/>
+  </g>
+</svg>

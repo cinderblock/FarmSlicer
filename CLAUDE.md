@@ -225,8 +225,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   registers it (`serviceWorkerReady()` for push, see `src/notifications.rs`), `installApp.ts` +
   `components/InstallApp.tsx` the sidebar's "Install app". The server sends
   `/sw.js` and the manifest with `Cache-Control: no-cache`
-  (`server::cache_control`). Icons were rendered once from favicon.svg
-  with resvg (strip its `color(display-p3 ...)` fills first)
+  (`server::cache_control`). The icon's sources are `web/icons/`
+  (`icon.svg`, `full-bleed.svg`); `web/icons/render.sh` (resvg) writes
+  favicon.svg and every PNG, committed
 - `web/src/sliceDraft.ts` — the Slice page's work in progress per tab
   (sessionStorage id → IndexedDB `drafts`, `web/src/idb.ts`): restored
   whenever the page opens in that tab, saved as it changes, before an

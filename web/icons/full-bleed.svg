@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- FarmSlicer's icon: an F drawn in extrusion beads (web/icons/README.md) -->
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a9eff"/><stop offset="1" stop-color="#2a5fb8"/></linearGradient></defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    <rect x="160" y="144" width="200" height="32" rx="16" opacity="1"/>
+    <rect x="160" y="182.4" width="200" height="32" rx="16" opacity="0.93"/>
+    <rect x="160" y="220.8" width="57.6" height="32" rx="16" opacity="0.86"/>
+    <rect x="160" y="259.2" width="156.8" height="32" rx="16" opacity="0.93"/>
+    <rect x="160" y="297.6" width="57.6" height="32" rx="16" opacity="0.86"/>
+    <rect x="160" y="336" width="57.6" height="32" rx="16" opacity="0.86"/>
+  </g>
+</svg>

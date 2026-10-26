@@ -40,7 +40,7 @@ self.addEventListener("push", (event) => {
       tag: msg.tag,
       renotify: Boolean(msg.tag),
       icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      badge: "/badge-96.png",
       data: { url: msg.url || "/" },
     }),
   );
