@@ -47,6 +47,28 @@ Answers from the maintainer, 2026-10-26:
   thread (branch `fix/openssl-1.1.1`).
 - **The demo** is deferred to its own thread (see `plans/demo.md`).
 
+## Image audit before making the GHCR package public (2026-10-26)
+
+The package (`ghcr.io/cinderblock/farmslicer`) was private only because
+GitHub makes new packages private and visibility doesn't follow the repo.
+Public exposes every version, including `:buildcache` (`mode=max`, every
+build stage) and the untagged older caches. Checked:
+
+- Every tagged version's commit is in the current (post-cleanup) public
+  history, so nothing in the package was built from the pre-cleanup tree.
+- The Dockerfile takes no secrets; build args are only `JOBS`, `GIT_SHA`
+  and the Ubuntu version. CI builds from a clean checkout (tracked files
+  only, less `.dockerignore`).
+- Production's image (`79cb3f2`): env is `PORT`, `RUST_LOG`; labels are the
+  licence, commit and repo URL; history is only COPYs from the repo and
+  apt installs. `/app` (173 MB) and the binary scanned for the private
+  hostnames, domains, names, LAN addresses, local paths and token patterns:
+  only false positives (library words like "sentinel"/"passphrase",
+  placeholder example addresses, vendor profiles' example IPs, React's
+  `memo_cache_sentinel`, Emscripten's `/home/web_user`, CI runner paths).
+- The one personal detail is intentional: `NOTICE` names the maintainer as
+  copyright holder (could be the company instead).
+
 ## Findings: licensing
 
 ### What FarmSlicer declares
