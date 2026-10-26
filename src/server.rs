@@ -1817,6 +1817,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::pools::routes())
         .merge(crate::integration::routes())
         .merge(crate::webhooks::routes())
+        .merge(crate::notifications::routes())
         .merge(crate::dispatch::routes())
         .merge(crate::autoplate::routes())
         .merge(crate::preview_api::routes())

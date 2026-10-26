@@ -2,6 +2,7 @@
 // is needed, and helpers to log out / refresh after a 401.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { forgetDevice } from "./notifications";
 
 export interface User {
   id: string;
@@ -59,6 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // While still signed in: this device stops getting the account's notifications.
+    await forgetDevice().catch(() => {});
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     await refresh();
   }, [refresh]);

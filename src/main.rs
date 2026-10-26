@@ -19,6 +19,7 @@ mod incidents;
 mod integration;
 mod join_api;
 mod moonraker;
+mod notifications;
 mod nozzles;
 mod octoprint;
 mod outcomes;

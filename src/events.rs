@@ -4,10 +4,14 @@
 //!
 //! - `print.started`, `print.finished`, `print.failed` (failed or stopped):
 //!   `{print, projects}` (the ids of the projects the plate carries parts of)
+//! - `print.approval_requested`: `{print, projects}` when a print waits
+//!   for someone to approve it
 //! - `print.outcome`: `{print, lines, projects}` when someone (or the
 //!   printer) records how it came out
 //! - `item.completed`: `{project, item}` when an item has enough good copies
 //! - `project.printed`, `project.status`: `{project}` (with its `summary`)
+//!
+//! Print events also notify people (src/notifications.rs).
 
 use serde_json::{Value, json};
 
@@ -35,6 +39,15 @@ pub fn print_status(state: &AppState, print_id: &str, status: &str) {
         _ => return,
     };
     emit(state, event, print.group_id.as_deref(), print_data(state, &print));
+    if event != "print.started" {
+        crate::notifications::print_event(state, event, &print);
+    }
+}
+
+/// A print is waiting for approval (src/prints_api.rs `send_job`).
+pub fn approval_requested(state: &AppState, print: &PrintRecord) {
+    emit(state, "print.approval_requested", print.group_id.as_deref(), print_data(state, print));
+    crate::notifications::print_event(state, "print.approval_requested", print);
 }
 
 pub fn print_outcome(state: &AppState, print: &PrintRecord) {

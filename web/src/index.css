@@ -4140,3 +4140,29 @@ a.btn-sm {
     align-items: stretch;
   }
 }
+
+/* Notifications (components/NotificationSettings.tsx, the Account page) */
+.notify-device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.notify-device .btn-primary {
+  width: auto;
+}
+.notify-prefs {
+  max-width: 36rem;
+  margin: 0.75rem 0 1rem;
+}
+.notify-prefs fieldset {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.75rem 0.6rem;
+  margin: 0 0 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.notify-prefs legend { color: var(--text-dim); font-size: 0.85rem; }

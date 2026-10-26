@@ -23,9 +23,10 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     id: "2026-10-26",
     date: "2026-10-26",
-    title: "FarmSlicer as an app",
+    title: "FarmSlicer as an app, with notifications",
     highlights: [
       "FarmSlicer can be installed as an app: “Install app” at the bottom of the menu puts it on your phone's home screen or your computer's app list, where it opens in its own window.",
+      "Notifications: turn them on under Account and your phone or computer tells you when one of your prints fails or is stopped, even with FarmSlicer closed. Operators hear about their printers too, and you can also ask to hear when prints finish or wait for your approval. On iPhone and iPad, add FarmSlicer to your Home Screen first.",
     ],
   },
   {

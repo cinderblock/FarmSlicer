@@ -513,6 +513,7 @@ async fn send_plate_now(
             printer.name,
             reason.as_deref().unwrap_or("")
         );
+        crate::events::approval_requested(&state, &print);
         return Ok((StatusCode::ACCEPTED, print));
     }
     if decided_by.is_some() {
@@ -541,7 +542,7 @@ fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRe
 
 /// Admins and the managers of the print's group approve requests; only
 /// admins approve G-code that needs review (it's the farm's hardware).
-fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
+pub(crate) fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
     viewer.admin || (!print.safety_review && print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)))
 }
 
@@ -921,6 +922,9 @@ async fn control_print(
         }
     }
     let command = control_command(&body)?;
+    if matches!(command, Command::Stop) {
+        crate::notifications::stopped_by(&print.id, &user.id);
+    }
     println!("Print {}: {} asks to {} it", print.id, user.username, body.action);
     run_control(&state, &printer_id, command).await
 }
@@ -959,6 +963,11 @@ async fn control_printer(
     }
     state.db.get_printer(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such printer"))?;
     let command = control_command(&body)?;
+    if matches!(command, Command::Stop) {
+        for p in state.db.list_prints(Some(&id), true, 5) {
+            crate::notifications::stopped_by(&p.id, &user.id);
+        }
+    }
     println!("Printer {id}: {} asks to {}", user.username, body.action);
     run_control(&state, &id, command).await
 }

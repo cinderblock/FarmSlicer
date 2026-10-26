@@ -370,13 +370,20 @@ what the printers do next (the queue).
   (not printers, not the queue); LAN only unless an admin lets that key
   in from outside (Integrations page; personal keys never are). Webhooks
   POST signed events (`print.started`, `print.finished`, `print.failed`,
-  `print.outcome`, `item.completed`, `project.printed`,
+  `print.approval_requested`, `print.outcome`, `item.completed`, `project.printed`,
   `project.status`): `X-FarmSlicer-Signature: sha256=<hex>` is the
   HMAC-SHA256 of `<X-FarmSlicer-Timestamp>.<body>` with the webhook's
   secret; failures are retried (1 min … 12 h) and logged. The usage
   report (`/api/usage/prints`) says what prints used per project
   (printer hours, grams by material, copies, cost estimate) for billing
   tools; FarmSlicer never invoices.
+- **Notifications** (Account page): Web Push to the phones and computers
+  people turn them on for, even with FarmSlicer closed: a print failed or
+  was stopped (on by default for your own prints and the printers you
+  operate), finished, or waits for your approval. Nothing to configure:
+  the server makes its push key on first use, and pushes go out to the
+  browsers' push services (needs the https address; on iPhone and iPad,
+  FarmSlicer added to the Home Screen).
 - **Pools** (Settings page, admins) are sets of printers with the people
   who run them. An operator sees the queue for their pools' printers in
   full, sends to them, controls their prints (anyone's) and records
@@ -487,6 +494,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/printers/{id}/send-mode`, `POST /api/printers/{id}/bed-clear` | how a printer takes the queue (`{mode: manual\|confirm\|yolo, acknowledge}`; YOLO needs `acknowledge: true`); the bed is clear. Printers carry `dispatch` (`send_mode`, `waiting_for: "bed"`) |
 | `GET/POST /api/integrations/keys`, `DELETE /api/integrations/keys/{id}`, `POST /api/integrations/keys/{id}/remote` | integration keys (admins; managers for their groups): `{name, group_id, client_ref, permissions: [projects:read, projects:write, usage:read]}`, the key returned once; `remote: {allowed}` (admins) lets one be used from the internet, still only to its scoped routes |
 | `GET/POST /api/integrations/webhooks`, `PATCH/DELETE /api/integrations/webhooks/{id}`, `GET …/{id}/deliveries`, `POST …/{id}/test`, `POST /api/integrations/deliveries/{id}/retry` | webhooks (admins): `{url, events: ["*"] \| [...], group_id, description, enabled, rotate_secret}` (the secret returned once), their delivery log |
+| `GET/PUT /api/me/notifications`, `POST /api/me/notifications/subscriptions`, `DELETE /api/me/notifications/subscriptions/{id}`, `POST /api/me/notifications/test` | your notifications: the server's push key, the events and relations you can choose, `prefs` (`{event: [mine\|operated\|managed\|all]}`) and your devices; subscribe this browser (`PushSubscription.toJSON()`, endpoints must be a known push service), forget one, send a test |
 | `GET /api/usage/prints?group=&client_ref=&project=&from=&to=` | what prints that ended in the period used, per project and in total: prints, printer hours, grams by material, good/failed copies, estimated cost (admins, a group's managers, keys with `usage:read`) |
 | `POST /api/printers/{id}/reports`, `GET /api/printer-reports?open=1`, `POST /api/printer-reports/{id}/resolve` | equipment problem reports (anyone reports; admins see all and resolve) |
 | `POST /api/printers/{id}/preheat` (`{slot}` or `{material}`), `POST /api/printers/{id}/cooldown` | heat an idle printer for a tray's filament or a material, or cool it |
@@ -543,7 +551,8 @@ src/            Rust server: main.rs, server.rs (HTTP + jobs), db.rs (SQLite),
                 autoplate.rs (plates for missing copies, libslic3r's arrange),
                 integration.rs (integration keys, usage), webhooks.rs +
                 db/webhooks.rs (signed event delivery),
-                events.rs (what happened, for webhooks),
+                events.rs (what happened, for webhooks and notifications),
+                notifications.rs + db/notifications.rs (Web Push),
                 preview_api.rs (a job's G-code for the preview),
                 package/ (.gcode.3mf and G-code readers), camera/,
                 discovery/ (SSDP, mDNS, SDCP), feedback.rs +

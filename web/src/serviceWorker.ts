@@ -51,3 +51,18 @@ export async function updateServiceWorker(): Promise<void> {
     // Offline or the server is restarting: the next navigation checks again.
   }
 }
+
+/**
+ * Call `open(path)` when the service worker asks this window to show a
+ * page (a tapped notification, sw.js): the app routes there itself rather
+ * than the page reloading. Returns the unsubscribe.
+ */
+export function onOpenRequest(open: (path: string) => void): () => void {
+  if (!("serviceWorker" in navigator)) return () => {};
+  const listener = (e: MessageEvent) => {
+    const data = e.data as { type?: string; path?: unknown } | null;
+    if (data?.type === "farmslicer.open" && typeof data.path === "string" && data.path.startsWith("/")) open(data.path);
+  };
+  navigator.serviceWorker.addEventListener("message", listener);
+  return () => navigator.serviceWorker.removeEventListener("message", listener);
+}

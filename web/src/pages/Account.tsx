@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { useJson } from "../api";
+import NotificationSettings from "../components/NotificationSettings";
 import RecoveryCode from "../components/RecoveryCode";
 import { UsageLines } from "../components/Quota";
 import type { QuotaLine } from "../groups";
@@ -31,7 +32,7 @@ interface MyUsage {
   groups: { group_id: string; path: string; lines: QuotaLine[] }[];
 }
 
-/** The signed-in user's own settings: groups and limits, passkeys, recovery code, API keys. */
+/** The signed-in user's own settings: groups and limits, notifications, passkeys, recovery code, API keys. */
 export default function AccountPage() {
   const { user, isGuest, refresh } = useAuth();
   const [rev, setRev] = useState(0);
@@ -166,6 +167,8 @@ export default function AccountPage() {
       ) : (
         <p className="hint">Loading…</p>
       )}
+
+      <NotificationSettings />
 
       <h3>Passkeys</h3>
       <p className="hint">

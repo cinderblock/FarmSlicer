@@ -32,6 +32,7 @@ pub const EVENTS: &[&str] = &[
     "print.started",
     "print.finished",
     "print.failed",
+    "print.approval_requested",
     "print.outcome",
     "item.completed",
     "project.printed",
@@ -102,24 +103,28 @@ fn enqueue_for(state: &AppState, webhook_id: &str, event: &str, data: &Value) {
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        use tokio_rustls::rustls;
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .expect("the ring provider supports TLS 1.2 and 1.3")
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        reqwest::Client::builder()
-            .use_preconfigured_tls(tls)
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(TIMEOUT)
-            .user_agent(concat!("FarmSlicer-Webhooks/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .expect("the webhook client builds")
-    })
+    CLIENT.get_or_init(|| internet_client(concat!("FarmSlicer-Webhooks/", env!("CARGO_PKG_VERSION"))))
+}
+
+/// A client for the internet (webhooks, push services): Mozilla's roots, no
+/// redirects, short timeouts.
+pub(crate) fn internet_client(user_agent: &'static str) -> reqwest::Client {
+    use tokio_rustls::rustls;
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .expect("the ring provider supports TLS 1.2 and 1.3")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    reqwest::Client::builder()
+        .use_preconfigured_tls(tls)
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(TIMEOUT)
+        .user_agent(user_agent)
+        .build()
+        .expect("the internet client builds")
 }
 
 async fn deliver(state: &AppState, d: &crate::db::Delivery) {

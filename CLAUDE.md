@@ -222,7 +222,7 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
 - `web/public/sw.js` + `manifest.webmanifest` + icons — the installable
   app. The service worker has **no fetch handler and no cache** on purpose
   (appUpdate.ts needs index.html from the network); `web/src/serviceWorker.ts`
-  registers it (`serviceWorkerReady()` for push), `installApp.ts` +
+  registers it (`serviceWorkerReady()` for push, see `src/notifications.rs`), `installApp.ts` +
   `components/InstallApp.tsx` the sidebar's "Install app". The server sends
   `/sw.js` and the manifest with `Cache-Control: no-cache`
   (`server::cache_control`). Icons were rendered once from favicon.svg
@@ -296,6 +296,22 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (print status from `printing::apply` and the send task, outcomes from
   `outcomes::after_record`, item/project from `projects::refresh` via
   `project_items.done_at`)
+- `src/notifications.rs` — Web Push (`db/notifications.rs`:
+  `push_subscriptions`, `users.notify_prefs`): `events::print_status` and
+  `events::approval_requested` call `print_event`; recipients are only
+  subscribers, by `relations` (mine = sent it or made the job, operated,
+  managed, all) and `prefs_of` (defaults in `default_prefs`), approvals
+  only to `prints_api::can_approve_print`, never whoever just stopped it
+  (`stopped_by`, in memory). RFC 8291 encryption and RFC 8292 VAPID on
+  the OpenSSL already linked (HKDF = `webhooks::hmac_sha256`); the VAPID
+  key is made on first use (setting `vapid_key`). Endpoints: an allowlist
+  of push services (`PUSH_SERVICES`; `FARMSLICER_PUSH_SERVICES` adds
+  origins, for `tests/notifications-e2e.mjs`'s fake one, which decrypts
+  with Node's crypto). Not retried; 404/410 forget the device. Client:
+  `web/src/notifications.ts`, `components/NotificationSettings.tsx`
+  (Account page), the handlers in `web/public/sw.js` (a tap posts
+  `farmslicer.open` to an open window, which routes there itself:
+  `serviceWorker.ts` `onOpenRequest`). Plan: `plans/notifications.md`
 - `src/autoplate.rs` — plates for missing copies: `candidate` (an item
   with a FarmSlicer recipe whose model is on the server), `batches` (same
   config, mixing rule), `plate_batch` (`AppState::arrange` →

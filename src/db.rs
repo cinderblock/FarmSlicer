@@ -10,12 +10,14 @@ mod pools;
 mod queue;
 mod webhooks;
 mod dispatch;
+mod notifications;
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
 pub use projects::{Item, JobItem, NewProject, Progress, Project, ProjectFilter};
 pub use pools::Pool;
 pub use queue::QueueEntry;
 pub use webhooks::{Delivery, Webhook};
 pub use dispatch::Dispatch;
+pub use notifications::PushSubscription;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -585,6 +587,7 @@ impl Db {
         pools::migrate(&conn);
         webhooks::migrate(&conn);
         dispatch::migrate(&conn);
+        notifications::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (

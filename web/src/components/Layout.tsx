@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useAuth } from "../auth";
 import { useJson } from "../api";
 import { FEEDBACK_CHANGED, newCount, prefillFor, type Counts, type FeedbackPrefill } from "../feedback";
@@ -9,6 +9,7 @@ import InstallApp from "./InstallApp";
 import UpdateBanner from "./UpdateBanner";
 import WhatsNewDialog from "./WhatsNewDialog";
 import { notifyLocation, reloadedQuietly } from "../appUpdate";
+import { onOpenRequest } from "../serviceWorker";
 import { CHANGELOG, type ChangelogEntry } from "../changelog";
 import { localDay, markSeen, seenId, unseenEntries } from "../whatsNew";
 
@@ -77,6 +78,10 @@ export default function Layout() {
   useEffect(() => {
     notifyLocation(location.pathname);
   }, [location.pathname]);
+
+  // A tapped notification opens its page here (sw.js).
+  const navigate = useNavigate();
+  useEffect(() => onOpenRequest((path) => navigate(path)), [navigate]);
 
   // Narrow screens: the sidebar is a drawer behind the top bar's menu button.
   // It is open for the location it was opened at, so any navigation (a link,
