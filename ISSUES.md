@@ -96,7 +96,7 @@ package says 443,074 s and 2,351 g; per filament 0.35-0.5x (filament 1:
 `gcode::effective_time`, and grams feed costs; CLAUDE.md already notes
 multi-material H2D files hadn't been through the check.
 
-## The server binary links OrcaSlicer's OpenSSL 1.1.1w (and libcurl)
+## The server binary links OrcaSlicer's OpenSSL 1.1.1w (and libcurl) — in progress — fix/openssl-1.1.1
 
 `build.rs` (lines 159-161) statically links `libcrypto`, `libssl` and
 `libcurl` from OrcaSlicer's deps build, which pins
