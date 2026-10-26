@@ -4176,6 +4176,9 @@ a.btn-sm {
   margin: 0;
 }
 .sidebar-source {
-  align-self: flex-start;
+  display: flex;
+  gap: 0.75rem;
+}
+.sidebar-source .link-button {
   text-decoration: none;
 }

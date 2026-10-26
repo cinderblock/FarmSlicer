@@ -1,7 +1,7 @@
 import { useAuth } from "../auth";
 import { sourceUrl } from "../source";
 
-/** Under the sign-in pages' card: FarmSlicer is open source, and where this build's source is. */
+/** Under the sign-in pages' card: FarmSlicer is open source, where this build's source is, and the licences. */
 export default function SourceFooter() {
   const { status } = useAuth();
   return (
@@ -9,6 +9,10 @@ export default function SourceFooter() {
       FarmSlicer is free software (AGPL).{" "}
       <a href={sourceUrl(status?.source_url)} target="_blank" rel="noopener noreferrer">
         Source code
+      </a>
+      {" · "}
+      <a href="/THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener noreferrer">
+        Licences
       </a>
     </p>
   );
