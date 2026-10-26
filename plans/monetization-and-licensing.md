@@ -25,6 +25,22 @@ This document answers three questions:
 2. What that license demands of each business model.
 3. What comparable projects and vendors charge, and what to sell first.
 
+## Decisions already made (don't re-ask)
+
+Answers from the maintainer, 2026-10-26:
+
+- **No trademark filing before there is revenue.** The free steps are fine:
+  use the name consistently (rights in a mark accrue with use) and publish
+  a trademark policy.
+- **Bambu restricting third-party access isn't a concern.**
+- **Hosted versions:** agreed, as the later step.
+- **A company already exists** (a C corp); whether to sell under it is an
+  open question below.
+- **The in-app "Source code" link:** done (`69c5cd5`).
+- **The licence paperwork** (notices, licence fields, wrong credits) and
+  **the OpenSSL 1.1.1 issue** are being handled in separate threads.
+- **The demo** is deferred to its own thread (see `plans/demo.md`).
+
 ## Findings: licensing
 
 ### What FarmSlicer declares

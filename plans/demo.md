@@ -57,6 +57,26 @@ it came out. Asked by the maintainer on 2026-10-26, with the project site.
    beyond their own; upload limits; the feedback inbox doesn't fill with
    noise (maybe its own label); the G-code check stays strict.
 
+## Decisions already made (don't re-ask)
+
+From the maintainer, 2026-10-26: **open (no sign-in), in the browser,
+simulated printers.** Asked whether it can run entirely in the browser or
+on Cloudflare Workers. Worked out in its own thread later. The options to
+weigh there:
+
+- **All in the browser, on Cloudflare Pages:** the web app with a fake
+  `/api` answered in the browser (the service worker, IndexedDB for
+  storage) and simulated printers in JavaScript; slicing already runs in
+  the browser (the WebAssembly engine). Nothing to host, nothing shared
+  between visitors, nothing to abuse. The cost is a second implementation
+  of the API that must keep up with the real one.
+- **The real server on Workers:** Rust on Workers (workers-rs) with D1 for
+  SQLite and Durable Objects per visitor. Server slicing can't fit the
+  Workers limits (CPU time, memory), so slicing stays in the browser;
+  printer drivers become simulations; much of `src/` would need porting.
+- **The real server in a small container** (the design below): least new
+  code, but a public service to run and keep safe.
+
 ## Open questions for the user
 
 1. Where does it run: a stack on buildhost behind the existing proxy or a
