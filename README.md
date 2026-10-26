@@ -146,7 +146,11 @@ can run in the user's browser.
   quality, filament, nozzle, plate, supports, support materials, every
   Quick Setting), how often and to what, for admins (`/reports`).
 
-License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
+License: FarmSlicer's own code is AGPL-3.0-or-later. Builds that include
+libslic3r (the server, the Docker image, the browser engine) are AGPL-3.0,
+since OrcaSlicer licenses libslic3r under version 3 without "or later". See
+`NOTICE` for the details, `LICENSE` for the licence text and
+`THIRD-PARTY-NOTICES.txt` for the software FarmSlicer includes.
 
 ## Printers
 

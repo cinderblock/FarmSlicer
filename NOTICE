@@ -1,0 +1,43 @@
+FarmSlicer
+Copyright (C) 2026 Cameron Tacklind and the FarmSlicer contributors
+https://github.com/cinderblock/FarmSlicer
+
+Licensing
+---------
+
+FarmSlicer's own code (everything in this repository outside extern/, unless a
+file or directory says otherwise) is free software: you can redistribute it
+and/or modify it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version. SPDX: AGPL-3.0-or-later.
+
+Builds that include libslic3r (the server binary, the Docker image and the
+WebAssembly browser engine) combine that code with OrcaSlicer's libslic3r,
+which OrcaSlicer licenses under "the GNU Affero General Public License,
+version 3" without "or later". Those builds are therefore distributed under
+the GNU Affero General Public License, version 3 only. SPDX: AGPL-3.0-only.
+
+The full text of the licence is in LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+Source code
+-----------
+
+The AGPL gives everyone who uses FarmSlicer over a network the right to its
+Corresponding Source. The source of every published build is the commit it
+was built from, in the repository above (the commit is the app's version, in
+/version.json and the What's New dialog), with the OrcaSlicer submodule it
+pins and the build scripts in Dockerfile and wasm/.
+
+Third-party software
+--------------------
+
+FarmSlicer includes and links software by others, each under its own licence:
+libslic3r and its C++ dependencies, Rust crates, JavaScript packages, fonts
+and data. Their notices are in THIRD-PARTY-NOTICES.txt (regenerate it with
+scripts/third-party-notices.mjs). The browser engine's build pieces adapted
+from orcaslicer-wasm are described in wasm/NOTICE.orcaslicer-wasm.md.

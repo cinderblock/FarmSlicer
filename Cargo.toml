@@ -2,6 +2,9 @@
 name = "farmslicer"
 version = "0.1.0"
 edition = "2024"
+# FarmSlicer's own code. A build linked with libslic3r is AGPL-3.0-only: see NOTICE.
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/cinderblock/FarmSlicer"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws", "multipart"] }
