@@ -34,6 +34,10 @@ Answers from the maintainer, 2026-10-26:
   a trademark policy.
 - **Bambu restricting third-party access isn't a concern.**
 - **Hosted versions:** agreed, as the later step.
+- **The image stays free and public; what's sold is support and cloud
+  hosting** (2026-10-26). Not paid binaries.
+- **First offering and selling under the existing C corp:** to decide
+  "soon"; still open.
 - **A company already exists** (a C corp); whether to sell under it is an
   open question below.
 - **The in-app "Source code" link:** done (`69c5cd5`).
