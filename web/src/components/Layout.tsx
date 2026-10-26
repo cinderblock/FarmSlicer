@@ -10,6 +10,7 @@ import UpdateBanner from "./UpdateBanner";
 import WhatsNewDialog from "./WhatsNewDialog";
 import { notifyLocation, reloadedQuietly } from "../appUpdate";
 import { onOpenRequest } from "../serviceWorker";
+import { sourceUrl } from "../source";
 import { CHANGELOG, type ChangelogEntry } from "../changelog";
 import { localDay, markSeen, seenId, unseenEntries } from "../whatsNew";
 
@@ -151,6 +152,15 @@ export default function Layout() {
             {unseen && <span className="whats-new-dot" title="Something changed since you last looked" />}
           </div>
           <InstallApp />
+          <a
+            className="link-button sidebar-source"
+            href={sourceUrl(status?.source_url)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="FarmSlicer is free software (AGPL): the source code of this version"
+          >
+            Source code
+          </a>
           <div className="sidebar-feedback">
             <button
               className="btn-sm"

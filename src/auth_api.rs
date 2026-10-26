@@ -182,7 +182,21 @@ async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<V
         "remote": remote,
         // Signed in, but that session can't be used from here (why).
         "remote_refused": remote_refused,
+        "source_url": source_url(),
     }))
+}
+
+/// Where this instance's source code is, for the "Source code" link every
+/// page shows (the AGPL's §13: people using it over a network are offered
+/// its source). `{commit}` stands for the commit the web app was built
+/// from; the browser fills it in. A deployment running modified code sets
+/// `FARMSLICER_SOURCE_URL` to where its own source is.
+fn source_url() -> String {
+    std::env::var("FARMSLICER_SOURCE_URL")
+        .ok()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "https://github.com/cinderblock/FarmSlicer/tree/{commit}".to_string())
 }
 
 // ---- public: first-run setup ----------------------------------------------------

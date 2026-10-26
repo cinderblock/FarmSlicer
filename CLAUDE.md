@@ -228,6 +228,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (`server::cache_control`). The icon's sources are `web/icons/`
   (`icon.svg`, `full-bleed.svg`); `web/icons/render.sh` (resvg) writes
   favicon.svg and every PNG, committed
+- `web/src/source.ts` — the "Source code" link (AGPL §13): the template
+  is `/api/auth/status`'s `source_url` (`auth_api::source_url`,
+  `FARMSLICER_SOURCE_URL`), `{commit}` = `build.ts`'s commit; shown in the
+  sidebar and under every sign-in card (`components/SourceFooter.tsx`)
 - `web/src/sliceDraft.ts` — the Slice page's work in progress per tab
   (sessionStorage id → IndexedDB `drafts`, `web/src/idb.ts`): restored
   whenever the page opens in that tab, saved as it changes, before an

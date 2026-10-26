@@ -28,6 +28,8 @@ export interface AuthStatus {
   remote: boolean;
   /** Signed in, but the session can't be used from here: why. */
   remote_refused: string | null;
+  /** Where this instance's source is (`{commit}` = this build's): source.ts. */
+  source_url?: string;
 }
 
 interface AuthContextValue {

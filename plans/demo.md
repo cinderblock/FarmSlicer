@@ -69,7 +69,7 @@ it came out. Asked by the maintainer on 2026-10-26, with the project site.
 
 - [x] Plan written (2026-10-26)
 - [ ] Questions answered
-- [ ] "Source code" link in the app (AGPL §13; blocker)
+- [x] "Source code" link in the app (AGPL §13): sidebar + sign-in pages, `FARMSLICER_SOURCE_URL`
 - [ ] Seed script + demo compose file (in this repo, generic)
 - [ ] Ops stack (staged for approval)
 - [ ] DNS for demo.farmslicer.com (staged for approval)

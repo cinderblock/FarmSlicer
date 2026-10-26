@@ -206,6 +206,7 @@ The maintainer's own farm runs the same image from the ops repo on
 | `FARMSLICER_ORIGINS` | `http://localhost:9337,http://localhost:5173` | Comma-separated origins the UI is served from. The first one is canonical: its host is the WebAuthn relying-party ID (never change it once users have enrolled) and it is used in invite links. Must be HTTPS except for `localhost`. |
 | `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner (local requests only once `FARMSLICER_LAN_HEADER` is set) |
 | `FARMSLICER_LAN_HEADER` | unset | Turns on remote access (see "Remote access"): the header your reverse proxy sets to `1` on local-network requests. Requests without it count as from the internet. Unset: every request counts as local |
+| `FARMSLICER_SOURCE_URL` | this repository at `{commit}` | Where the "Source code" link on every page points. The AGPL asks that people using FarmSlicer over a network be offered its source: if you run a modified version, set this to where your source is. `{commit}` becomes the commit the web app was built from |
 | `RUST_LOG` | — | Log level |
 
 Data (SQLite db, uploaded models, G-code) lives in `/app/data`.

@@ -19,6 +19,11 @@ const ownerAuthn = new SoftAuthenticator();
 let r = await owner.get("/api/auth/status");
 check(r.json?.setup_required === true, "fresh server reports setup_required", JSON.stringify(r.json));
 check(r.json?.rp_id === RP_ID, "rp_id matches the test origin", r.json?.rp_id);
+check(
+  r.json?.source_url === "https://github.com/cinderblock/FarmSlicer/tree/{commit}",
+  "the status says where the source is, before anyone signs in (AGPL §13)",
+  r.json?.source_url,
+);
 r = await owner.get("/api/printers");
 check(r.status === 401, "protected route is 401 before setup", String(r.status));
 

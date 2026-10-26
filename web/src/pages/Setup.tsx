@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../auth";
 import RecoveryCode from "../components/RecoveryCode";
+import SourceFooter from "../components/SourceFooter";
 import { browserSupportsWebAuthn, defaultKeyName, registerPasskey } from "../passkeys";
 
 /** First run: no accounts exist, so whoever gets here creates the owner with a passkey. */
@@ -71,6 +72,7 @@ export default function SetupPage() {
           {error && <p className="login-error">{error}</p>}
         </form>
       </div>
+      <SourceFooter />
     </div>
   );
 }
