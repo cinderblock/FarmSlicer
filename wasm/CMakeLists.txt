@@ -91,14 +91,16 @@ if(NOT ORCA_WASM_THREADS)
   add_compile_definitions(SLIC3R_NO_TBB=1 BOOST_LOG_NO_THREADS)
 else()
   # MT: real oneTBB + Boost.Thread from install-mt. Only the stubs for libraries
-  # that are not linked at all (OpenSSL MD5, OpenVDB) stay on the include path.
+  # that are not linked at all (OpenVDB) stay on the include path.
   set(_mt_shims "${CMAKE_BINARY_DIR}/mt_shims")
   file(MAKE_DIRECTORY "${_mt_shims}")
-  foreach(_d openssl openvdb)
+  foreach(_d openvdb)
     file(CREATE_LINK "${WASM_SHIMS_DIR}/${_d}" "${_mt_shims}/${_d}" SYMBOLIC)
   endforeach()
   include_directories(BEFORE SYSTEM "${_mt_shims}")
 endif()
+# libslic3r's <openssl/md5.h>: the standalone MD5 both engines use.
+include_directories(BEFORE SYSTEM "${CMAKE_CURRENT_LIST_DIR}/../cxx/shims")
 include_directories(SYSTEM "${WASM_DEPS_PREFIX}/include" "${WASM_DEPS_PREFIX}/include/eigen3")
 
 # Emscripten ports: at compile time too, so a fresh emsdk fetches their headers.

@@ -1,8 +1,11 @@
 #pragma once
-// OpenSSL is not linked in the WASM build. libslic3r only needs the legacy
-// MD5_* API (file checksums in utils.cpp / bbs_3mf.cpp). This is a compact,
-// standalone RFC 1321 implementation (verified against md5sum by
-// wasm/tests/md5_selftest.cpp); the previous shim was a non-MD5 placeholder.
+// libslic3r's <openssl/md5.h>, for both engines (native and WebAssembly):
+// libslic3r only needs the legacy MD5_* API (file checksums in utils.cpp /
+// bbs_3mf.cpp, e.g. a package's plate_N.gcode.md5), so the C++ side links no
+// OpenSSL at all. A compact, standalone RFC 1321 implementation; the functions
+// are C++ inline (mangled names), so they never collide with the libcrypto
+// the Rust side links. Every package is cross-checked: src/package/bambu.rs
+// compares the .md5 entry with its own MD5 of the plate's G-code.
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
