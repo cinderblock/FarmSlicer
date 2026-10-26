@@ -20,11 +20,18 @@ Native builds mirror the Dockerfile's steps:
 
 1. `git submodule update --init` (OrcaSlicer, pinned to tag **v2.4.2**).
 2. Build the deps superbuild in `extern/OrcaSlicer/deps/build` with all `dep_*`
-   targets except `dep_wxWidgets dep_GLEW dep_GLFW dep_OpenCSG dep_WebView2`,
-   then libslic3r in `extern/OrcaSlicer/build` with `-DSLIC3R_GUI=OFF`
-   (targets `libslic3r libslic3r_cgal libnest2d`). OrcaSlicer's top-level CMake
-   still demands DBus and glfw3 on Linux with the GUI off: `libdbus-1-dev` and
-   `-Dglfw3_DIR=docker/cmake-stubs` (an empty package config) satisfy it.
+   targets except `dep_wxWidgets dep_GLEW dep_GLFW dep_OpenCSG dep_WebView2
+   dep_OpenSSL dep_CURL`, then libslic3r in `extern/OrcaSlicer/build` with
+   `-DSLIC3R_GUI=OFF` (targets `libslic3r libslic3r_cgal libnest2d`).
+   OrcaSlicer's top-level CMake still demands DBus, glfw3, curl and OpenSSL on
+   Linux with the GUI off: `libdbus-1-dev`, `-Dglfw3_DIR=docker/cmake-stubs`
+   and `-DCMAKE_MODULE_PATH=docker/cmake-stubs` (empty glfw3 and curl
+   packages), and `libssl-dev` (OpenSSL 3 headers only) satisfy it.
+   libslic3r uses no curl and only MD5 from OpenSSL; build.rs compiles and
+   links that against the Rust side's vendored OpenSSL 3 (`DEP_OPENSSL_*`
+   from `openssl-sys`), the binary's only OpenSSL (`plans/openssl-in-deps.md`).
+   A deps build from before that still holds OrcaSlicer's OpenSSL 1.1.1:
+   rebuild it.
 3. `cd web && bun install && bun run build` → `dist/web`.
 4. `cargo build --release` → `target/release/farmslicer`; run from the repo root
    (it reads `extern/OrcaSlicer/resources` and serves `dist/web`). Port 9337.

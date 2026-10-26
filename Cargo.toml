@@ -19,6 +19,9 @@ webauthn-rs = { version = "0.5", features = ["conditional-ui"] }
 # webauthn-rs uses OpenSSL; build it in so neither the Docker image nor a dev
 # machine needs a system OpenSSL.
 openssl = { version = "0.10", features = ["vendored"] }
+# Depended on directly only so build.rs gets its DEP_OPENSSL_* paths: the C++
+# side (libslic3r's MD5) compiles against and links this same OpenSSL 3.
+openssl-sys = "0.9"
 url = "2"
 sha2 = "0.10"
 hex = "0.4"

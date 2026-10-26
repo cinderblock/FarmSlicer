@@ -40,12 +40,14 @@ WORKDIR /orca
 COPY extern/OrcaSlicer/deps deps
 # Headless subset of OrcaSlicer's dependency superbuild: every dep_* target the
 # configure step generated (it omits whatever it found on the system) minus the
-# ones only the wxWidgets GUI needs. CMAKE_POLICY_VERSION_MINIMUM keeps old
-# third-party CMakeLists configuring under CMake >= 4.
+# ones only the wxWidgets GUI needs. OpenSSL (1.1.1) and curl are left out too:
+# headless libslic3r uses no curl and only MD5 from OpenSSL, which the server
+# takes from the Rust side's OpenSSL 3 (see build.rs). CMAKE_POLICY_VERSION_MINIMUM
+# keeps old third-party CMakeLists configuring under CMake >= 4.
 RUN cmake -S deps -B deps/build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     && targets="$(make -C deps/build -s help | grep -o 'dep_[A-Za-z0-9_]*' | sort -u \
-            | grep -v -E '^dep_(wxWidgets|GLEW|GLFW|OpenCSG|WebView2)$' | tr '\n' ' ')" \
+            | grep -v -E '^dep_(wxWidgets|GLEW|GLFW|OpenCSG|WebView2|OpenSSL|CURL)$' | tr '\n' ' ')" \
     && echo "building: $targets" \
     && make -C deps/build -j"${JOBS:-$(nproc)}" $targets \
     && rm -rf deps/build/dep_* deps/build/DL_CACHE
@@ -54,9 +56,12 @@ RUN cmake -S deps -B deps/build -DCMAKE_BUILD_TYPE=Release \
 FROM cxx-base AS libslic3r
 ARG JOBS
 # OrcaSlicer's top-level CMake requires DBus on Linux even with SLIC3R_GUI=OFF
-# (nothing in libslic3r links it). Installed here rather than in cxx-base so the
-# deps stage cache is not invalidated.
-RUN apt-get update && apt-get install -y --no-install-recommends libdbus-1-dev \
+# (nothing in libslic3r links it). libssl-dev only provides the OpenSSL 3
+# headers for libslic3r's <openssl/md5.h>: libslic3r is a static archive, and
+# the server links the Rust side's own OpenSSL 3 (ABI-compatible across 3.x).
+# Both installed here rather than in cxx-base so the deps stage cache is not
+# invalidated, and no dependency there picks up a system OpenSSL.
+RUN apt-get update && apt-get install -y --no-install-recommends libdbus-1-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /orca
 COPY --from=orca-deps /orca/deps/build/OrcaSlicer_dep deps/build/OrcaSlicer_dep
@@ -65,12 +70,13 @@ COPY extern/OrcaSlicer/cmake cmake
 COPY extern/OrcaSlicer/deps_src deps_src
 COPY extern/OrcaSlicer/src src
 COPY extern/OrcaSlicer/resources resources
-# glfw3 is required by OrcaSlicer's top-level CMake but only used by the GUI;
-# an empty package config stands in for it (see docker/cmake-stubs/).
+# glfw3 and curl are required by OrcaSlicer's top-level CMake but only used by
+# the GUI; empty packages stand in for them (see docker/cmake-stubs/).
 COPY docker/cmake-stubs /orca/cmake-stubs
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSLIC3R_GUI=OFF \
         -DCMAKE_PREFIX_PATH=/orca/deps/build/OrcaSlicer_dep/usr/local \
         -Dglfw3_DIR=/orca/cmake-stubs \
+        -DCMAKE_MODULE_PATH=/orca/cmake-stubs \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     && cmake --build build -j"${JOBS:-$(nproc)}" --target libslic3r libslic3r_cgal libnest2d \
     # Keep only what build.rs links against and the generated headers.

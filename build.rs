@@ -17,6 +17,13 @@ fn main() {
 
     let is_windows = cfg!(target_os = "windows");
 
+    // The one OpenSSL in the binary: the Rust side's (openssl-sys, vendored
+    // OpenSSL 3). libslic3r only needs its MD5 (<openssl/md5.h>, included by
+    // Utils.hpp), so OrcaSlicer's own OpenSSL 1.1.1 and curl aren't built.
+    let openssl_include = std::env::var_os("DEP_OPENSSL_INCLUDE")
+        .map(PathBuf::from)
+        .expect("openssl-sys didn't report its include directory");
+
     // Build the cxx bridge, the shared slicing pipeline and the shims for
     // what upstream keeps in GUI code (nanosvg, RGB2HSV).
     let mut build = cxx_build::bridge("src/slicer.rs");
@@ -35,6 +42,7 @@ fn main() {
         .include(orca_dir.join("deps_src/clipper"))
         .include(orca_dir.join("deps_src/clipper2"))
         .include(orca_dir.join("deps_src/nanosvg"))
+        .include(&openssl_include)
         .include(deps_prefix.join("include"))
         .include(deps_prefix.join("include/eigen3"))
         .define("NDEBUG", None)
@@ -70,7 +78,7 @@ fn main() {
 
     // --- Link search paths ---
 
-    // Deps prefix (boost, tbb, zlib, openssl, curl, etc.)
+    // Deps prefix (boost, tbb, occt, opencv, etc.)
     link_search(&deps_prefix.join("lib"));
 
     if is_windows {
@@ -155,10 +163,7 @@ fn link_windows_libs() {
     println!("cargo:rustc-link-lib=static=libpng16_static");
     println!("cargo:rustc-link-lib=static=jpeg-static");
 
-    // Crypto / network
-    println!("cargo:rustc-link-lib=static=libcrypto");
-    println!("cargo:rustc-link-lib=static=libssl");
-    println!("cargo:rustc-link-lib=static=libcurl");
+    // libcrypto (libslic3r's MD5) comes from openssl-sys's own link line.
 
     // Other deps
     for lib in &[
@@ -252,9 +257,18 @@ fn link_linux_libs() {
     println!("cargo:rustc-link-arg=-ljpeg");
     println!("cargo:rustc-link-arg=-lz");
 
-    // Crypto / network
-    for lib in &["crypto", "ssl", "curl"] {
-        println!("cargo:rustc-link-arg=-l{lib}");
+    // libcrypto for libslic3r's MD5: openssl-sys's own, again inside the group.
+    // openssl-sys's copy (bundled into its rlib) comes before these link args,
+    // and GNU ld only takes members something earlier asked for; today
+    // libcrypto's own MD5 users pull md5_dgst.o in, but that's not ours to rely
+    // on. Vendored, by path; a system OpenSSL (OPENSSL_NO_VENDOR) is on
+    // openssl-sys's search path already.
+    match std::env::var_os("DEP_OPENSSL_ROOT") {
+        Some(root) => println!(
+            "cargo:rustc-link-arg={}",
+            PathBuf::from(root).join("lib/libcrypto.a").display()
+        ),
+        None => println!("cargo:rustc-link-arg=-lcrypto"),
     }
 
     // Other deps
