@@ -146,7 +146,14 @@ can run in the user's browser.
   quality, filament, nozzle, plate, supports, support materials, every
   Quick Setting), how often and to what, for admins (`/reports`).
 
-License: AGPL-3.0-or-later (inherited from libslic3r). See `LICENSE`.
+License: FarmSlicer's own code is AGPL-3.0-or-later. Builds that include
+libslic3r (the server, the Docker image, the browser engine) are AGPL-3.0,
+since OrcaSlicer licenses libslic3r under version 3 without "or later". See
+`NOTICE` for the details, `LICENSE` for the licence text and
+`THIRD-PARTY-NOTICES.txt` for the software FarmSlicer includes (served by
+the app at `/THIRD-PARTY-NOTICES.txt`; regenerate it with
+`node scripts/third-party-notices.mjs` after a dependency change, which CI
+checks).
 
 ## Printers
 
@@ -206,6 +213,7 @@ The maintainer's own farm runs the same image from the ops repo on
 | `FARMSLICER_ORIGINS` | `http://localhost:9337,http://localhost:5173` | Comma-separated origins the UI is served from. The first one is canonical: its host is the WebAuthn relying-party ID (never change it once users have enrolled) and it is used in invite links. Must be HTTPS except for `localhost`. |
 | `FARMSLICER_NO_AUTH` | unset | Development only: skip accounts, every request runs as the owner (local requests only once `FARMSLICER_LAN_HEADER` is set) |
 | `FARMSLICER_LAN_HEADER` | unset | Turns on remote access (see "Remote access"): the header your reverse proxy sets to `1` on local-network requests. Requests without it count as from the internet. Unset: every request counts as local |
+| `FARMSLICER_SOURCE_URL` | this repository at `{commit}` | Where the "Source code" link on every page points. The AGPL asks that people using FarmSlicer over a network be offered its source: if you run a modified version, set this to where your source is. `{commit}` becomes the commit the web app was built from |
 | `RUST_LOG` | — | Log level |
 
 Data (SQLite db, uploaded models, G-code) lives in `/app/data`.
@@ -457,8 +465,12 @@ place (idempotent); point `ORCA_SRC_DIR` at a separate copy if the same
 checkout also feeds a native build. The dependency handling under `wasm/`
 (find-modules, sequential-TBB shims, patch, toolchain scripts) is adapted from
 [JoshTheDerf/orcaslicer-wasm](https://github.com/JoshTheDerf/orcaslicer-wasm)
-(AGPL-3.0); the engine bridge (`wasm/bridge/`) and the slicing pipeline it
-shares with the server (`cxx/slice_core.cpp`) are FarmSlicer's.
+by Joshua Bemenderfer, a fork of
+[allanwrench28/orcaslicer-wasm](https://github.com/allanwrench28/orcaslicer-wasm)
+by Allan Wrench (AGPL-3.0-or-later; `wasm/LICENSE.orcaslicer-wasm`,
+`wasm/NOTICE.orcaslicer-wasm.md`); the engine bridge (`wasm/bridge/`) and
+the slicing pipeline it shares with the server (`cxx/slice_core.cpp`) are
+FarmSlicer's.
 
 ## Deploying
 

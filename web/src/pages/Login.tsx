@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
+import SourceFooter from "../components/SourceFooter";
 import RecoveryCode from "../components/RecoveryCode";
 import { browserSupportsWebAuthn, signInWithPasskey } from "../passkeys";
 
@@ -168,6 +169,7 @@ export default function LoginPage() {
           </div>
         )}
       </div>
+      <SourceFooter />
     </div>
   );
 }

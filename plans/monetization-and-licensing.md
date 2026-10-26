@@ -25,6 +25,28 @@ This document answers three questions:
 2. What that license demands of each business model.
 3. What comparable projects and vendors charge, and what to sell first.
 
+## Decisions already made (don't re-ask)
+
+Answers from the maintainer, 2026-10-26:
+
+- **No trademark filing before there is revenue.** The free steps are fine:
+  use the name consistently (rights in a mark accrue with use) and publish
+  a trademark policy.
+- **Bambu restricting third-party access isn't a concern.**
+- **Hosted versions:** agreed, as the later step.
+- **The image stays free and public; what's sold is support and cloud
+  hosting** (2026-10-26). Not paid binaries.
+- **First offering and selling under the existing C corp:** to decide
+  "soon"; still open.
+- **A company already exists** (a C corp); whether to sell under it is an
+  open question below.
+- **The in-app "Source code" link:** done (`69c5cd5`).
+- **The licence paperwork** (notices, licence fields, wrong credits): done
+  (`e33c930`..`59b303e`, linked from the app in `2cb379e`;
+  `plans/licence-paperwork.md`). **The OpenSSL 1.1.1 issue** has its own
+  thread (branch `fix/openssl-1.1.1`).
+- **The demo** is deferred to its own thread (see `plans/demo.md`).
+
 ## Findings: licensing
 
 ### What FarmSlicer declares
@@ -100,14 +122,14 @@ Slic3r, which are AGPL-3.0.
    - OpenSSL 1.1.1 has also been out of support since September 2023.
    - The Rust side separately vendors OpenSSL **3.6.3** (`openssl-src 300.6.1+3.6.3`, Apache-2.0, which is GPLv3-compatible).
    - Fix: build the deps with OpenSSL 3.x, or drop curl/OpenSSL from libslic3r's link if nothing in the headless build needs them. That also removes two OpenSSL copies in one binary. It is a build change, so it is logged here rather than diagnosed.
-4. **No third-party notices accompany the binaries.**
+4. **No third-party notices accompany the binaries.** *Addressed: `THIRD-PARTY-NOTICES.txt`, see `plans/licence-paperwork.md`.*
    - MIT, BSD, Apache-2.0, Unicode-3.0, CDLA-Permissive-2.0, OFL, the FreeType License (credit clause) and the LGPLs all require their notices to travel with the binary or the image.
    - The image ships none, and the JS bundle has no licences page.
-5. **Missing license metadata:**
+5. **Missing license metadata:** *Addressed (metadata and `NOTICE`; no SPDX headers yet): `plans/licence-paperwork.md`.*
    - `Cargo.toml` and `web/package.json` have no `license` field.
    - There are no SPDX headers.
    - `LICENSE` lacks a copyright and "or later" notice, so the README's "or later" claim is the only place it is made.
-6. **A stale, contradictory notice was copied in.** `wasm/NOTICE.orcaslicer-wasm.md` says "Licensing will be added later. Until a LICENSE file is added, all rights reserved."
+6. **A stale, contradictory notice was copied in.** *Addressed: annotated, both repositories credited (`plans/licence-paperwork.md`).* `wasm/NOTICE.orcaslicer-wasm.md` says "Licensing will be added later. Until a LICENSE file is added, all rights reserved."
    - Upstream (`allanwrench28/orcaslicer-wasm`, checked via the GitHub API) still has that `NOTICE.md` *next to* a `LICENSE` that grants AGPL-3.0-or-later.
    - The LICENSE supersedes the notice by the notice's own wording, and the work is an OrcaSlicer derivative either way.
    - Shipping the notice still invites doubt: annotate it or drop it, and credit both upstream repos in the README.

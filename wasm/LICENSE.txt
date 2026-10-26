@@ -2,8 +2,10 @@ FarmSlicer browser engine (libslic3r compiled to WebAssembly)
 
 Licensed under the GNU Affero General Public License v3.0, the same license as
 OrcaSlicer, whose libslic3r this engine is built from. The full license text is
-in ../LICENSE. Attribution for the build-system pieces adapted from
-JoshTheDerf/orcaslicer-wasm is in LICENSE.orcaslicer-wasm.
+in ../LICENSE, and ../NOTICE explains FarmSlicer's licensing. The build-system
+pieces adapted from JoshTheDerf/orcaslicer-wasm (a fork of
+allanwrench28/orcaslicer-wasm) are under that project's licence, copied in
+LICENSE.orcaslicer-wasm; NOTICE.orcaslicer-wasm.md explains its history.
 
 (This file exists because OrcaSlicer's CMake project configures CPack with
 ${CMAKE_SOURCE_DIR}/LICENSE.txt, which resolves to this directory when

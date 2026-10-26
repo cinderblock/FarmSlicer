@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { useAuth } from "../auth";
 import RecoveryCode from "../components/RecoveryCode";
 import { browserSupportsWebAuthn, defaultKeyName, registerPasskey } from "../passkeys";
+import SourceFooter from "../components/SourceFooter";
 
 /** /recover — lost every passkey: enrol a new one with the recovery code. */
 export default function RecoverPage() {
@@ -92,6 +93,7 @@ export default function RecoverPage() {
           </>
         )}
       </div>
+      <SourceFooter />
     </div>
   );
 }

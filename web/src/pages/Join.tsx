@@ -4,6 +4,7 @@ import { apiJson, useAuth } from "../auth";
 import { errorText } from "../api";
 import RecoveryCode from "../components/RecoveryCode";
 import { browserSupportsWebAuthn, defaultKeyName, registerPasskey, signInWithPasskey } from "../passkeys";
+import SourceFooter from "../components/SourceFooter";
 
 interface Step {
   group?: string;
@@ -344,6 +345,7 @@ function JoinCard({ children }: { children: React.ReactNode }) {
         <h1>FarmSlicer</h1>
         {children}
       </div>
+      <SourceFooter />
     </div>
   );
 }

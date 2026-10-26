@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../auth";
 import RecoveryCode from "../components/RecoveryCode";
 import { browserSupportsWebAuthn, defaultKeyName, registerPasskey } from "../passkeys";
+import SourceFooter from "../components/SourceFooter";
 
 interface InviteInfo {
   username: string;
@@ -88,6 +89,7 @@ export default function InvitePage() {
           </>
         )}
       </div>
+      <SourceFooter />
     </div>
   );
 }

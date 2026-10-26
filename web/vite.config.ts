@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { execSync } from "child_process";
-import { writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 /** Run git in the repo; "" when there is no git (the Docker build context has no .git). */
@@ -39,6 +39,47 @@ export default defineConfig({
           "warn( 'Clock: This module has been deprecated. Please use THREE.Timer instead.' ); // @deprecated, r183";
         if (!code.includes(target)) return;
         return code.replace(target, "");
+      },
+    },
+    {
+      // The licence files go out with the app (/THIRD-PARTY-NOTICES.txt,
+      // /LICENSE.txt, /NOTICE.txt), and every npm package that ends up in the
+      // bundle must be in the notices (scripts/third-party-notices.mjs lists
+      // web/package.json's production tree; this catches what that misses).
+      name: "third-party-notices",
+      apply: "build",
+      generateBundle(_options, bundle) {
+        const read = (name: string) => {
+          const path = resolve(__dirname, "..", name);
+          if (!existsSync(path)) this.error(`${name} is missing (the Docker web stage must copy it next to web/)`);
+          return readFileSync(path, "utf8");
+        };
+        const notices = read("THIRD-PARTY-NOTICES.txt");
+        const npmSection = notices.split(/^3\. JAVASCRIPT PACKAGES.*$/m)[1]?.split(/^4\. /m)[0] ?? "";
+        const listed = new Set([...npmSection.matchAll(/^ {2}(\S+)@[^@\s]+$/gm)].map((m) => m[1]));
+        if (listed.size === 0) this.error("THIRD-PARTY-NOTICES.txt has no JavaScript package list");
+        const bundled = new Set<string>();
+        for (const out of Object.values(bundle)) {
+          if (out.type !== "chunk") continue;
+          for (const [id, mod] of Object.entries(out.modules)) {
+            if (mod.renderedLength === 0) continue;
+            const path = id.replace(/\\/g, "/");
+            const at = path.lastIndexOf("/node_modules/");
+            if (at < 0) continue;
+            const parts = path.slice(at + "/node_modules/".length).split("/");
+            bundled.add(parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]);
+          }
+        }
+        const missing = [...bundled].filter((name) => !listed.has(name)).sort();
+        if (missing.length) {
+          this.error(
+            `npm packages in the bundle but not in THIRD-PARTY-NOTICES.txt: ${missing.join(", ")}. ` +
+              "Run node scripts/third-party-notices.mjs (and add them to web/package.json's dependencies if they are only devDependencies).",
+          );
+        }
+        this.emitFile({ type: "asset", fileName: "THIRD-PARTY-NOTICES.txt", source: notices });
+        this.emitFile({ type: "asset", fileName: "LICENSE.txt", source: read("LICENSE") });
+        this.emitFile({ type: "asset", fileName: "NOTICE.txt", source: read("NOTICE") });
       },
     },
     {

@@ -1761,6 +1761,9 @@ body {
 /* Login page */
 .login-page {
   display: flex;
+  /* The card, then the source-code line under it. */
+  flex-direction: column;
+  gap: 0.75rem;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
@@ -4166,3 +4169,16 @@ a.btn-sm {
   gap: 0.25rem;
 }
 .notify-prefs legend { color: var(--text-dim); font-size: 0.85rem; }
+
+/* The "Source code" link (source.ts): under the sign-in card, in the sidebar. */
+.source-footer {
+  text-align: center;
+  margin: 0;
+}
+.sidebar-source {
+  display: flex;
+  gap: 0.75rem;
+}
+.sidebar-source .link-button {
+  text-decoration: none;
+}

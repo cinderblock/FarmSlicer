@@ -74,6 +74,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Third-party notices up to date
+        run: node scripts/third-party-notices.mjs --check
+
       - name: API end-to-end tests (stub slicer)
         run: tests/run-e2e.sh
 
