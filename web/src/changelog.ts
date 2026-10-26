@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-25",
+    date: "2026-10-25",
+    title: "Camera fixes",
+    highlights: [],
+    fixes: "A printer's camera picks up again after you switch away from the browser on a phone, and closing it no longer shows an error page.",
+  },
+  {
     id: "2026-10-24",
     date: "2026-10-24",
     title: "Recent slices, and updates that don't get in your way",

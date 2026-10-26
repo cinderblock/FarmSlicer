@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 /** Live view of a printer's camera (GET /api/printers/{id}/camera, a
  * WebSocket). X1/H2-class printers send H.264, decoded here with WebCodecs;
- * A1/P1 send JPEG frames. Reconnects while open. */
+ * A1/P1 send JPEG frames. Reconnects while open, and makes a new decoder
+ * when the browser takes the old one away (iOS does when the app goes to
+ * the background: the decoder fails and is closed). */
 export default function CameraView({ printerId }: { printerId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -16,6 +18,39 @@ export default function CameraView({ printerId }: { printerId: string }) {
     let lastUrl = "";
     let retry: ReturnType<typeof setTimeout> | undefined;
     let waitingForKey = true;
+    let config: VideoDecoderConfig | null = null;
+    let rebuild: ReturnType<typeof setTimeout> | undefined;
+
+    // close() throws on a decoder that is already closed (one that failed).
+    const closeDecoder = () => {
+      if (decoder && decoder.state !== "closed") decoder.close();
+      decoder = null;
+    };
+
+    const makeDecoder = () => {
+      clearTimeout(rebuild);
+      closeDecoder();
+      if (closed || !config) return;
+      const d = new VideoDecoder({
+        output: draw,
+        error: (e) => {
+          if (closed || decoder !== d) return;
+          decoder = null;
+          setStatus(`Video error: ${e.message}`);
+          // A hidden page gets a new decoder when it's shown again; a visible
+          // one after a pause, so a stream that keeps failing doesn't spin.
+          if (!document.hidden) rebuild = setTimeout(makeDecoder, 1000);
+        },
+      });
+      d.configure(config);
+      decoder = d;
+      waitingForKey = true;
+    };
+
+    const onVisibility = () => {
+      if (!document.hidden && !decoder && config) makeDecoder();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     const draw = (frame: VideoFrame) => {
       const canvas = canvasRef.current;
@@ -42,25 +77,21 @@ export default function CameraView({ printerId }: { printerId: string }) {
             }
           } else if (msg.type === "h264-init") {
             const description = Uint8Array.from(atob(msg.description), (c) => c.charCodeAt(0));
-            const config: VideoDecoderConfig = {
+            const next: VideoDecoderConfig = {
               codec: msg.codec,
               description,
               codedWidth: msg.width,
               codedHeight: msg.height,
               optimizeForLatency: true,
             };
-            const support = await VideoDecoder.isConfigSupported(config).catch(() => null);
+            const support = await VideoDecoder.isConfigSupported(next).catch(() => null);
+            if (closed) return;
             if (!support?.supported) {
               setStatus(`This browser can't decode ${msg.codec}.`);
               return;
             }
-            decoder?.close();
-            decoder = new VideoDecoder({
-              output: draw,
-              error: (e) => setStatus(`Video error: ${e.message}`),
-            });
-            decoder.configure(config);
-            waitingForKey = true;
+            config = next;
+            makeDecoder();
           } else if (msg.type === "error") {
             setStatus(msg.message);
           }
@@ -95,8 +126,10 @@ export default function CameraView({ printerId }: { printerId: string }) {
     return () => {
       closed = true;
       clearTimeout(retry);
+      clearTimeout(rebuild);
+      document.removeEventListener("visibilitychange", onVisibility);
       ws?.close();
-      decoder?.close();
+      closeDecoder();
       if (lastUrl) URL.revokeObjectURL(lastUrl);
     };
   }, [printerId]);
