@@ -53,6 +53,10 @@ const TITLE = {
 const LICENSE_FILE = /^(licen[cs]e|copying|copyright|notice|unlicense)([-._].*)?$/i;
 // Files a crate keeps below its root that hold the licence of what it bundles.
 const EXTRA_FILES = { "openssl-src": ["openssl/LICENSE.txt"] };
+// Build dependencies whose output is linked in: openssl-src builds the vendored
+// OpenSSL 3 (the binary's only OpenSSL). Listed, but not followed further (its
+// own dependencies, like cc, only run at build time).
+const LINKED_BUILD_DEPS = new Set(["openssl-src"]);
 // Licences whose text the recipient already has from FarmSlicer itself.
 const OWN = new Set(["AGPL-3.0-only", "AGPL-3.0-or-later", "AGPL-3.0"]);
 const NOT_SPDX = new Set(["various", "NOASSERTION"]);
@@ -98,8 +102,10 @@ function rustCrates() {
     const id = stack.pop();
     if (seen.has(id)) continue;
     seen.add(id);
+    if (LINKED_BUILD_DEPS.has(pkgs.get(id).name)) continue;
     for (const dep of nodes.get(id).deps) {
-      if (!dep.dep_kinds.some((k) => k.kind === null)) continue; // dev/build only
+      const linked = LINKED_BUILD_DEPS.has(pkgs.get(dep.pkg).name) && dep.dep_kinds.some((k) => k.kind === "build");
+      if (!linked && !dep.dep_kinds.some((k) => k.kind === null)) continue; // dev/build only
       if (isProcMacro(pkgs.get(dep.pkg))) continue;
       stack.push(dep.pkg);
     }

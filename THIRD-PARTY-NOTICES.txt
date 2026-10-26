@@ -292,7 +292,7 @@ sent to browsers.
 2. RUST CRATES (linked into the server binary)
 ================================================================================
 
-228 crates, for x86_64-unknown-linux-gnu.
+229 crates, for x86_64-unknown-linux-gnu.
 
   adler2 2.0.1
       0BSD OR MIT OR Apache-2.0  [T48] [T49] [T50]
@@ -675,6 +675,9 @@ sent to browsers.
   openssl-probe 0.2.1
       MIT OR Apache-2.0  [Apache-2.0] [T70]
       https://github.com/rustls/openssl-probe
+  openssl-src 300.6.1+3.6.3
+      MIT/Apache-2.0  [Apache-2.0] [T70]
+      https://github.com/alexcrichton/openssl-src-rs
   openssl-sys 0.9.117
       MIT  [T70]
       https://github.com/rust-openssl/rust-openssl
@@ -9616,7 +9619,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-[T70] cfg-if 1.0.4, openssl-probe 0.2.1, openssl-sys 0.9.117, socket2 0.5.10, socket2 0.6.3
+[T70] cfg-if 1.0.4, openssl-probe 0.2.1, openssl-src 300.6.1+3.6.3, openssl-sys 0.9.117, socket2 0.5.10, socket2 0.6.3
 --------------------------------------------------------------------------------
 
 --- LICENSE-MIT ---
