@@ -196,6 +196,12 @@ AUTOFARM3D, PRINTERHIVE, OCTOPRINT, or PRUSASLICER at the USPTO.
   than a silent redirect. If it isn't doing anything useful, letting it
   lapse at renewal (2027-05-13) removes the question. `slicer.farm` is
   generic and carries no such risk.
+- **Decided (2026-10-26):** `slic3r.farm` forwards to `slicer.farm` (which
+  forwards to farmslicer.com). Staged in the ops repo, branch
+  `cloudflare/slic3r-farm-forward` (`b4e3fe9`, worktree
+  `~/.t3/worktrees/ops/slic3r-farm-forward`); dry run: 2 redirect rules
+  updated (`slic3r.farm/*` and `www.slic3r.farm/*`), nothing else. Not
+  applied until the maintainer says yes to that change.
 
 ### OrcaSlicer is now a registered mark
 
@@ -314,15 +320,16 @@ document that use.
 
 ## Open questions for the user
 
-1. **`slic3r.farm`**: the maintainer asked why, since FarmSlicer uses
-   libslic3r (answer above, in the Slic3r section). Keep it with a page that
-   says what it is, or let it lapse at renewal (2027-05-13)?
-   *Recommendation*: keep it only if it's useful, and then as a disclosure
-   page, not a silent redirect. Changing what it serves is a Cloudflare
-   change: it needs the maintainer's per-change OK, through the ops repo.
-2. **Who owns the mark**: `TRADEMARKS.md` names Cameron Tacklind. If a
-   company ends up selling the support and hosting, assign the mark to it
-   (or license it in writing) and update the policy.
+1. **Apply the `slic3r.farm` → `slicer.farm` change** (staged, see the
+   Slic3r section)?
+
+Answered: the owner is Cameron Tacklind for now, as long as it's easy to
+move to a company later (2026-10-26). It is: an unregistered mark moves
+with a short written assignment that includes the business's goodwill (an
+assignment of the name alone is void), and a registered one the same way,
+recorded with the USPTO. One catch: an intent-to-use application can't be
+assigned before use is shown, except along with the business it belongs
+to. So if a company is coming, file in its name.
 
 ## Progress log
 
@@ -339,5 +346,9 @@ document that use.
   is fine), linked from the README and `NOTICE`, served at
   `/TRADEMARKS.txt` and linked under the sign-in cards; ™ on the README's
   first mention, the sidebar title, and the sign-in footer
-- [ ] ™ on farmslicer.com (not in this repo)
-- [ ] Claim the free handles (step 5 above): the maintainer's to do (sign-ins)
+- [x] ™ on farmslicer.com and a "Trademarks" footer link (its repo,
+  `d95c606`, not pushed; its link needs this repo's `TRADEMARKS.md` pushed
+  first)
+- [x] `slic3r.farm` → `slicer.farm` staged in ops (`b4e3fe9`), not applied
+- [ ] Claim the free handles (step 5 above): creating accounts is the
+  maintainer's to do
