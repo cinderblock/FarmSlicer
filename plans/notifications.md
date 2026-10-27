@@ -99,15 +99,6 @@ on 2026-10-26, together with making FarmSlicer an installable app (PWA).
 - A tap on a notification must not reload an open window (it could be
   slicing in the browser): sw.js posts `farmslicer.open` and the app
   routes itself (`Layout` + `serviceWorker.ts` `onOpenRequest`).
-- The app's icon is still Vite's default logo (`favicon.svg`); installed
-  apps make that visible. Replace the SVG and re-render the PNGs (CLAUDE.md).
-
-## Open questions for the user
-
-1. Replace the placeholder (Vite) logo before people install the app?
-2. Deploy now? (Push, then the ops digest pin, per usual.)
-
-## Things not to do
-
+- ~~The app's icon was Vite's default logo.~~ Replaced by the layer "F" (`web/icons/`, `c7799d1`).
 - Don't give the service worker a fetch handler or a cache (see above).
 - Don't route pushes through Caddy/Cloudflare or add infra: none needed.
