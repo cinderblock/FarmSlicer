@@ -3,7 +3,7 @@
 **[farmslicer.com](https://farmslicer.com)** · demo at
 [demo.farmslicer.com](https://demo.farmslicer.com) (coming soon)
 
-Web-first, headless slicing service for a small 3D print farm. Upload a model,
+FarmSlicer™ is a web-first, headless slicing service for a small 3D print farm. Upload a model,
 pick a printer and OrcaSlicer profiles, get G-code. The slicer is
 [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)'s `libslic3r`, linked
 natively into a Rust server **and** compiled to WebAssembly so the same engine
@@ -153,7 +153,8 @@ since OrcaSlicer licenses libslic3r under version 3 without "or later". See
 `THIRD-PARTY-NOTICES.txt` for the software FarmSlicer includes (served by
 the app at `/THIRD-PARTY-NOTICES.txt`; regenerate it with
 `node scripts/third-party-notices.mjs` after a dependency change, which CI
-checks).
+checks). The name and logo aren't covered by the licence: `TRADEMARKS.md`
+says what you can do with them (forks get their own name).
 
 ## Printers
 

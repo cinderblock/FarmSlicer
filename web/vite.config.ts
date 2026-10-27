@@ -43,7 +43,7 @@ export default defineConfig({
     },
     {
       // The licence files go out with the app (/THIRD-PARTY-NOTICES.txt,
-      // /LICENSE.txt, /NOTICE.txt), and every npm package that ends up in the
+      // /LICENSE.txt, /NOTICE.txt, /TRADEMARKS.txt), and every npm package that ends up in the
       // bundle must be in the notices (scripts/third-party-notices.mjs lists
       // web/package.json's production tree; this catches what that misses).
       name: "third-party-notices",
@@ -80,6 +80,7 @@ export default defineConfig({
         this.emitFile({ type: "asset", fileName: "THIRD-PARTY-NOTICES.txt", source: notices });
         this.emitFile({ type: "asset", fileName: "LICENSE.txt", source: read("LICENSE") });
         this.emitFile({ type: "asset", fileName: "NOTICE.txt", source: read("NOTICE") });
+        this.emitFile({ type: "asset", fileName: "TRADEMARKS.txt", source: read("TRADEMARKS.md") });
       },
     },
     {

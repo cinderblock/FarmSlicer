@@ -41,3 +41,10 @@ libslic3r and its C++ dependencies, Rust crates, JavaScript packages, fonts
 and data. Their notices are in THIRD-PARTY-NOTICES.txt (regenerate it with
 scripts/third-party-notices.mjs). The browser engine's build pieces adapted
 from orcaslicer-wasm are described in wasm/NOTICE.orcaslicer-wasm.md.
+
+Trademarks
+----------
+
+FarmSlicer and its logo are trademarks of Cameron Tacklind. The licence above
+covers the code, not the name: TRADEMARKS.md says what you can do with them
+without asking (a modified version you distribute gets its own name).

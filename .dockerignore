@@ -13,6 +13,7 @@ plans
 issues
 *.md
 !README.md
+!TRADEMARKS.md
 extern/OrcaSlicer/.git
 extern/OrcaSlicer/build
 extern/OrcaSlicer/build-*

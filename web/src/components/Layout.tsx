@@ -116,7 +116,7 @@ export default function Layout() {
       <div className="sidebar-backdrop" onClick={() => setMenuAt(null)} />
       <nav className="sidebar" id="sidebar">
         <div className="sidebar-header">
-          <h1>FarmSlicer</h1>
+          <h1>FarmSlicer™</h1>
         </div>
         <ul className="nav-list">
           {items.map((item) => (
