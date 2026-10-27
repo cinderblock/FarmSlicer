@@ -62,6 +62,8 @@ into the PTFE tube until it can not be pushed any farther."
 - [x] Deployed 2026-10-20: FarmSlicer `22c7a71`, image
       `sha256:9d4c60003ba1153893bd7615fa8c19c625622598a7bdcbb0bda7b4d663c844ff`,
       ops `fe2c47f`, deploy run 39393090848 green, sentinel healthy
+- [x] 2026-10-26: run-time fetch deployed (`d4e230a`); the first live fetch
+      on buildhost: "2499 HMS and 869 error texts for device type 094"
 - [ ] Confirm the text on a printer card with a live error (Albert's)
 
 ## Findings

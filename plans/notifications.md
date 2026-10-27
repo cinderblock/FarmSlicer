@@ -76,7 +76,10 @@ on 2026-10-26, together with making FarmSlicer an installable app (PWA).
       on buildhost, 2026-10-26
 - [x] UI checked in Chrome against a stub server (desktop and 360 px)
 - [x] Commit
-- [ ] Deploy (CI image, ops pin): the maintainer's call
+- [x] Deployed 2026-10-26 5:50 PM PDT (00:50Z): FarmSlicer `d4e230a`, image
+      `sha256:c26162c0d023f5f0437b1871862f485b11c75822d7f473f02061d9b831c52842`,
+      ops `b310c8a`, Server Deploys run 40428789385 green; healthy, version
+      and the new static files served on buildhost and at the public address
 - [ ] First real notification on a real phone after deploy (Android Chrome,
       and iOS from the Home Screen); nobody has granted the permission
       prompt and received a push from FCM/Apple yet
