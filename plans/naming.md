@@ -20,10 +20,12 @@ How names were checked: web search (3D printing, software, products),
 GitHub repository names (`gh api search/repositories`), `.com` registration
 at the registry (Verisign RDAP: 404 = unregistered), `.io`/`.app`/`.dev` by
 DNS NS records (a proxy: registered-but-parked domains can lack NS). **No
-trademark search yet** (USPTO/EUIPO); do one before committing to a name.
+trademark search yet** (USPTO/EUIPO) at the time; since done in
+`plans/trademark-search.md`.
 
 - **FarmSlicer**: no product, company or other repo uses it; `farmslicer.com`
-  is unregistered, as are the `.io`/`.app`/`.dev` names. As one word it is a
+  was unregistered (the maintainer registered it later that day), as are
+  the `.io`/`.app`/`.dev` names. As one word it is a
   unique token. The weakness: "farm slicer" with a space is two generic words,
   and searches for it return Printago's "print farm slicing" pages and
   kitchen/meat slicers. The neighbours have distinctive names (OctoFarm,
@@ -68,4 +70,7 @@ The deployment's domain is separate from the product name, so passkeys
 - [x] Conflict and domain checks for ~40 candidates
 - [x] Name decided: FarmSlicer stays
 - [x] Icon: the layer "F", `web/icons/` + `render.sh`
-- [ ] Trademark search on "FarmSlicer" (not done)
+- [x] Trademark search on "FarmSlicer" (2026-10-26): no conflicting mark
+  found at the USPTO, EUIPO, or WIPO, or in use; the risks are
+  descriptiveness at filing and the `slic3r.farm` domain. See
+  `plans/trademark-search.md`
