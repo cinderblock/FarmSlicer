@@ -175,13 +175,27 @@ AUTOFARM3D, PRINTERHIVE, OCTOPRINT, or PRUSASLICER at the USPTO.
   (UDRP disputes don't require a registered mark). FarmSlicer is built on
   libslic3r, which helps explain the choice but also makes an affiliation
   look more plausible to users.
-- **Recommendation:** don't promote `slic3r.farm` anywhere (docs, app,
-  social), keep it a quiet redirect at most, and consider letting it lapse
-  at renewal (2027-05-13) or pointing it at a neutral page that says
-  FarmSlicer is not affiliated with the Slic3r project. Describing the
-  engine as "built on libslic3r (from Slic3r, PrusaSlicer, and OrcaSlicer)"
-  in prose is ordinary nominative use and fine. `slicer.farm` is generic
-  and carries no such risk.
+- **Using libslic3r doesn't change this** (the maintainer's point, 2026-10-26:
+  "we use slic3r internally"). The AGPL licenses the code, not the name,
+  and saying "built on libslic3r, which comes from Slic3r" in prose is
+  ordinary nominative use. A domain is different: it uses the name as
+  FarmSlicer's own address. UDRP panels let someone who builds on or
+  services a product use its name in a domain only when the site offers
+  that product, **says plainly what its relationship to the owner is**, and
+  doesn't corner the name (the *Oki Data* test). A bare redirect to
+  FarmSlicer says nothing, which is the weak spot.
+- **How big the risk is**: low. Ranellucci let the registration lapse, and
+  the realistic worst case is a UDRP complaint that takes the domain away
+  (it costs the complainant, not the holder). It's not a risk to the
+  FarmSlicer name itself.
+- **Recommendation (revised 2026-10-26):** keeping it is reasonable if it
+  serves the project. Don't make it the main address or print it in the
+  README, app, or social profiles, and have it say what it is: a short page
+  ("FarmSlicer is built on libslic3r, from the Slic3r project; it isn't
+  affiliated with or endorsed by Slic3r", then a link to FarmSlicer) rather
+  than a silent redirect. If it isn't doing anything useful, letting it
+  lapse at renewal (2027-05-13) removes the question. `slicer.farm` is
+  generic and carries no such risk.
 
 ### OrcaSlicer is now a registered mark
 
@@ -300,13 +314,15 @@ document that use.
 
 ## Open questions for the user
 
-1. **`slic3r.farm`**: keep as a quiet redirect, point it at a
-   non-affiliation page, or let it lapse at renewal (2027-05-13)?
-   *Recommendation*: stop linking it anywhere now and let it lapse, unless
-   it's already in use somewhere important.
-2. **Trademark policy and ™**: write `TRADEMARKS.md` and add the ™ marks to
-   the README, project site, and app now? *Recommendation*: yes; both are
-   free and cheap to do. (Not started: outside this research task.)
+1. **`slic3r.farm`**: the maintainer asked why, since FarmSlicer uses
+   libslic3r (answer above, in the Slic3r section). Keep it with a page that
+   says what it is, or let it lapse at renewal (2027-05-13)?
+   *Recommendation*: keep it only if it's useful, and then as a disclosure
+   page, not a silent redirect. Changing what it serves is a Cloudflare
+   change: it needs the maintainer's per-change OK, through the ops repo.
+2. **Who owns the mark**: `TRADEMARKS.md` names Cameron Tacklind. If a
+   company ends up selling the support and hosting, assign the mark to it
+   (or license it in writing) and update the policy.
 
 ## Progress log
 
@@ -317,3 +333,11 @@ document that use.
 - [x] Common-law search (web, GitHub, package registries, app store,
   handles, domains)
 - [x] Report written; `plans/naming.md` points here
+- [x] ™ and trademark policy (2026-10-26, the maintainer asked to start
+  claiming the name): `TRADEMARKS.md` (forks distributed or offered
+  publicly get their own name; running a modified copy for your own people
+  is fine), linked from the README and `NOTICE`, served at
+  `/TRADEMARKS.txt` and linked under the sign-in cards; ™ on the README's
+  first mention, the sidebar title, and the sign-in footer
+- [ ] ™ on farmslicer.com (not in this repo)
+- [ ] Claim the free handles (step 5 above): the maintainer's to do (sign-ins)
