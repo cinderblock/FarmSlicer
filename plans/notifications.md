@@ -99,6 +99,15 @@ on 2026-10-26, together with making FarmSlicer an installable app (PWA).
 - A tap on a notification must not reload an open window (it could be
   slicing in the browser): sw.js posts `farmslicer.open` and the app
   routes itself (`Layout` + `serviceWorker.ts` `onOpenRequest`).
-- ~~The app's icon was Vite's default logo.~~ Replaced by the layer "F" (`web/icons/`, `c7799d1`).
+- ~~The app's icon was Vite's default logo.~~ Replaced by the layer "F"
+  (`web/icons/`, `c7799d1`).
+
+## Open questions for the user
+
+(none: the logo was replaced, `c7799d1`; deployed 2026-10-26, see the
+progress log)
+
+## Things not to do
+
 - Don't give the service worker a fetch handler or a cache (see above).
 - Don't route pushes through Caddy/Cloudflare or add infra: none needed.
