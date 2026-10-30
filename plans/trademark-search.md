@@ -258,12 +258,11 @@ document that use.
      paid support or hosting customer is a date to write down);
    - Internet Archive snapshots of farmslicer.com and the GitHub repo
      (save a page now and after major releases: web.archive.org/save).
-5. **Claim the remaining handles** while free: `farmslicer` on YouTube,
-   Mastodon, and Bluesky (all free on 2026-10-26), plus whichever of
-   Instagram, X, and Reddit are still available, and a GitHub org
-   `farmslicer` (free) if the repo should ever move off the personal
-   account. Optionally npm, crates.io, and Docker Hub names, if packages are
-   ever published.
+5. **Claim the remaining handles** while free. Pinned for soon: the
+   2026-10-30 check, site by site, is in `ISSUES.md`. The maintainer's GitHub
+   org `FarmSlicer` is already taken care of (created
+   2026-10-28 4:00 PM PDT (23:00Z)). Optionally npm, crates.io, and Docker
+   Hub names, if packages are ever published.
 6. **Watch for conflicts for free**: re-run the USPTO search
    (`farmslicer`, `farm* AND slic*`) every few months, and set a web alert
    for "FarmSlicer".
@@ -351,5 +350,5 @@ to. So if a company is coming, file in its name.
 - [x] ™ on farmslicer.com and a "Trademarks" footer link (its repo,
   `d95c606`, deployed)
 - [x] `slic3r.farm` → `slicer.farm` live through ops CI (`3a1ded5`)
-- [ ] Claim the free handles (step 5 above): creating accounts is the
-  maintainer's to do
+- [ ] Claim the free handles (step 5 above): pinned by the maintainer
+  2026-10-30, tracked in `ISSUES.md`

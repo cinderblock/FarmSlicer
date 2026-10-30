@@ -95,3 +95,19 @@ package says 443,074 s and 2,351 g; per filament 0.35-0.5x (filament 1:
 (25,689 s vs 31,049 s). Why it matters: print rules (`max_minutes`) use
 `gcode::effective_time`, and grams feed costs; CLAUDE.md already notes
 multi-material H2D files hadn't been through the check.
+
+## Claim the `farmslicer` social handles
+
+Pinned for soon, not urgent. Anyone can take these names until they're
+claimed, and holding them protects the brand (`plans/trademark-search.md`,
+free step 5). It means creating accounts, so the maintainer has to do it.
+
+Unauthenticated check on 2026-10-30. "No profile" means nothing is there
+today; only signing up proves a name can be had (a site can hold names back).
+
+- **Already ours:** GitHub org `FarmSlicer` (no repos yet).
+- **No profile:** YouTube `@farmslicer`, X, Bluesky `farmslicer.bsky.social`,
+  mastodon.social (one server only), LinkedIn company page, Docker Hub, and
+  npm, crates.io, and PyPI (package names: only worth taking if publishing).
+- **Couldn't tell** (sign-in wall or bot check, so check by hand): Instagram,
+  TikTok, Threads, Facebook, Twitch, Reddit (`u/` and `r/`), Printables.
