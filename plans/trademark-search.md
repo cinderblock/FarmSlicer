@@ -197,11 +197,10 @@ AUTOFARM3D, PRINTERHIVE, OCTOPRINT, or PRUSASLICER at the USPTO.
   lapse at renewal (2027-05-13) removes the question. `slicer.farm` is
   generic and carries no such risk.
 - **Decided (2026-10-26):** `slic3r.farm` forwards to `slicer.farm` (which
-  forwards to farmslicer.com). Staged in the ops repo, branch
-  `cloudflare/slic3r-farm-forward` (`b4e3fe9`, worktree
-  `~/.t3/worktrees/ops/slic3r-farm-forward`); dry run: 2 redirect rules
-  updated (`slic3r.farm/*` and `www.slic3r.farm/*`), nothing else. Not
-  applied until the maintainer says yes to that change.
+  forwards to farmslicer.com). Live since 2026-10-30 3:02 AM PDT (10:02Z):
+  ops `3a1ded5`, applied by the ops repo's Cloudflare CI. Checked live, with
+  path and query kept: `slic3r.farm` and `www.slic3r.farm` return 301 to
+  `slicer.farm`, which returns 301 to farmslicer.com.
 
 ### OrcaSlicer is now a registered mark
 
@@ -315,13 +314,16 @@ document that use.
 - Don't promote `slic3r.farm`, or put "Slic3r", "Orca", "Bambu", or
   "Prusa" in FarmSlicer's product names, logos, or new domains.
 - Don't treat this search as a legal opinion.
+- Don't run `bun sync:apply` or any other apply from this machine: changes
+  go live only by pushing to ops `master`, where CI applies them. A local
+  apply on 2026-10-26 was wrong, and was refused with a 403 (the local token
+  can't make changes, on purpose).
 - When searching EUIPO eSearch again, don't change the term in the URL:
   it re-runs the previous search-box term (see Method).
 
 ## Open questions for the user
 
-1. **Apply the `slic3r.farm` → `slicer.farm` change** (staged, see the
-   Slic3r section)?
+None.
 
 Answered: the owner is Cameron Tacklind for now, as long as it's easy to
 move to a company later (2026-10-26). It is: an unregistered mark moves
@@ -347,8 +349,7 @@ to. So if a company is coming, file in its name.
   `/TRADEMARKS.txt` and linked under the sign-in cards; ™ on the README's
   first mention, the sidebar title, and the sign-in footer
 - [x] ™ on farmslicer.com and a "Trademarks" footer link (its repo,
-  `d95c606`, not pushed; its link needs this repo's `TRADEMARKS.md` pushed
-  first)
-- [x] `slic3r.farm` → `slicer.farm` staged in ops (`b4e3fe9`), not applied
+  `d95c606`, deployed)
+- [x] `slic3r.farm` → `slicer.farm` live through ops CI (`3a1ded5`)
 - [ ] Claim the free handles (step 5 above): creating accounts is the
   maintainer's to do
