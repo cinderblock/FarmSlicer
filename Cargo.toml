@@ -26,7 +26,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 url = "2"
 sha2 = "0.10"
 hex = "0.4"
-rand = "0.8"
+rand = "0.10"
 # Groups and quotas: UTC period boundaries, self-service identifier patterns.
 chrono = { version = "0.4", default-features = false, features = ["now", "std"] }
 regex = "1"
