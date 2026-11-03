@@ -24,7 +24,7 @@ webauthn-rs = { version = "0.5", features = ["conditional-ui"] }
 # none (libslic3r's MD5 is cxx/shims/openssl/md5.h).
 openssl = { version = "0.10", features = ["vendored"] }
 url = "2"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 rand = "0.8"
 # Groups and quotas: UTC period boundaries, self-service identifier patterns.
