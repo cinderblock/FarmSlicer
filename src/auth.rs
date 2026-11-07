@@ -36,7 +36,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -208,7 +208,7 @@ pub fn cred_id_hex(id: &[u8]) -> String {
 /// 256 random bits as lowercase hex.
 pub fn random_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 
@@ -216,7 +216,7 @@ pub fn random_token() -> String {
 pub fn recovery_code() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut bytes = [0u8; 25];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     bytes
         .chunks(5)
         .map(|chunk| {
