@@ -9,7 +9,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent};
 
 use super::{DiscoveredPrinter, DiscoveryMap, found};
 
@@ -43,11 +43,11 @@ fn prusa_model(hostname: &str) -> &'static str {
 
 /// A reachable IPv4 address of the service (printers announce every
 /// interface they have).
-fn best_ip(info: &ServiceInfo) -> Option<IpAddr> {
+fn best_ip(info: &ResolvedService) -> Option<IpAddr> {
     let mut v4: Vec<IpAddr> = info
         .get_addresses()
         .iter()
-        .copied()
+        .map(|a| a.to_ip_addr())
         .filter(|a| match a {
             IpAddr::V4(v) => !v.is_loopback() && !v.is_link_local(),
             IpAddr::V6(_) => false,
@@ -57,7 +57,7 @@ fn best_ip(info: &ServiceInfo) -> Option<IpAddr> {
     v4.into_iter().next()
 }
 
-pub fn describe(info: &ServiceInfo, service: &str, protocol: &'static str) -> Option<DiscoveredPrinter> {
+pub fn describe(info: &ResolvedService, service: &str, protocol: &'static str) -> Option<DiscoveredPrinter> {
     let name = instance(info.get_fullname(), service);
     // Prusa-Link on a Raspberry Pi advertises OctoPrint's service too.
     if protocol == "octoprint" && name.starts_with("PrusaLink") {
@@ -151,16 +151,16 @@ mod tests {
     #[test]
     fn services_become_printers() {
         let props = [("path", "/octoprint"), ("uuid", "eea05568"), ("model", "MK3S")];
-        let info = ServiceInfo::new("_octoprint._tcp.local.", "Bench", "octopi.local.", "192.168.1.60", 80, &props[..]).unwrap();
+        let info = mdns_sd::ServiceInfo::new("_octoprint._tcp.local.", "Bench", "octopi.local.", "192.168.1.60", 80, &props[..]).unwrap().as_resolved_service();
         let p = describe(&info, "_octoprint._tcp.local.", "octoprint").unwrap();
         assert_eq!((p.id.as_str(), p.address.as_str(), p.model_name.as_str()), ("eea05568", "http://192.168.1.60:80/octoprint", "MK3S"));
 
         let none: [(&str, &str); 0] = [];
-        let info = ServiceInfo::new("_prusalink._tcp.local.", "prusa-mk4", "prusa-mk4.local.", "192.168.1.70", 80, &none[..]).unwrap();
+        let info = mdns_sd::ServiceInfo::new("_prusalink._tcp.local.", "prusa-mk4", "prusa-mk4.local.", "192.168.1.70", 80, &none[..]).unwrap().as_resolved_service();
         let p = describe(&info, "_prusalink._tcp.local.", "prusalink").unwrap();
         assert_eq!((p.address.as_str(), p.machine_profile.as_str()), ("192.168.1.70", "Prusa MK4"));
 
-        let info = ServiceInfo::new("_moonraker._tcp.local.", "voron @ voron", "voron.local.", "192.168.1.80", 7125, &none[..]).unwrap();
+        let info = mdns_sd::ServiceInfo::new("_moonraker._tcp.local.", "voron @ voron", "voron.local.", "192.168.1.80", 7125, &none[..]).unwrap().as_resolved_service();
         let p = describe(&info, "_moonraker._tcp.local.", "moonraker").unwrap();
         assert_eq!((p.protocol, p.address.as_str()), ("moonraker", "192.168.1.80"));
     }

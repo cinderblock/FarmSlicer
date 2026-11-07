@@ -4,6 +4,10 @@ name: Build image
 # image, push it to GHCR. That is the whole job: this repo publishes a
 # *candidate*, it does not deploy.
 #
+# Pull requests run only the fast `check` job (typecheck, unit and API e2e
+# tests, notices) so dependency PRs get a verdict in minutes; the two-hour
+# WebAssembly and image builds stay on master.
+#
 # What runs on buildhost is decided in the ops repo (OWNER/ops) by
 # servers/buildhost/stacks/farmslicer/pin.json, which names an image digest.
 # Shipping a build therefore takes two steps:
@@ -17,6 +21,12 @@ on:
     branches:
       - master
     # Docs-only pushes don't need a two-hour image build.
+    paths-ignore:
+      - 'plans/**'
+      - 'issues/**'
+      - '**.md'
+      - 'LICENSE'
+  pull_request:
     paths-ignore:
       - 'plans/**'
       - 'issues/**'
@@ -84,6 +94,7 @@ jobs:
   # Emscripten toolchain and the cross-compiled deps (Boost, CGAL, GMP, MPFR,
   # oneTBB, ...) are cached between runs; the engine itself goes through ccache.
   wasm:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -149,6 +160,7 @@ jobs:
           retention-days: 7
 
   image:
+    if: github.event_name != 'pull_request'
     needs: [check, wasm]
     runs-on: ubuntu-latest
     timeout-minutes: 360
