@@ -68,5 +68,5 @@ merge; the user ships by editing ops `pin.json`, so merging ships nothing anyway
       web: tsc -b + vite build, bun test 75/75, lint same 15 as master
 - [x] Passkey upgrade test: ES256 + RS256 registered on master (0.5), both
       sign in on the batch (0.6), username and discoverable flows
-- [ ] PR opened; Renovate PRs closed
+- [x] PR #25 opened; #16 #17 #20 #21 #24 closed, notes left on #18 #19 #22 #23
 - Left out: #18, #19, #22, #23 (see Findings)
