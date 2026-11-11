@@ -541,9 +541,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   health/auth goes through `auth::require_auth` (attaches `CurrentUser`);
   admin handlers call `auth::require_admin`. `FARMSLICER_NO_AUTH=1`
   short-circuits all of it for local dev. `tests/passkey-e2e.mjs` is a
-  software-authenticator end-to-end test (webauthn-rs builds OpenSSL from
-  source via the `openssl` crate's `vendored` feature, which on Windows needs
-  Strawberry Perl; typecheck on Linux if that bites).
+  software-authenticator end-to-end test (the server builds OpenSSL from
+  source for Web Push via the `openssl` crate's `vendored` feature, which on
+  Windows needs Strawberry Perl; typecheck on Linux if that bites).
 - Remote access (`plans/remote-access.md`): `FARMSLICER_LAN_HEADER` names
   the header the reverse proxy sets to `1` on LAN requests; anything else is
   "remote" (fail closed). `auth::remote_gate` limits the public routes to

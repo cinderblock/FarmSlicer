@@ -325,23 +325,22 @@ async fn login_finish(
             (user_id, result)
         }
         Some(Flow::Discoverable { state: auth_state }) => {
-            let (uuid, _cred_id) = state
+            let (uuid, cred_id) = state
                 .rp
                 .webauthn
                 .identify_discoverable_authentication(&body.credential)
                 .map_err(|_| bad())?;
             let user_id = uuid.to_string();
-            let keys: Vec<DiscoverableKey> = load_passkeys(&state, &user_id)
+            // The credential the authenticator says it used, among this user's.
+            let key = load_passkeys(&state, &user_id)
                 .into_iter()
-                .map(|(_, k)| DiscoverableKey::from(k))
-                .collect();
-            if keys.is_empty() {
-                return Err(bad());
-            }
+                .map(|(_, k)| k)
+                .find(|k| k.cred_id().as_slice() == cred_id)
+                .ok_or_else(bad)?;
             let result = state
                 .rp
                 .webauthn
-                .finish_discoverable_authentication(&body.credential, auth_state, &keys)
+                .finish_discoverable_authentication_v2(&body.credential, auth_state, &key)
                 .map_err(|_| bad())?;
             (user_id, result)
         }
