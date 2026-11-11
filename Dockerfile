@@ -17,7 +17,7 @@
 # What runs on buildhost is decided in OWNER/ops (servers/buildhost/stacks/
 # farmslicer/pin.json); this file only produces the candidate image.
 
-ARG UBUNTU_VERSION=24.04
+ARG UBUNTU_VERSION=26.04
 
 # ---------------------------------------------------------------------------
 FROM ubuntu:${UBUNTU_VERSION} AS cxx-base
