@@ -199,10 +199,12 @@ jobs:
         with:
           context: .
           push: true
-          # Pin-able sha tag for reproducible deploys + a moving latest.
+          # Pin-able sha tag for reproducible deploys + a moving latest. Only
+          # master moves latest: a workflow_dispatch run on another branch (to
+          # test a change with the full image build) publishes just its sha tag.
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ github.ref == 'refs/heads/master' && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
           # ops verifies this label against the commit its pin claims, so a
           # hand-edited pin.json can't quietly ship a different build than the
           # one that was reviewed. Required — the deploy fails without it.

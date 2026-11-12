@@ -10,7 +10,7 @@
     "sha256} (the archive's top-level LICENSE/COPYING/NOTICE files, or 'files'),",
     "{emsdk: path} (a file in emsdk/upstream/emscripten), {emport: name} (that",
     "Emscripten port's cached archive), {ubuntu: package} (its",
-    "/usr/share/doc/<package>/copyright in the ubuntu:24.04 image).",
+    "/usr/share/doc/<package>/copyright in the ubuntu:26.04 image).",
     "Server versions follow extern/OrcaSlicer/deps (the Docker orca-deps stage builds",
     "dep_Blosc dep_Boost dep_CGAL dep_Cereal dep_Draco dep_Eigen dep_FREETYPE dep_GMP",
     "dep_JPEG dep_MPFR dep_NLopt dep_OCCT dep_OpenCV dep_OpenEXR dep_OpenVDB dep_PNG",
@@ -420,7 +420,7 @@
     {
       "id": "zlib",
       "name": "zlib",
-      "version": "1.3 (Ubuntu 24.04, server), 1.3.2 Emscripten port (wasm)",
+      "version": "1.3.1 (Ubuntu 26.04, server), 1.3.2 Emscripten port (wasm)",
       "license": "Zlib",
       "in": ["server", "wasm"],
       "url": "https://zlib.net/",
@@ -486,11 +486,11 @@
     {
       "id": "system-libraries",
       "name": "System libraries and packages of the Docker image",
-      "version": "Ubuntu 24.04",
+      "version": "Ubuntu 26.04",
       "license": "various",
       "in": ["image"],
       "url": "https://ubuntu.com/legal/open-source-licences",
-      "note": "The image is based on ubuntu:24.04. glibc and libstdc++ (LGPL / GPL with the GCC runtime library exception) and fontconfig are dynamically linked system libraries; tini, curl and ca-certificates are installed packages. Each package's licence is in the image under /usr/share/doc/<package>/copyright.",
+      "note": "The image is based on ubuntu:26.04. glibc and libstdc++ (LGPL / GPL with the GCC runtime library exception) and fontconfig are dynamically linked system libraries; tini, curl and ca-certificates are installed packages. Each package's licence is in the image under /usr/share/doc/<package>/copyright.",
       "harvest": []
     }
   ]

@@ -1,4 +1,4 @@
---- ubuntu:24.04 /usr/share/doc/zlib1g/copyright ---
+--- ubuntu:26.04 /usr/share/doc/zlib1g/copyright ---
 
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: zlib

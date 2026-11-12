@@ -31,6 +31,11 @@ const outDir = join(here, "native");
 // Top-level files that carry a licence or notice.
 const LICENSE_NAME = /^(licen[cs]e|copying|copyright|notice|unlicense)([-._].*)?$/i;
 
+// {ubuntu} entries are read from the same base image the Dockerfile builds on.
+const ubuntuImage = `ubuntu:${
+  readFileSync(join(repo, "Dockerfile"), "utf8").match(/^ARG UBUNTU_VERSION=(\S+)/m)[1]
+}`;
+
 const run = (cmd, args, opts = {}) =>
   execFileSync(cmd, args, { maxBuffer: 256 * 1024 * 1024, ...opts }).toString("utf8");
 
@@ -120,8 +125,8 @@ function harvest(spec) {
   if (spec.archive) return fromArchive(download(spec.archive, spec.sha256), spec.files);
   if (spec.emport) return fromArchive(emport(spec.emport), spec.files);
   if (spec.ubuntu) {
-    const text = run("docker", ["run", "--rm", "ubuntu:24.04", "cat", `/usr/share/doc/${spec.ubuntu}/copyright`]);
-    return [{ title: `ubuntu:24.04 /usr/share/doc/${spec.ubuntu}/copyright`, text }];
+    const text = run("docker", ["run", "--rm", ubuntuImage, "cat", `/usr/share/doc/${spec.ubuntu}/copyright`]);
+    return [{ title: `${ubuntuImage} /usr/share/doc/${spec.ubuntu}/copyright`, text }];
   }
   throw new Error(`unknown harvest spec ${JSON.stringify(spec)}`);
 }
