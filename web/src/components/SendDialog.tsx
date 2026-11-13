@@ -245,9 +245,9 @@ export default function SendDialog({
                       </span>
                       {(t.incompatible || t.busy) && <span className="hint">{t.incompatible ?? t.busy}</span>}
                     </span>
-                    <span className="printer-state">
-                      {label}
+                    <span className={`printer-state tone-${tone}`}>
                       <span className={`status-dot status-${tone}`} />
+                      {label}
                     </span>
                   </label>
                 );

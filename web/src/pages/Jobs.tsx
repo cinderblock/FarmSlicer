@@ -4,7 +4,7 @@ import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
 import Icon from "../components/Icon";
-import PageHeader, { EmptyState } from "../components/PageHeader";
+import PageHeader, { EmptyState, Skeleton } from "../components/PageHeader";
 import { GcodeChip } from "../components/GcodeCheck";
 import { formatCost, packageVerdict, type Prices } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
@@ -102,7 +102,8 @@ export default function JobsPage() {
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const navigate = useNavigate();
-  const jobs = useJson<Job[]>("/api/jobs", rev).data ?? [];
+  const jobsQuery = useJson<Job[]>("/api/jobs", rev);
+  const jobs = jobsQuery.data ?? [];
   const chargeable = useJson<{ chargeable: { id: string; path: string }[] }>("/api/me").data?.chargeable ?? [];
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
 
@@ -325,7 +326,9 @@ export default function JobsPage() {
           Drop a .gcode.3mf or .gcode to upload it
         </div>
       )}
-      {jobs.length === 0 ? (
+      {!jobsQuery.data && !jobsQuery.error ? (
+        <Skeleton kind="rows" count={5} />
+      ) : jobs.length === 0 ? (
         <EmptyState
           icon="jobs"
           title="No jobs yet"

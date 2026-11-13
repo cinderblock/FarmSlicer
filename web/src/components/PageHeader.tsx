@@ -55,3 +55,18 @@ export function EmptyState({
     </div>
   );
 }
+
+/** Grey shapes where content is about to load. */
+export function Skeleton({ kind, count = 3 }: { kind: "cards" | "rows"; count?: number }) {
+  return (
+    <div className={`skeleton-${kind}`} aria-busy="true" aria-label="Loading">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="skeleton-item">
+          <span className="skeleton-line wide" />
+          <span className="skeleton-line" />
+          {kind === "cards" && <span className="skeleton-line short" />}
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -5660,3 +5660,81 @@ select.select-sm {
 .data-table td[data-label="Printer"] {
   white-space: nowrap;
 }
+
+/* Loading skeletons (Skeleton in components/PageHeader.tsx). */
+.skeleton-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.skeleton-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.skeleton-cards .skeleton-item {
+  height: 13rem;
+  padding: 1.35rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.skeleton-rows .skeleton-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.1rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.skeleton-rows .skeleton-item:last-child {
+  border-bottom: none;
+}
+
+.skeleton-line {
+  display: block;
+  height: 0.8rem;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--tone-neutral) 0%, color-mix(in srgb, var(--text-dim) 22%, transparent) 50%, var(--tone-neutral) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line.wide {
+  width: 65%;
+  height: 1rem;
+}
+
+.skeleton-line.short {
+  width: 25%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Dialogs sit inside pages: page heading rules don't apply to them. */
+.page .modal h3,
+.page .modal-header h3 {
+  margin: 0;
+  padding: 0;
+  border: none;
+}

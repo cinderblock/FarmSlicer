@@ -3,7 +3,7 @@ import { useAuth } from "../auth";
 import { localDateTime, useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
 import Icon from "../components/Icon";
-import PageHeader, { EmptyState } from "../components/PageHeader";
+import PageHeader, { EmptyState, Skeleton } from "../components/PageHeader";
 import {
   BED_TYPES,
   describeState,
@@ -557,7 +557,9 @@ export default function PrintersPage() {
         </div>
       )}
 
-      {printersQuery.data && printers.length === 0 && (!isAdmin || newDiscovered.length === 0) ? (
+      {!printersQuery.data && !printersQuery.error ? (
+        <Skeleton kind="cards" />
+      ) : printersQuery.data && printers.length === 0 && (!isAdmin || newDiscovered.length === 0) ? (
         <EmptyState
           icon="printer"
           title="No printers yet"
