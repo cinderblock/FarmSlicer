@@ -99,9 +99,11 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(builtAt.toISOString()),
   },
   server: {
+    // FARMSLICER_DEV_API points `vite dev` at another server (a dev
+    // container through an SSH tunnel, say).
     proxy: {
-      "/api": "http://localhost:9337",
-      "/wasm": "http://localhost:9337",
+      "/api": process.env.FARMSLICER_DEV_API ?? "http://localhost:9337",
+      "/wasm": process.env.FARMSLICER_DEV_API ?? "http://localhost:9337",
     },
     // Same cross-origin isolation the Rust server sends, so the multithreaded
     // WebAssembly engine (SharedArrayBuffer) also works under `vite dev`.
