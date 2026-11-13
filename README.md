@@ -447,6 +447,7 @@ Frontend only:
 
 ```bash
 cd web && bun install && bun run dev      # Vite dev server, proxies /api and /wasm to :9337
+FARMSLICER_DEV_API=http://localhost:9338 bun run dev   # …or to another server (a dev container, say)
 cd web && bun run build                    # tsc + vite → dist/web
 cd web && bun test                         # unit tests (the G-code parser, support materials, slicer warnings)
 ```

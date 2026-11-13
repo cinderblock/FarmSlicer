@@ -21,6 +21,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-13",
+    date: "2026-11-13",
+    title: "A new look, a light theme, and search everywhere",
+    highlights: [
+      "FarmSlicer has a new look: clearer pages, a menu grouped by what you're doing, and a light theme. It follows your device's light or dark setting; pick one yourself from the button next to your name or under Account.",
+      "Search: press Ctrl K (⌘K on a Mac), or /, anywhere to jump to a page, printer, job or project, or to change the theme.",
+      "The Printers page shows the farm at a glance: how many printers are printing, idle, paused or need a look (tap one to see only those), and each printing card shows the percentage, time left and when it should finish.",
+      "Jobs: find one by name, person or group, show only ready, slicing or failed ones, and drop a sliced file anywhere on the page to upload it.",
+    ],
+    fixes: "The Slice button stays in reach at the bottom of the settings, the queue shows each printer's next plate with its picture, and empty pages say what to do next.",
+  },
+  {
     id: "2026-10-26",
     date: "2026-10-26",
     title: "FarmSlicer as an app, with notifications",

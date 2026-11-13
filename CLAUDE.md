@@ -34,7 +34,8 @@ Native builds mirror the Dockerfile's steps:
    (`plans/openssl-in-deps.md`). A deps build from before that still holds
    OrcaSlicer's OpenSSL 1.1.1 (and libslic3r built against its headers):
    rebuild both.
-3. `cd web && bun install && bun run build` → `dist/web`.
+3. `cd web && bun install && bun run build` → `dist/web`. (`bun run dev`
+   proxies `/api` to :9337, or to `FARMSLICER_DEV_API`.)
 4. `cargo build --release` → `target/release/farmslicer`; run from the repo root
    (it reads `extern/OrcaSlicer/resources` and serves `dist/web`). Port 9337.
 
@@ -220,6 +221,24 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `components/ErrorBoundary.tsx`, `components/FeedbackDialog.tsx` (the
   sidebar's "Send feedback"), `pages/Feedback.tsx` (admin triage / "My
   feedback"), `feedback.ts` (types, labels)
+- `web/src/index.css` — one stylesheet; its top is the design system:
+  tokens on `:root` (surfaces `--bg*`, `--text*`, `--accent`, semantic
+  colours and their soft `--tone-*` backgrounds, radii, shadows), the
+  light theme (system preference, or `data-theme` on `<html>` from
+  `web/src/theme.ts`; index.html applies it before the first paint), and
+  base styles for every control. Use tokens, never raw colours. The 3D
+  views and camera stay dark in both themes (a token override on their
+  containers). Shared pieces: `btn-primary` (+ `btn-inline`), `btn-sm`
+  (+ `btn-ghost`, `btn-icon`, `btn-accent`, `btn-danger`), `segmented`,
+  `list-toolbar` + `search-field`, `status-badge`, `empty-state`
+- `web/src/components/Icon.tsx` — the app's icons (hand-drawn SVG paths,
+  no icon package) and `BrandMark`; `PageHeader.tsx` — every page's
+  title, subtitle and actions, plus `EmptyState` (icon, what's missing,
+  the next step)
+- `web/src/nav.ts` — the pages by sidebar section (Farm, Make, Setup,
+  Admin) with icons and search keywords; `components/CommandPalette.tsx`
+  (Ctrl/Cmd+K or `/`: pages, actions, printers, jobs, projects; matching
+  in `web/src/search.ts`, unit-tested)
 - `web/src/appUpdate.ts` — new builds without losing work: polls
   `/version.json`, and a newer build reloads the page only when `decide`
   (pure, unit-tested) allows: when someone goes to another page (`notifyLocation`,
