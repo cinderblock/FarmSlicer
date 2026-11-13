@@ -54,22 +54,49 @@ dark themes, and keyboard-driven navigation. Asked for 2026-11-13 with
 
 - `index.css` is ~4200 lines and already mostly on `--` tokens (86
   hard-coded colours), so a light theme is a token job, not a rewrite.
+- The 3D views, camera and their overlays stay dark in both themes: a
+  token override on their containers (`.model-viewer`, `.gp-viewport`,
+  `.cmp-pane`, `.slice-result-waiting`, `.camera-view`).
+- `.page h3` (border, margins) also hits headings inside dialogs and the
+  Slice settings card, which live inside `.page`: both now reset it.
+- An SVG gradient `id` shared by two copies of the brand mark blanks both
+  when one copy is `display: none` (the phone top bar): `useId` per copy.
+- Bash heredocs in this harness choke on an apostrophe in the body even
+  with a quoted delimiter; write scripts to files instead.
+- `waitUntil: "networkidle"` never settles on pages with live SSE (the
+  Printers page); screenshots use `load` + a delay.
+- Lint: the only errors left are the pre-existing ones in ISSUES.md.
+- The bundle is one 1.7 MB chunk (three.js); code-splitting the 3D pages
+  would cut first load, but lazy chunks break stale tabs after a deploy
+  unless appUpdate.ts handles a failed chunk load. Not done; a candidate.
 
 ## Progress log
 
-- [ ] 1 tokens + themes
-- [ ] 2 base components
-- [ ] 3 sidebar
-- [ ] 4 page headers
-- [ ] 5 printers page
-- [ ] 6 empty states
-- [ ] 7 command palette
-- [ ] 8 page polish
-- [ ] 9 changelog/docs
+- [x] 1 tokens + themes (dark refined, light, system/manual choice)
+- [x] 2 base components (buttons, inputs, selects, tables, badges,
+  modals, progress, segmented control, list toolbar, skeletons)
+- [x] 3 sidebar (sections, icons, search, account block, theme toggle;
+  phone drawer)
+- [x] 4 page headers (PageHeader on every list/settings page)
+- [x] 5 printers page (summary filter, state stripe, temp chips, big
+  percentage + finish time, icon actions)
+- [x] 6 empty states (EmptyState with next steps)
+- [x] 7 command palette (Ctrl/Cmd+K, /)
+- [x] 8 page polish: Jobs (search, status filter, drop to upload), Queue
+  (lanes, next plate picture), Slice (segmented tabs, settings card,
+  sticky Slice button), sign-in cards, Account (Appearance), Projects
+  (search + switch), Feedback, send dialog, tab titles
+- [x] 9 changelog entry, README, CLAUDE.md
+- [ ] Not pushed (waiting on the maintainer)
+- [ ] Possible next round: code-splitting (see above), Group page tabs,
+  Profiles browser, Integrations and Settings as setting cards
 
 ## Open questions for the user
 
-(none yet)
+1. Push the commits to `origin/master`? (Recommendation: yes, after a
+   look at the dev instance.)
+2. Keep the dev container `farmslicer-uidev` and the fake printers on
+   buildhost for another round, or remove them?
 
 ## Things not to do
 
