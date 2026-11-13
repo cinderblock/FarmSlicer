@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router";
+import Icon from "../components/Icon";
 import ModelViewer, { type BedShape, type PlateState, type SupportCheck } from "../components/ModelViewer";
 import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
 import NozzlePlanView from "../components/NozzlePlanView";
@@ -1217,10 +1218,9 @@ export default function SlicePage() {
   return (
     // Saved as a draft: edits here don't keep an update from loading.
     <div className="page slice-page" data-autosave>
-      <h2>Slice</h2>
       <div className="slice-layout">
         <div className="viewer-panel">
-          <div className="view-tabs" role="tablist">
+          <div className="view-tabs segmented" role="tablist">
             <button role="tab" aria-selected={view === "prepare"} className={view === "prepare" ? "active" : ""} onClick={() => setView("prepare")}>
               Prepare
             </button>
@@ -1260,7 +1260,9 @@ export default function SlicePage() {
           )}
         </div>
         <div className="settings-panel">
-          <h3>Settings</h3>
+          <h3>
+            <Icon name="profiles" /> Settings
+          </h3>
           {reslice && (
             <p className={`hint reslice-note ${reslice.error ? "bad" : ""}`}>
               {reslice.error
@@ -1623,10 +1625,11 @@ export default function SlicePage() {
           )}
 
           <button
-            className="btn-primary"
+            className="btn-primary slice-button"
             disabled={modelFiles.length === 0 || slicing || offBed}
             onClick={() => void handleSlice()}
           >
+            {slicing ? <span className="spinner" aria-hidden="true" /> : <Icon name={sameSlice ? "layers" : "slice"} />}
             {slicing ? (progress ? "Slicing in browser…" : "Submitting…") : sameSlice ? "Show slice" : "Slice"}
           </button>
           {sameSlice && !slicing && !offBed && (

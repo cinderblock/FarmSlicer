@@ -1303,8 +1303,9 @@ a.card:hover {
   /* One row the height of the window: the viewer fits on screen (its
      placement panel sits at the bottom) and the settings scroll. */
   grid-template-rows: minmax(0, 1fr);
-  gap: 1.5rem;
-  height: calc(100vh - 8rem);
+  gap: 1.25rem;
+  height: calc(100vh - 4.5rem);
+  height: calc(100dvh - 4.5rem);
   /* A short window scrolls the page rather than crushing the viewer. */
   min-height: 480px;
 }
@@ -1318,23 +1319,7 @@ a.card:hover {
 
 /* Prepare (the plate) / Preview (the last slice) above the viewer. */
 .view-tabs {
-  display: flex;
-  gap: 2px;
-}
-
-.view-tabs button {
-  padding: 0.3rem 0.9rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px 6px 0 0;
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.view-tabs button.active {
-  color: var(--accent);
-  background: var(--bg-card);
+  align-self: flex-start;
 }
 
 .view-tabs button:disabled {
@@ -1418,7 +1403,44 @@ a.card:hover {
   gap: 1rem;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 0.25rem;
+  padding: 1rem 1rem 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+.page .settings-panel > h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.settings-panel > h3 .icon {
+  color: var(--accent);
+}
+
+/* The Slice button stays in reach at the bottom of the panel while its
+   settings scroll. */
+.settings-panel > .slice-button {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-bottom: 0.25rem;
+  padding: 0.8rem 1rem;
+  font-size: 1rem;
+  box-shadow:
+    0 -14px 18px 4px var(--bg-card),
+    0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.settings-panel > :last-child {
+  margin-bottom: 1rem;
 }
 
 /* Items keep their natural height so the panel scrolls. Shrinking them
@@ -1478,11 +1500,6 @@ a.card:hover {
 }
 
 .settings-panel select {
-  background: var(--bg-card);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 0.5rem;
-  border-radius: 4px;
   font-size: 0.9rem;
 }
 
@@ -1510,10 +1527,10 @@ a.card:hover {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  padding: 0.6rem 0.75rem 0.75rem;
+  padding: 0.7rem 0.8rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
 }
 
 .supports-title {
@@ -1546,10 +1563,10 @@ a.card:hover {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  padding: 0.6rem 0.75rem 0.75rem;
+  padding: 0.7rem 0.8rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
   font-size: 0.85rem;
 }
 
@@ -1606,9 +1623,10 @@ a.card:hover {
 }
 
 .model-info {
-  padding: 0.75rem;
-  background: var(--bg-card);
-  border-radius: 6px;
+  padding: 0.7rem 0.8rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 
 .hint {
@@ -1627,13 +1645,8 @@ a.card:hover {
 
 /* Form inputs */
 .form-input,
-.settings-panel input,
-.card input {
-  background: var(--bg-card);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 0.5rem;
-  border-radius: 4px;
+.settings-panel input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+.card input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]) {
   font-size: 0.9rem;
   width: 100%;
 }
@@ -1648,11 +1661,6 @@ a.card:hover {
 }
 
 .card select {
-  background: var(--bg-card);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 0.5rem;
-  border-radius: 4px;
   font-size: 0.9rem;
 }
 
@@ -2551,17 +2559,27 @@ a.card:hover {
   /* A phone's visible height, not the one behind its browser bars. */
   min-height: 100dvh;
   padding: 1rem;
-  background: var(--bg);
+  /* A soft glow of the brand colour over faint extrusion lines. */
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--text) 3%, transparent) 0 1px, transparent 1px 22px),
+    var(--bg);
 }
 
 .login-card {
-  background: var(--bg-card);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2.5rem;
+  border-radius: var(--radius-lg);
+  padding: 2.25rem 2.25rem 2rem;
   width: 100%;
-  max-width: 360px;
+  max-width: 380px;
   text-align: center;
+  box-shadow: var(--shadow-lg);
+  animation: modal-in 0.3s var(--ease);
+}
+
+.login-card > * + * {
+  margin-top: 0.85rem;
 }
 
 @media (max-width: 800px) {
@@ -2570,10 +2588,33 @@ a.card:hover {
   }
 }
 
+/* Every sign-in card (login, setup, invite, recover, join) opens with the
+   mark over the name. */
 .login-card h1 {
-  color: var(--accent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
   margin-bottom: 1.5rem;
+  color: var(--text);
   font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.login-card h1::before {
+  content: "";
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: url("/favicon.svg") center / contain no-repeat;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.login-tagline {
+  margin: -1rem 0 1.5rem !important;
+  color: var(--text-dim);
+  font-size: 0.92rem;
 }
 
 .login-card form {
@@ -2592,13 +2633,15 @@ a.card:hover {
 }
 
 .login-card input {
-  background: var(--bg-surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 0.65rem;
-  border-radius: 6px;
+  padding: 0.6rem 0.7rem;
   font-size: 1rem;
   width: 100%;
+}
+
+.login-card .btn-sm[type="submit"] {
+  justify-content: center;
+  padding: 0.5rem;
+  margin-right: 0;
 }
 
 .login-error {

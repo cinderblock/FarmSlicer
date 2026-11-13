@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
+import Icon from "../components/Icon";
 import SourceFooter from "../components/SourceFooter";
 import RecoveryCode from "../components/RecoveryCode";
 import { browserSupportsWebAuthn, signInWithPasskey } from "../passkeys";
@@ -69,6 +70,7 @@ export default function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <h1>FarmSlicer</h1>
+        <p className="login-tagline">Slice and send to the farm's printers.</p>
         {!browserSupportsWebAuthn() && (
           <p className="login-error">This browser does not support passkeys.</p>
         )}
@@ -91,6 +93,7 @@ export default function LoginPage() {
           onClick={() => signIn()}
           disabled={busy || !browserSupportsWebAuthn()}
         >
+          <Icon name="key" />
           {busy ? "Waiting for your passkey…" : "Sign in with a passkey"}
         </button>
 
