@@ -87,16 +87,14 @@ dark themes, and keyboard-driven navigation. Asked for 2026-11-13 with
   sticky Slice button), sign-in cards, Account (Appearance), Projects
   (search + switch), Feedback, send dialog, tab titles
 - [x] 9 changelog entry, README, CLAUDE.md
-- [ ] Not pushed (waiting on the maintainer)
+- [x] Pushed to origin/master (`396cbe1`, 2026-11-13); dev container,
+  its volume and the fake printers removed from buildhost
 - [ ] Possible next round: code-splitting (see above), Group page tabs,
   Profiles browser, Integrations and Settings as setting cards
 
 ## Open questions for the user
 
-1. Push the commits to `origin/master`? (Recommendation: yes, after a
-   look at the dev instance.)
-2. Keep the dev container `farmslicer-uidev` and the fake printers on
-   buildhost for another round, or remove them?
+None.
 
 ## Things not to do
 
