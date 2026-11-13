@@ -6,6 +6,8 @@ import { Link, useNavigate } from "react-router";
 import { apiJson } from "../auth";
 import { errorText, localDate, useJson } from "../api";
 import ProgressBar from "../components/ProgressBar";
+import Icon from "../components/Icon";
+import PageHeader, { EmptyState } from "../components/PageHeader";
 import { STATUS_LABELS, overdue, progressText, type Project } from "../projects";
 
 interface MeGroups {
@@ -24,33 +26,63 @@ export default function ProjectsPage() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h2>Projects</h2>
-        <button className="btn-sm" onClick={() => setCreating((c) => !c)}>
-          {creating ? "Cancel" : "New project"}
-        </button>
-      </div>
-      <p className="hint">
+      <PageHeader
+        title="Projects"
+        icon="projects"
+        actions={
+          <button className={creating ? "btn-sm" : "btn-primary btn-inline"} onClick={() => setCreating((c) => !c)}>
+            {creating ? (
+              "Cancel"
+            ) : (
+              <>
+                <Icon name="plus" /> New project
+              </>
+            )}
+          </button>
+        }
+      >
         What needs printing, part by part, and how far each part has got: good copies, copies on a printer or
         waiting to be checked, and copies that failed and need printing again. Slice a part for a project from the
         Slice page (Project), or add an existing job from its page.
-      </p>
+      </PageHeader>
       {creating && <NewProject onCreated={() => setRev((r) => r + 1)} />}
-      <div className="filters">
-        <select value={show} onChange={(e) => setShow(e.target.value as "active" | "all")} aria-label="Which projects">
-          <option value="active">Not shipped or cancelled</option>
-          <option value="all">All</option>
-        </select>
-        <input
-          type="search"
-          placeholder="Search name, client, order…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search projects"
-        />
+      <div className="list-toolbar">
+        <label className="search-field">
+          <Icon name="search" />
+          <input
+            type="search"
+            placeholder="Search name, client, order…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search projects"
+          />
+        </label>
+        <div className="segmented" role="group" aria-label="Which projects">
+          <button className={show === "active" ? "active" : ""} aria-pressed={show === "active"} onClick={() => setShow("active")}>
+            In progress
+          </button>
+          <button className={show === "all" ? "active" : ""} aria-pressed={show === "all"} onClick={() => setShow("all")}>
+            All
+          </button>
+        </div>
       </div>
       {projects.error && <p className="login-error">{projects.error}</p>}
-      {projects.data?.length === 0 && <p className="empty-state">No projects{show === "active" ? " in progress" : ""}.</p>}
+      {projects.data?.length === 0 && (
+        <EmptyState
+          icon="projects"
+          title={search.trim() ? "No projects match" : show === "active" ? "No projects in progress" : "No projects yet"}
+          action={
+            !creating &&
+            !search.trim() && (
+              <button className="btn-primary btn-inline" onClick={() => setCreating(true)}>
+                <Icon name="plus" /> New project
+              </button>
+            )
+          }
+        >
+          A project is what someone needs printed: its parts, how many of each, and when.
+        </EmptyState>
+      )}
       {projects.data && projects.data.length > 0 && (
         <table className="data-table cards">
           <thead>

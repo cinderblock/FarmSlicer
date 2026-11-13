@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import ProfileEditor from "../components/ProfileEditor";
+import PageHeader from "../components/PageHeader";
 
 interface CustomProfile {
   id: string;
@@ -214,7 +215,7 @@ export default function ProfilesPage() {
 
   return (
     <div className="page">
-      <h2>Profiles</h2>
+      <PageHeader title="Profiles" icon="profiles" />
 
       <div className="profile-tabs">
         <button

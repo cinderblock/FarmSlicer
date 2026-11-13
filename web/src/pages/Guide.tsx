@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { useJson } from "../api";
 import { describeRules, formatMinutes, type GcodeLimits, type Printer, type PrintRules, type UploadPolicy } from "../printers";
+import PageHeader from "../components/PageHeader";
 
 interface GuideInfo {
   /** The farm's own notes (Settings), plain text. */
@@ -51,7 +52,7 @@ export default function GuidePage() {
 
   return (
     <div className="page guide">
-      <h2>How to print</h2>
+      <PageHeader title="How to print" icon="guide" />
 
       {info?.notes && (
         <section className="card guide-notes">

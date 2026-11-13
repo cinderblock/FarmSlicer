@@ -210,6 +210,7 @@ export default function JobsPage() {
     >
       <PageHeader
         title="Jobs"
+        icon="jobs"
         actions={
           <>
             {chargeable.length > 0 && (

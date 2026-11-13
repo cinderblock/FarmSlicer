@@ -6,6 +6,7 @@ import { useState } from "react";
 import { apiJson, useAuth } from "../auth";
 import { errorText, localDateTime, useJson } from "../api";
 import type { GroupSummary } from "../groups";
+import PageHeader from "../components/PageHeader";
 
 interface IntegrationKey {
   id: string;
@@ -74,11 +75,10 @@ export default function IntegrationsPage() {
   const groups = (useJson<GroupSummary[]>("/api/groups").data ?? []).filter((g) => isAdmin || g.can_manage);
   return (
     <div className="page">
-      <h2>Integrations</h2>
-      <p className="hint">
+      <PageHeader title="Integrations" icon="integrations">
         Connect ordering, shipping and billing software. FarmSlicer keeps no customer records: projects carry the
         other tool's client and order references. The API is described in the README (API section).
-      </p>
+      </PageHeader>
       <h3>Keys for ordering software</h3>
       <KeysSection groups={groups} isAdmin={isAdmin} />
       {isAdmin && (

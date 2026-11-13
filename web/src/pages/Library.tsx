@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { formatDuration, formatSize, localDate, useJson } from "../api";
+import PageHeader, { EmptyState } from "../components/PageHeader";
+import Icon from "../components/Icon";
 
 interface SliceRecord {
   id: string;
@@ -29,7 +31,7 @@ export default function LibraryPage() {
 
   return (
     <div className="page">
-      <h2>Slice Library</h2>
+      <PageHeader title="Slice Library" icon="library" />
       <div className="browse-filters">
         <label>
           Show{" "}
@@ -52,7 +54,17 @@ export default function LibraryPage() {
       {slices === undefined ? (
         <p className="hint">Loading…</p>
       ) : slices.length === 0 ? (
-        <p className="empty-state">No slices yet. Completed slice jobs will appear here.</p>
+        <EmptyState
+          icon="library"
+          title="Nothing in the library yet"
+          action={
+            <Link className="btn-primary btn-inline" to="/slice">
+              <Icon name="slice" /> Slice a model
+            </Link>
+          }
+        >
+          Finished slices you can see land here, ready to print again.
+        </EmptyState>
       ) : (
         <table className="data-table cards">
           <thead>

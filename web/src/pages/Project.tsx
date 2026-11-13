@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { apiJson } from "../auth";
 import { errorText, localDate, localDateTime, useJson } from "../api";
 import ProgressBar from "../components/ProgressBar";
+import { EmptyState } from "../components/PageHeader";
 import { STATUS_LABELS, overdue, progressText, type Item, type ProjectDetail, type ProjectStatus } from "../projects";
 
 /** What people can move a project to from each status. */
@@ -154,7 +155,11 @@ export default function ProjectPage() {
         )}
       </div>
       {notice && <p className="job-alert">{notice}</p>}
-      {p.items.length === 0 && <p className="empty-state">No parts yet.</p>}
+      {p.items.length === 0 && (
+        <EmptyState icon="box" title="No parts yet">
+          Add the parts this project needs below, with how many of each.
+        </EmptyState>
+      )}
       {p.items.length > 0 && (
         <table className="data-table cards">
           <thead>

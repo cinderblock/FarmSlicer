@@ -7,6 +7,9 @@ import RecoveryCode from "../components/RecoveryCode";
 import { UsageLines } from "../components/Quota";
 import type { QuotaLine } from "../groups";
 import { browserSupportsWebAuthn, defaultKeyName, registerPasskey } from "../passkeys";
+import PageHeader from "../components/PageHeader";
+import Icon from "../components/Icon";
+import { useTheme } from "../theme";
 
 interface PasskeyInfo {
   id: string;
@@ -34,6 +37,7 @@ interface MyUsage {
 
 /** The signed-in user's own settings: groups and limits, notifications, passkeys, recovery code, API keys. */
 export default function AccountPage() {
+  const [theme, setTheme] = useTheme();
   const { user, isGuest, refresh } = useAuth();
   const [rev, setRev] = useState(0);
   const passkeys = useJson<PasskeyInfo[]>("/api/me/passkeys", rev).data ?? [];
@@ -110,11 +114,10 @@ export default function AccountPage() {
   };
 
   return (
-    <div className="page">
-      <h2>Account</h2>
-      <p>
+    <div className="page page-narrow">
+      <PageHeader title="Account" icon="user">
         Signed in as <strong>{user?.username}</strong> ({isGuest ? "guest" : user?.role}).
-      </p>
+      </PageHeader>
       {!isGuest && (
         <p className="hint">
           {user?.remote_access
@@ -129,6 +132,33 @@ export default function AccountPage() {
           make it a full account.
         </p>
       )}
+
+      <h3>Appearance</h3>
+      <div className="setting-row">
+        <div>
+          <div className="setting-row-label">Theme</div>
+          <p className="hint">This browser only. System follows your device's light or dark setting.</p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label="Theme">
+          {(
+            [
+              ["system", "System", "monitor"],
+              ["light", "Light", "sun"],
+              ["dark", "Dark", "moon"],
+            ] as const
+          ).map(([value, label, icon]) => (
+            <button
+              key={value}
+              role="radio"
+              aria-checked={theme === value}
+              className={theme === value ? "active" : ""}
+              onClick={() => setTheme(value)}
+            >
+              <Icon name={icon} /> {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <h3>Groups</h3>
       {me && me.groups.length === 0 && (

@@ -5613,3 +5613,29 @@ select.select-sm {
     margin-left: 0;
   }
 }
+
+/* Forms one column wide (Account, Settings) read better narrower. */
+.page.page-narrow {
+  max-width: 920px;
+}
+
+/* A setting's name and explanation on the left, its control on the right. */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.setting-row-label {
+  font-weight: 600;
+}
+
+.setting-row .hint {
+  margin-top: 0.15rem;
+}

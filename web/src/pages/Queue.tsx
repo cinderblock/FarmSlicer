@@ -66,6 +66,7 @@ export default function QueuePage() {
     <div className="page">
       <PageHeader
         title="Queue"
+        icon="queue"
         actions={
           <>
           <span className="stat-pair" title="Plates waiting for a printer">

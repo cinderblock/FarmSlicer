@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useJson } from "../api";
+import PageHeader, { EmptyState } from "../components/PageHeader";
 
 interface SettingStat {
   key: string;
@@ -32,7 +33,7 @@ export default function ReportsPage() {
   const data = report.data;
   return (
     <div className="page">
-      <h2>Reports</h2>
+      <PageHeader title="Reports" icon="reports" />
       <h3>Defaults people change</h3>
       <p className="hint">
         For jobs made on the Slice page: what the page proposed (profiles, plate, supports, support materials) against
@@ -50,7 +51,7 @@ export default function ReportsPage() {
         {data && <span className="hint">{data.jobs} jobs</span>}
       </div>
       {report.error && <p className="login-error">{report.error}</p>}
-      {data && data.settings.length === 0 && <p className="empty-state">No jobs with proposals in this period.</p>}
+      {data && data.settings.length === 0 && <EmptyState icon="reports" title="No data for this period">Jobs made on the Slice page in this period show up here.</EmptyState>}
       {data && data.settings.length > 0 && (
         <table className="data-table defaults-report">
           <thead>

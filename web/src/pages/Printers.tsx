@@ -296,6 +296,7 @@ export default function PrintersPage() {
     <div className="page">
       <PageHeader
         title="Printers"
+        icon="printer"
         actions={
           isAdmin && (
             <button

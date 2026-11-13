@@ -7,6 +7,7 @@ import { QuotaRulesEditor } from "../components/Quota";
 import GcodeIncidents from "../components/GcodeIncidents";
 import type { Rule } from "../groups";
 import { ruleText } from "../groups";
+import PageHeader from "../components/PageHeader";
 
 interface AdminUser extends User {
   passkeys: number;
@@ -125,15 +126,14 @@ export default function UsersPage() {
 
   return (
     <div className="page">
-      <h2>Users</h2>
-      <p className="hint">
+      <PageHeader title="Users" icon="users">
         Sign-in is passkey-only. Adding a user gives you an invite link; send it to them and
         they enrol their own passkey. Owner: the first account, fixed. Admins manage users and
         printers. Users slice and manage their own passkeys and API keys. Guests joined through a
         group's link without a passkey; they sign in with one-time codes and can't change printers,
         profiles or API keys. People can also join on their own through{" "}
         <Link to="/groups">group join links</Link>.
-      </p>
+      </PageHeader>
       <p className="hint">
         Remote: the account may be used from outside the local network, signing in with a passkey
         only (no recovery codes, guest codes or API keys from there). Its invite link works from

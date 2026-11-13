@@ -4,6 +4,7 @@ import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import type { GroupSummary } from "../groups";
 import GroupTable from "../components/GroupTable";
+import PageHeader from "../components/PageHeader";
 
 /** /groups — the caller's groups (admins: every group), joining, creating top-level groups. */
 export default function GroupsPage() {
@@ -44,11 +45,10 @@ export default function GroupsPage() {
 
   return (
     <div className="page">
-      <h2>Groups</h2>
-      <p className="hint">
+      <PageHeader title="Groups" icon="groups">
         Jobs you slice for a group land in its library, where its members can see them. Groups can have
         subgroups; limits and settings carry down from parent groups.
-      </p>
+      </PageHeader>
 
       <h3>Your groups</h3>
       {groups.data === undefined ? (

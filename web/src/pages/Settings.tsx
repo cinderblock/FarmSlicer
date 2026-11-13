@@ -6,6 +6,7 @@ import type { Rule } from "../groups";
 import PrintRulesEditor from "../components/PrintRulesEditor";
 import PoolsEditor from "../components/PoolsEditor";
 import { UPLOAD_POLICIES, type GcodeLimits, type Prices, type PrintRules, type UploadPolicy } from "../printers";
+import PageHeader from "../components/PageHeader";
 
 interface SiteSettings {
   season_start: string;
@@ -50,12 +51,11 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
   };
 
   return (
-    <div className="page">
-      <h2>Settings</h2>
-      <p className="hint">
+    <div className="page page-narrow">
+      <PageHeader title="Settings" icon="settings">
         Site-wide defaults. Groups have their own settings and limits (Groups page); a user's own limits can be
         changed on the Users page.
-      </p>
+      </PageHeader>
       <form className="printer-form settings-form" onSubmit={save}>
         <label>
           Season starts (MM-DD)

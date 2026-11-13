@@ -4,6 +4,7 @@ import { errorText, localDateTime, useJson } from "../api";
 import OutcomeDialog from "../components/OutcomeDialog";
 import PrintControls from "../components/PrintControls";
 import { ACTIVE_PRINT, formatCost, outcomeText, type Prices, type Printer, type PrintRecord } from "../printers";
+import PageHeader, { EmptyState } from "../components/PageHeader";
 
 const STATUS_LABELS: Record<PrintRecord["status"], string> = {
   pending_approval: "Waiting for approval",
@@ -55,18 +56,19 @@ export default function PrintsPage() {
 
   return (
     <div className="page">
-      <h2>Prints</h2>
-      <p className="hint">
+      <PageHeader title="Prints" icon="prints">
         Jobs sent to printers. Send one from the Jobs page; prints of jobs you can't see show only
         their printer and status.
-      </p>
+      </PageHeader>
       <label className="checkbox-label">
         <input type="checkbox" checked={uncheckedOnly} onChange={(e) => setUncheckedOnly(e.target.checked)} />
         Only finished prints nobody has checked yet
       </label>
       {error && <p className="login-error">{error}</p>}
       {prints && prints.length === 0 && (
-        <p className="empty-state">{uncheckedOnly ? "Every finished print has been checked." : "Nothing has been printed yet."}</p>
+        <EmptyState icon={uncheckedOnly ? "check" : "prints"} title={uncheckedOnly ? "All checked" : "Nothing printed yet"}>
+          {uncheckedOnly ? "Every finished print has been checked." : "Prints sent from the Jobs page or the queue show up here."}
+        </EmptyState>
       )}
       {recording && (
         <OutcomeDialog
