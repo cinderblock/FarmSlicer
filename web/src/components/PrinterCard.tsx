@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { apiJson } from "../auth";
 import { errorText } from "../api";
 import CameraView from "./CameraView";
+import Icon from "./Icon";
 import PrintControls from "./PrintControls";
 import {
   describeState,
@@ -22,6 +23,30 @@ import {
 function temp(t: { current: number; target: number }): string {
   const current = Math.round(t.current);
   return t.target > 0 ? `${current}/${Math.round(t.target)} °C` : `${current} °C`;
+}
+
+/** A temperature as a chip: warm while heating to a target. */
+function TempChip({ label, icon, t }: { label: string; icon: "thermometer" | "bed" | "box"; t: { current: number; target: number } }) {
+  const heating = t.target > 0;
+  const reached = heating && Math.abs(t.current - t.target) <= 3;
+  return (
+    <span
+      className={`temp-chip${heating ? " heating" : ""}${reached ? " reached" : ""}`}
+      title={`${label}: ${temp(t)}${heating ? (reached ? " (at temperature)" : " (heating)") : ""}`}
+    >
+      <Icon name={icon} size={14} />
+      <span className="temp-label">{label}</span>
+      <span className="temp-value">{temp(t)}</span>
+    </span>
+  );
+}
+
+/** When a print with `minutes` left should end, as a local clock time. */
+function finishAt(minutes: number): string {
+  const end = new Date(Date.now() + minutes * 60_000);
+  const sameDay = end.toDateString() === new Date().toDateString();
+  const time = end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return sameDay ? time : `${end.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
 }
 
 function TraySwatch({ tray, active }: { tray: Tray; active: boolean }) {
@@ -105,7 +130,7 @@ export default function PrinterCard({
   const busy = isBusy(status);
 
   return (
-    <div className="card printer-card">
+    <div className="card printer-card" data-tone={tone}>
       <div className="printer-header">
         <h3>
           {printer.name}
@@ -120,13 +145,13 @@ export default function PrinterCard({
             </span>
           )}
         </h3>
-        <span className="printer-state">
-          {label}
+        <span className={`printer-state tone-${tone}`}>
           <span className={`status-dot status-${tone}`} />
+          {label}
         </span>
       </div>
       {printer.machine_profile && (
-        <p className="hint">
+        <p className="hint printer-model">
           {printer.machine_profile}
           {printer.nozzle_diameter && ` · ${printer.nozzle_diameter} mm nozzle`}
           {printer.plate_type && ` · ${plateLabel(printer.plate_type)}`}
@@ -145,6 +170,15 @@ export default function PrinterCard({
 
       {status?.online && (
         <>
+          <div className="printer-temps">
+            {status.nozzles.map((n, i) => (
+              <TempChip key={i} icon="thermometer" label={status.nozzles.length > 1 ? (i === 0 ? "L" : "R") : "Nozzle"} t={n} />
+            ))}
+            {status.bed && <TempChip icon="bed" label="Bed" t={status.bed} />}
+            {status.chamber != null && status.chamber > 0 && (
+              <TempChip icon="box" label="Chamber" t={{ current: status.chamber, target: 0 }} />
+            )}
+          </div>
           {picture && (
             <img
               className="printer-picture"
@@ -160,19 +194,23 @@ export default function PrinterCard({
                 {print?.name ?? status.job_name ?? "Untitled"}
                 {print?.username && <span className="hint"> · {print.username}</span>}
               </div>
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${status.percent ?? 0}%` }} />
+              <div className="printer-progress">
+                <span className="printer-percent">{status.percent != null ? `${status.percent}%` : "—"}</span>
+                <span className="printer-progress-facts">
+                  {status.remaining_minutes != null && (
+                    <span title={`Should finish around ${finishAt(status.remaining_minutes)}`}>
+                      <Icon name="clock" size={13} /> {formatMinutes(status.remaining_minutes)} left · {finishAt(status.remaining_minutes)}
+                    </span>
+                  )}
+                  {status.total_layers && status.layer != null ? (
+                    <span>
+                      <Icon name="layers" size={13} /> Layer {status.layer} of {status.total_layers}
+                    </span>
+                  ) : null}
+                </span>
               </div>
-              <div className="hint">
-                {[
-                  status.percent != null ? `${status.percent}%` : null,
-                  status.total_layers && status.layer != null ? `layer ${status.layer}/${status.total_layers}` : null,
-                  status.remaining_minutes != null
-                    ? `${formatMinutes(status.remaining_minutes)} left`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
+              <div className="progress-bar progress-lg">
+                <div className="progress-fill" style={{ width: `${status.percent ?? 0}%` }} />
               </div>
               {caps &&
                 (print?.can_control ? (
@@ -201,17 +239,6 @@ export default function PrinterCard({
             <p className="hint">Last print: {status.job_name}</p>
           )}
 
-          <p className="hint printer-temps">
-            {status.nozzles.map((n, i) => (
-              <span key={i}>
-                {status.nozzles.length > 1 ? `Nozzle ${i + 1}` : "Nozzle"} {temp(n)}
-              </span>
-            ))}
-            {status.bed && <span>Bed {temp(status.bed)}</span>}
-            {status.chamber != null && status.chamber > 0 && (
-              <span>Chamber {Math.round(status.chamber)} °C</span>
-            )}
-          </p>
 
           {(status.ams.length > 0 || status.external.length > 0) && (
             <div className="printer-trays">
@@ -263,7 +290,8 @@ export default function PrinterCard({
           status.nozzles.some((n) => n.target > 0) ||
           (status.bed?.target ?? 0) > 0) && (
         <label className="preheat">
-          <select value={heatSlot} onChange={(e) => heat(e.target.value)}>
+          <Icon name="flame" size={15} />
+          <select value={heatSlot} onChange={(e) => heat(e.target.value)} aria-label="Pre-heat">
             <option value="">Pre-heat for…</option>
             {loadedTrays(status).map((t) => (
                 <option key={t.slot} value={t.slot}>
@@ -285,7 +313,7 @@ export default function PrinterCard({
       {note && <p className="hint">{note}</p>}
       {isAdmin && !!openReports && (
         <p className="printer-error">
-          {openReports} open problem report{openReports === 1 ? "" : "s"}
+          <Icon name="alert" size={14} /> {openReports} open problem report{openReports === 1 ? "" : "s"}
         </p>
       )}
       {reporting && (
@@ -311,15 +339,15 @@ export default function PrinterCard({
       <div className="printer-actions">
         {caps?.camera && configured && (
           <button className="btn-sm" onClick={() => setCamera(true)}>
-            Camera
+            <Icon name="camera" /> Camera
           </button>
         )}
         {!reporting && (
-          <button className="btn-sm" onClick={() => setReporting(true)} title="Tell the admins something is wrong">
-            Report a problem
+          <button className="btn-sm btn-ghost" onClick={() => setReporting(true)} title="Tell the admins something is wrong">
+            <Icon name="alert" /> Report a problem
           </button>
         )}
-        {actions}
+        {actions && <span className="printer-admin-actions">{actions}</span>}
       </div>
 
       {camera && (
@@ -327,8 +355,8 @@ export default function PrinterCard({
           <div className="modal camera-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{printer.name}</h3>
-              <button className="btn-sm" onClick={() => setCamera(false)} aria-label="Close">
-                ✕
+              <button className="btn-sm btn-ghost btn-icon" onClick={() => setCamera(false)} aria-label="Close">
+                <Icon name="x" />
               </button>
             </div>
             <CameraView printerId={printer.id} />

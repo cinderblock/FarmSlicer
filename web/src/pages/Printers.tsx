@@ -2,7 +2,18 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
 import { localDateTime, useJson } from "../api";
 import PrinterCard from "../components/PrinterCard";
-import { BED_TYPES, NOZZLE_PRIORITIES, useActivePrints, usePrinterStatuses, type Printer, type Protocol } from "../printers";
+import Icon from "../components/Icon";
+import PageHeader, { EmptyState } from "../components/PageHeader";
+import {
+  BED_TYPES,
+  describeState,
+  NOZZLE_PRIORITIES,
+  useActivePrints,
+  usePrinterStatuses,
+  type Printer,
+  type PrinterStatus,
+  type Protocol,
+} from "../printers";
 
 interface MachineModel {
   name: string;
@@ -82,6 +93,24 @@ const EMPTY: Draft = {
   nozzlePriority: "",
 };
 
+type SummaryKey = "all" | "printing" | "attention" | "paused" | "idle" | "offline";
+
+/** The summary's chips, in order: busy and needing a look first. */
+const SUMMARY: { key: SummaryKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "printing", label: "Printing" },
+  { key: "attention", label: "Need attention" },
+  { key: "paused", label: "Paused" },
+  { key: "idle", label: "Idle" },
+  { key: "offline", label: "Offline" },
+];
+
+/** Which summary chip a printer counts under. */
+function toneGroup(status: PrinterStatus | undefined): SummaryKey {
+  const { tone } = describeState(status);
+  return tone === "error" ? "attention" : (tone as SummaryKey);
+}
+
 function defaultNozzle(m: MachineModel | undefined): string {
   if (!m) return "";
   return m.nozzle_diameters.find((n) => n === "0.4") ?? m.nozzle_diameters[0] ?? "";
@@ -103,6 +132,7 @@ export default function PrintersPage() {
   const areas = [...new Set(printers.map((p) => p.area))].sort((a, b) =>
     a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, undefined, { numeric: true }),
   );
+  const [show, setShow] = useState<SummaryKey>("all");
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState("");
@@ -264,19 +294,48 @@ export default function PrintersPage() {
 
   return (
     <div className="page">
-      <h2>Printers</h2>
-      {isAdmin && (
-        <div className="page-actions">
-          <button
-            className="btn-primary"
-            style={{ width: "auto" }}
-            onClick={() => {
-              setError("");
-              setDraft(draft ? null : { ...EMPTY });
-            }}
-          >
-            {draft ? "Cancel" : "Add Printer"}
-          </button>
+      <PageHeader
+        title="Printers"
+        actions={
+          isAdmin && (
+            <button
+              className={draft ? "btn-sm" : "btn-primary btn-inline"}
+              onClick={() => {
+                setError("");
+                setDraft(draft ? null : { ...EMPTY });
+              }}
+            >
+              {draft ? (
+                "Cancel"
+              ) : (
+                <>
+                  <Icon name="plus" /> Add printer
+                </>
+              )}
+            </button>
+          )
+        }
+      >
+        {printers.length > 0 ? "Every printer in the farm, live." : "The farm's printers, live, once they're added."}
+      </PageHeader>
+      {printers.length > 1 && (
+        <div className="farm-summary" role="toolbar" aria-label="Show printers">
+          {SUMMARY.map(({ key, label }) => {
+            const n = key === "all" ? printers.length : printers.filter((p) => toneGroup(statuses[p.id]) === key).length;
+            if (key !== "all" && n === 0) return null;
+            return (
+              <button
+                key={key}
+                className={`summary-chip tone-${key}${show === key ? " active" : ""}`}
+                aria-pressed={show === key}
+                onClick={() => setShow(show === key && key !== "all" ? "all" : key)}
+              >
+                {key !== "all" && <span className={`status-dot status-${key === "attention" ? "error" : key}`} />}
+                <span className="summary-count">{n}</span>
+                {label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -498,15 +557,31 @@ export default function PrintersPage() {
       )}
 
       {printersQuery.data && printers.length === 0 && (!isAdmin || newDiscovered.length === 0) ? (
-        <p className="empty-state">No printers configured yet.</p>
+        <EmptyState
+          icon="printer"
+          title="No printers yet"
+          action={
+            isAdmin &&
+            !draft && (
+              <button className="btn-primary btn-inline" onClick={() => setDraft({ ...EMPTY })}>
+                <Icon name="plus" /> Add a printer
+              </button>
+            )
+          }
+        >
+          {isAdmin
+            ? "Add one by hand, or wait a moment: printers on this network show up here by themselves."
+            : "An admin adds the farm's printers; they will show up here."}
+        </EmptyState>
       ) : (
-        areas.map((area) => (
+        areas.map((area) => {
+          const shown = printers.filter((p) => p.area === area && (show === "all" || toneGroup(statuses[p.id]) === show));
+          if (shown.length === 0) return null;
+          return (
           <section key={area} className="printer-area">
             {(areas.length > 1 || area) && <h3>{area || "Elsewhere"}</h3>}
             <div className="card-grid printer-grid">
-              {printers
-                .filter((p) => p.area === area)
-                .map((printer) => (
+              {shown.map((printer) => (
                   <PrinterCard
                     key={printer.id}
                     printer={printer}
@@ -517,11 +592,11 @@ export default function PrintersPage() {
                     actions={
                       isAdmin && (
                         <>
-                          <button className="btn-sm" onClick={() => startEdit(printer)}>
-                            Edit
+                          <button className="btn-sm btn-ghost btn-icon" onClick={() => startEdit(printer)} title={`Edit ${printer.name}`} aria-label={`Edit ${printer.name}`}>
+                            <Icon name="edit" />
                           </button>
-                          <button className="btn-sm btn-danger" onClick={() => handleDelete(printer)}>
-                            Remove
+                          <button className="btn-sm btn-ghost btn-icon btn-danger" onClick={() => handleDelete(printer)} title={`Remove ${printer.name}`} aria-label={`Remove ${printer.name}`}>
+                            <Icon name="trash" />
                           </button>
                         </>
                       )
@@ -530,7 +605,8 @@ export default function PrintersPage() {
                 ))}
             </div>
           </section>
-        ))
+          );
+        })
       )}
     </div>
   );

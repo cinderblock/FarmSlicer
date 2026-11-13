@@ -6,6 +6,10 @@ import { FEEDBACK_CHANGED, newCount, prefillFor, type Counts, type FeedbackPrefi
 import ErrorBoundary from "./ErrorBoundary";
 import FeedbackDialog from "./FeedbackDialog";
 import InstallApp from "./InstallApp";
+import CommandPalette from "./CommandPalette";
+import Icon, { BrandMark } from "./Icon";
+import { NAV_SECTIONS } from "../nav";
+import { nextTheme, useTheme } from "../theme";
 import UpdateBanner from "./UpdateBanner";
 import WhatsNewDialog from "./WhatsNewDialog";
 import { notifyLocation, reloadedQuietly } from "../appUpdate";
@@ -14,34 +18,13 @@ import { sourceUrl } from "../source";
 import { CHANGELOG, type ChangelogEntry } from "../changelog";
 import { localDay, markSeen, seenId, unseenEntries } from "../whatsNew";
 
-const navItems = [
-  { to: "/", label: "Printers" },
-  { to: "/slice", label: "Slice" },
-  { to: "/jobs", label: "Jobs" },
-  { to: "/queue", label: "Queue" },
-  { to: "/prints", label: "Prints" },
-  { to: "/projects", label: "Projects" },
-  { to: "/profiles", label: "Profiles" },
-  { to: "/library", label: "Library" },
-  { to: "/groups", label: "Groups" },
-  { to: "/guide", label: "Guide" },
-];
-
-const adminItems = [
-  { to: "/users", label: "Users" },
-  { to: "/feedback", label: "Feedback" },
-  { to: "/reports", label: "Reports" },
-  { to: "/integrations", label: "Integrations" },
-  { to: "/settings", label: "Settings" },
-];
-
 /** How often admins' sidebar checks for new feedback. */
 const FEEDBACK_POLL_MS = 60_000;
 
 export default function Layout() {
   const { user, isAdmin, status, logout } = useAuth();
   const location = useLocation();
-  const items = isAdmin ? [...navItems, ...adminItems] : navItems;
+  const sections = NAV_SECTIONS.filter((section) => !section.admin || isAdmin);
   const [feedback, setFeedback] = useState<FeedbackPrefill | null>(null);
   const [poll, setPoll] = useState(0);
   useEffect(() => {
@@ -96,6 +79,27 @@ export default function Layout() {
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
 
+  const [theme, setTheme] = useTheme();
+  const [palette, setPalette] = useState(false);
+  // Ctrl+K / Cmd+K (and "/" outside a field) opens the command palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const field = e.target instanceof HTMLElement && e.target.closest("input, textarea, select, [contenteditable]");
+      if ((e.key === "k" || e.key === "K") && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        e.preventDefault();
+        setPalette((p) => !p);
+      } else if (e.key === "/" && !field && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (document.querySelector(".modal-backdrop")) return;
+        e.preventDefault();
+        setPalette(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const themeLabel = theme === "system" ? "System theme" : theme === "light" ? "Light theme" : "Dark theme";
+
   return (
     <div className={`app${menuOpen ? " menu-open" : ""}`}>
       <header className="topbar">
@@ -106,55 +110,134 @@ export default function Layout() {
           aria-controls="sidebar"
           onClick={() => setMenuAt(menuOpen ? null : location.key)}
         >
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
+          <Icon name="menu" size={22} />
           {fresh > 0 && <span className="feedback-count">{fresh}</span>}
         </button>
-        <span className="topbar-title">FarmSlicer</span>
+        <span className="topbar-title">
+          <BrandMark size={22} />
+          FarmSlicer
+        </span>
+        <button className="topbar-search" aria-label="Search" onClick={() => setPalette(true)}>
+          <Icon name="search" size={20} />
+        </button>
       </header>
       <div className="sidebar-backdrop" onClick={() => setMenuAt(null)} />
       <nav className="sidebar" id="sidebar">
         <div className="sidebar-header">
-          <h1>FarmSlicer™</h1>
+          <BrandMark size={30} />
+          <h1>
+            FarmSlicer<span className="tm">™</span>
+          </h1>
         </div>
-        <ul className="nav-list">
-          {items.map((item) => (
-            <li key={item.to}>
-              <NavLink
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  `nav-link ${isActive ? "active" : ""}`
-                }
-              >
-                {item.label}
-                {item.to === "/feedback" && fresh > 0 && (
-                  <span className="feedback-count" title={`${fresh} new`}>
-                    {fresh}
-                  </span>
-                )}
-              </NavLink>
-            </li>
+        <button
+          className="sidebar-search"
+          onClick={() => {
+            setMenuAt(null);
+            setPalette(true);
+          }}
+        >
+          <Icon name="search" />
+          <span>Search…</span>
+          <kbd>{mac ? "⌘K" : "Ctrl K"}</kbd>
+        </button>
+        <div className="nav-sections">
+          {sections.map((section) => (
+            <div className="nav-section" key={section.title}>
+              <div className="nav-section-title">{section.title}</div>
+              <ul className="nav-list">
+                {section.items.map((item) => (
+                  <li key={item.to}>
+                    <NavLink
+                      to={item.to}
+                      end={item.to === "/"}
+                      className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+                    >
+                      <Icon name={item.icon} className="nav-icon" />
+                      <span className="nav-label">{item.label}</span>
+                      {item.to === "/feedback" && fresh > 0 && (
+                        <span className="feedback-count" title={`${fresh} new`}>
+                          {fresh}
+                        </span>
+                      )}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
         <div className="sidebar-user">
-          <div className="sidebar-whats-new">
+          <div className="sidebar-actions">
             <button
-              className="link-button"
+              className="sidebar-action"
               onClick={() => {
                 setMenuAt(null);
                 setWhatsNew({ entries: null });
               }}
             >
+              <Icon name="sparkles" />
               What's new
+              {unseen && <span className="whats-new-dot" title="Something changed since you last looked" />}
             </button>
-            {unseen && <span className="whats-new-dot" title="Something changed since you last looked" />}
+            <button
+              className="sidebar-action"
+              onClick={() => {
+                setMenuAt(null);
+                setFeedback(prefillFor(location.pathname, location.search));
+              }}
+              title="Report a problem or suggest something"
+            >
+              <Icon name="feedback" />
+              Send feedback
+            </button>
+            {!isAdmin && (
+              <NavLink to="/feedback" className="sidebar-action">
+                <Icon name="list" />
+                My feedback
+              </NavLink>
+            )}
+            <InstallApp />
           </div>
-          <InstallApp />
+          <div className="sidebar-account">
+            {status?.auth_disabled ? (
+              <span className="sidebar-who" title="FARMSLICER_NO_AUTH is set on the server">
+                <span className="avatar">
+                  <Icon name="user" size={16} />
+                </span>
+                <span className="sidebar-who-text">
+                  <span className="sidebar-who-name">dev</span>
+                  <span className="sidebar-who-role">auth disabled</span>
+                </span>
+              </span>
+            ) : (
+              <NavLink
+                to="/account"
+                className={({ isActive }) => `sidebar-who ${isActive ? "active" : ""}`}
+                title="Your account"
+              >
+                <span className="avatar">{(user?.username ?? "?").slice(0, 1).toUpperCase()}</span>
+                <span className="sidebar-who-text">
+                  <span className="sidebar-who-name">{user?.username ?? "account"}</span>
+                  <span className="sidebar-who-role">{user?.kind === "guest" ? "guest" : user?.role}</span>
+                </span>
+              </NavLink>
+            )}
+            <button
+              className="btn-sm btn-ghost btn-icon"
+              onClick={() => setTheme(nextTheme(theme))}
+              title={`${themeLabel} (click to change)`}
+              aria-label={themeLabel}
+            >
+              <Icon name={theme === "system" ? "monitor" : theme === "light" ? "sun" : "moon"} />
+            </button>
+            {!status?.auth_disabled && (
+              <button className="btn-sm btn-ghost btn-icon" onClick={() => logout()} title="Log out" aria-label="Log out">
+                <Icon name="logout" />
+              </button>
+            )}
+          </div>
           <div className="sidebar-source">
             <a
-              className="link-button"
               href={sourceUrl(status?.source_url)}
               target="_blank"
               rel="noopener noreferrer"
@@ -162,8 +245,8 @@ export default function Layout() {
             >
               Source code
             </a>
+            <span aria-hidden="true">·</span>
             <a
-              className="link-button"
               href="/THIRD-PARTY-NOTICES.txt"
               target="_blank"
               rel="noopener noreferrer"
@@ -172,38 +255,6 @@ export default function Layout() {
               Licences
             </a>
           </div>
-          <div className="sidebar-feedback">
-            <button
-              className="btn-sm"
-              onClick={() => {
-                setMenuAt(null);
-                setFeedback(prefillFor(location.pathname, location.search));
-              }}
-              title="Report a problem or suggest something"
-            >
-              Send feedback
-            </button>
-            {!isAdmin && (
-              <NavLink to="/feedback" className="link-button">
-                My feedback
-              </NavLink>
-            )}
-          </div>
-          {status?.auth_disabled ? (
-            <span className="hint" title="FARMSLICER_NO_AUTH is set on the server">
-              auth disabled
-            </span>
-          ) : (
-            <>
-              <NavLink to="/account" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
-                {user?.username ?? "account"}
-                <span className="hint"> · {user?.kind === "guest" ? "guest" : user?.role}</span>
-              </NavLink>
-              <button className="btn-sm" onClick={() => logout()}>
-                Log out
-              </button>
-            </>
-          )}
         </div>
       </nav>
       <main className="content">
@@ -214,6 +265,16 @@ export default function Layout() {
       </main>
       {feedback && <FeedbackDialog prefill={feedback} onClose={() => setFeedback(null)} />}
       {whatsNew && <WhatsNewDialog entries={whatsNew.entries} onClose={closeWhatsNew} />}
+      {palette && (
+        <CommandPalette
+          sections={sections}
+          onClose={() => setPalette(false)}
+          onFeedback={() => setFeedback(prefillFor(location.pathname, location.search))}
+          onWhatsNew={() => setWhatsNew({ entries: null })}
+          onTheme={setTheme}
+          onLogout={status?.auth_disabled ? undefined : logout}
+        />
+      )}
     </div>
   );
 }

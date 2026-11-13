@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { install, useInstallState } from "../installApp";
+import Icon from "./Icon";
 
 /** The sidebar's "Install app": the browser's dialog, or on iOS how to do it. */
 export default function InstallApp() {
@@ -10,11 +11,12 @@ export default function InstallApp() {
   return (
     <div className="sidebar-install">
       <button
-        className="link-button"
+        className="sidebar-action"
         onClick={() => (canPrompt ? void install() : setShowHint((s) => !s))}
         aria-expanded={canPrompt ? undefined : showHint}
         title="Open FarmSlicer in its own window, from your home screen or app list"
       >
+        <Icon name="download" />
         Install app
       </button>
       {!canPrompt && showHint && (
