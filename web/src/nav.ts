@@ -43,3 +43,18 @@ export const NAV_SECTIONS: { title: string; admin?: boolean; items: NavItem[] }[
     ],
   },
 ];
+
+const EXTRA_TITLES: [string, string][] = [
+  ["/account", "Account"],
+  ["/join", "Join"],
+];
+
+/** The browser tab's title for a path: its page's name, then the app's. */
+export function pageTitle(pathname: string): string {
+  const items = NAV_SECTIONS.flatMap((section) => section.items);
+  const match =
+    items.find((item) => item.to === pathname) ??
+    items.find((item) => item.to !== "/" && pathname.startsWith(`${item.to}/`));
+  const name = match?.label ?? EXTRA_TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1];
+  return name ? `${name} · FarmSlicer` : "FarmSlicer";
+}

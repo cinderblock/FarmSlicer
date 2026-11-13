@@ -8,7 +8,7 @@ import FeedbackDialog from "./FeedbackDialog";
 import InstallApp from "./InstallApp";
 import CommandPalette from "./CommandPalette";
 import Icon, { BrandMark } from "./Icon";
-import { NAV_SECTIONS } from "../nav";
+import { NAV_SECTIONS, pageTitle } from "../nav";
 import { nextTheme, useTheme } from "../theme";
 import UpdateBanner from "./UpdateBanner";
 import WhatsNewDialog from "./WhatsNewDialog";
@@ -61,6 +61,10 @@ export default function Layout() {
   // (the Slice page's ?from= when taking a slice's settings back).
   useEffect(() => {
     notifyLocation(location.pathname);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    document.title = pageTitle(location.pathname);
   }, [location.pathname]);
 
   // A tapped notification opens its page here (sw.js).

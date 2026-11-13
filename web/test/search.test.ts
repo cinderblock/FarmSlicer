@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { pageTitle } from "../src/nav";
 import { matchScore } from "../src/search";
 
 describe("matchScore", () => {
@@ -25,5 +26,15 @@ describe("matchScore", () => {
   test("matching ignores case in the name and keywords (words come lower-cased)", () => {
     expect(matchScore(["x1c"], "X1C Lab")).toBeGreaterThan(0);
     expect(matchScore(["stl"], "Slice", "New Model STL")).toBeGreaterThan(0);
+  });
+});
+
+describe("pageTitle", () => {
+  test("names the page, then the app", () => {
+    expect(pageTitle("/")).toBe("Printers · FarmSlicer");
+    expect(pageTitle("/jobs")).toBe("Jobs · FarmSlicer");
+    expect(pageTitle("/jobs/abc")).toBe("Jobs · FarmSlicer");
+    expect(pageTitle("/account")).toBe("Account · FarmSlicer");
+    expect(pageTitle("/nowhere")).toBe("FarmSlicer");
   });
 });
