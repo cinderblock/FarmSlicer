@@ -7,6 +7,8 @@ import { Link } from "react-router";
 import { apiJson } from "../auth";
 import { errorText, formatDuration, localDateTime, useJson } from "../api";
 import OutcomeDialog from "../components/OutcomeDialog";
+import Icon from "../components/Icon";
+import PageHeader, { EmptyState } from "../components/PageHeader";
 import { linesText, overdue, type QueueEntry, type QueueView } from "../projects";
 import type { PrintRecord } from "../printers";
 
@@ -62,11 +64,15 @@ export default function QueuePage() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h2>Queue</h2>
-        <span className="print-controls">
-          <span className="hint">
-            {view?.counts.queued ?? 0} waiting · {view?.counts.sent ?? 0} on printers
+      <PageHeader
+        title="Queue"
+        actions={
+          <>
+          <span className="stat-pair" title="Plates waiting for a printer">
+            <strong>{view?.counts.queued ?? 0}</strong> waiting
+          </span>
+          <span className="stat-pair" title="Plates on printers now">
+            <strong>{view?.counts.sent ?? 0}</strong> on printers
           </span>
           {printers.some((p) => p.operates) && (
             <button
@@ -81,16 +87,16 @@ export default function QueuePage() {
                 })
               }
             >
-              Plate missing parts
+              <Icon name="grid" /> Plate missing parts
             </button>
           )}
-        </span>
-      </div>
-      {notice && <p className="job-alert">{notice}</p>}
-      <p className="hint">
+          </>
+        }
+      >
         Plates waiting for a printer, most urgent first: an entry's priority, then its project's priority and due
         date, then age. Queue a job's plates from its page, or a project's missing parts from the project.
-      </p>
+      </PageHeader>
+      {notice && <p className="job-alert">{notice}</p>}
       {error && <p className="login-error">{error}</p>}
 
       {printers.length > 0 && show === "queued" && (
@@ -100,6 +106,7 @@ export default function QueuePage() {
             return (
               <div key={p.printer_id} className={`queue-printer${p.busy ? " busy" : ""}`}>
                 <div className="queue-printer-name">
+                  <span className={`status-dot status-${p.busy ? "printing" : "idle"}`} />
                   {p.name}
                   {p.send_mode === "yolo" && <span className="send-mode-yolo" title="Sends the next plate by itself, without asking">YOLO</span>}
                 </div>
@@ -131,13 +138,29 @@ export default function QueuePage() {
                     )}
                   </div>
                 )}
-                <div className="hint">{p.busy ?? "Free"}</div>
+                <div className="hint queue-printer-busy">{p.busy ?? "Free"}</div>
                 <div className="queue-printer-next">
-                  {next ? <>Next: {next.visible ? `${next.name} · plate ${next.plate}` : "a plate you can't see"}</> : <span className="hint">Nothing in the queue fits</span>}
+                  {next ? (
+                    <>
+                      {next.visible && next.has_thumbnail && (
+                        <img className="job-thumb" src={`/api/jobs/${next.job_id}/thumbnail?plate=${next.plate}`} alt="" loading="lazy" />
+                      )}
+                      <span>
+                        <span className="queue-next-label">Next</span>
+                        {next.visible ? `${next.name} · plate ${next.plate}` : "a plate you can't see"}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="hint">Nothing in the queue fits</span>
+                  )}
                 </div>
                 {p.operates && (
-                  <button className="btn-sm" disabled={!!p.busy || !next || busyId === p.printer_id} onClick={() => sendNext(p.printer_id)}>
-                    Send next
+                  <button
+                    className={`btn-sm${!p.busy && next ? " btn-accent" : ""}`}
+                    disabled={!!p.busy || !next || busyId === p.printer_id}
+                    onClick={() => sendNext(p.printer_id)}
+                  >
+                    <Icon name="send" /> Send next
                   </button>
                 )}
               </div>
@@ -176,10 +199,11 @@ export default function QueuePage() {
       )}
 
       <div className="filters">
-        <div className="job-plates" role="tablist" aria-label="Which entries">
+        <div className="segmented" role="tablist" aria-label="Which entries">
           {(["queued", "sent", "done"] as Show[]).map((s) => (
             <button key={s} role="tab" aria-selected={show === s} className={show === s ? "active" : ""} onClick={() => setShow(s)}>
               {s === "queued" ? "Waiting" : s === "sent" ? "On printers" : "Done"}
+              {s !== "done" && <span className="segmented-count">{s === "queued" ? (view?.counts.queued ?? 0) : (view?.counts.sent ?? 0)}</span>}
             </button>
           ))}
         </div>
@@ -204,7 +228,25 @@ export default function QueuePage() {
       </div>
 
       {queue.error && <p className="login-error">{queue.error}</p>}
-      {view && view.entries.length === 0 && <p className="empty-state">{show === "queued" ? "Nothing waiting." : "Nothing here."}</p>}
+      {view && view.entries.length === 0 && (
+        <EmptyState
+          icon="queue"
+          title={show === "queued" ? "Nothing waiting" : show === "sent" ? "Nothing on the printers" : "Nothing finished yet"}
+          action={
+            show === "queued" && (
+              <Link className="btn-sm" to="/jobs">
+                <Icon name="jobs" /> Queue a job's plates
+              </Link>
+            )
+          }
+        >
+          {show === "queued"
+            ? "Queue plates from a job's page, or a project's missing parts from the project, and printers take them in order."
+            : show === "sent"
+              ? "Plates sent from the queue show here while they print."
+              : "Plates the queue sent that have finished show here."}
+        </EmptyState>
+      )}
       {view && view.entries.length > 0 && (
         <table className="data-table cards queue-table">
           <thead>
@@ -372,14 +414,14 @@ function EntryRow({
                 </option>
               ))}
             </select>
-            <button className="btn-sm" disabled={!target || busy} onClick={() => onSend(target)}>
-              Send
+            <button className="btn-sm btn-accent" disabled={!target || busy} onClick={() => onSend(target)}>
+              <Icon name="send" /> Send
             </button>
           </span>
         )}
         {e.can_manage && show === "queued" && (
-          <button className="btn-sm btn-danger" onClick={remove}>
-            Remove
+          <button className="btn-sm btn-ghost btn-icon btn-danger" onClick={remove} title="Take it out of the queue" aria-label="Remove from the queue">
+            <Icon name="trash" />
           </button>
         )}
       </td>

@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
+import Icon from "../components/Icon";
+import PageHeader, { EmptyState } from "../components/PageHeader";
 import { GcodeChip } from "../components/GcodeCheck";
 import { formatCost, packageVerdict, type Prices } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
@@ -55,6 +57,30 @@ const SOURCE_LABELS: Record<Job["source"], [string, string]> = {
   upload: ["Uploaded", "Sliced elsewhere and uploaded (a .gcode.3mf for Bambu printers, G-code for others)."],
 };
 
+type StatusFilter = "all" | "done" | "active" | "failed";
+
+const STATUS_FILTERS: [StatusFilter, string][] = [
+  ["all", "All"],
+  ["done", "Ready"],
+  ["active", "Slicing"],
+  ["failed", "Failed"],
+];
+
+const STATUS_MATCH: Record<StatusFilter, (job: Job) => boolean> = {
+  all: () => true,
+  done: (j) => j.status === "done",
+  active: (j) => !finished(j),
+  failed: (j) => j.status === "failed" || j.status === "cancelled",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  queued: "Waiting",
+  slicing: "Slicing",
+  done: "Ready",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
 function formatTime(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
@@ -72,6 +98,9 @@ export default function JobsPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const navigate = useNavigate();
   const jobs = useJson<Job[]>("/api/jobs", rev).data ?? [];
   const chargeable = useJson<{ chargeable: { id: string; path: string }[] }>("/api/me").data?.chargeable ?? [];
@@ -145,6 +174,11 @@ export default function JobsPage() {
   // the server decides).
   const deletable = jobs.filter((j) => finished(j) && (isAdmin || j.user_id === user?.id));
   const selectedJobs = jobs.filter((j) => selected.has(j.id));
+  const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+  const shownJob = (j: Job) =>
+    STATUS_MATCH[statusFilter](j) &&
+    words.every((w) => `${j.model_name} ${j.username ?? ""} ${j.group_name ?? "personal"} ${j.printer_name ?? ""}`.toLowerCase().includes(w));
+  const shown = jobs.filter(shownJob);
 
   const moveJob = async (id: string, groupId: string) => {
     setError("");
@@ -157,62 +191,119 @@ export default function JobsPage() {
   };
 
   return (
-    <div className="page">
-      <h2>Jobs</h2>
-      <p className="hint">Your jobs, and the jobs of groups whose library you can see.</p>
-      <div className="page-actions upload-row">
-        <button
-          className="btn-primary"
-          style={{ width: "auto" }}
-          disabled={uploading}
-          onClick={() => fileInput.current?.click()}
-        >
-          {uploading ? "Uploading…" : "Upload a sliced file"}
-        </button>
-        {chargeable.length > 0 && (
-          <select value={uploadGroup} onChange={(e) => setUploadGroup(e.target.value)} aria-label="Group to charge the upload to">
-            <option value="">Personal</option>
-            {chargeable.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.path}
-              </option>
+    <div
+      className={`page jobs-page${dropping ? " dropping" : ""}`}
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.items].some((i) => i.kind === "file")) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDropping(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) upload(file);
+      }}
+    >
+      <PageHeader
+        title="Jobs"
+        actions={
+          <>
+            {chargeable.length > 0 && (
+              <select
+                className="select-sm"
+                value={uploadGroup}
+                onChange={(e) => setUploadGroup(e.target.value)}
+                aria-label="Group to charge the upload to"
+                title="Group to charge an upload to"
+              >
+                <option value="">Personal</option>
+                {chargeable.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.path}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              className="btn-sm"
+              disabled={uploading}
+              onClick={() => fileInput.current?.click()}
+              title="A plate sliced elsewhere: a .gcode.3mf from Bambu Studio or OrcaSlicer for Bambu printers, a .gcode file for others. Its G-code is checked before it can be printed. You can also drop the file on this page."
+            >
+              <Icon name="upload" /> {uploading ? "Uploading…" : "Upload sliced file"}
+            </button>
+            <Link className="btn-primary btn-inline" to="/slice">
+              <Icon name="slice" /> Slice a model
+            </Link>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".3mf,.gcode,.gco,.g"
+              hidden
+              onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
+            />
+          </>
+        }
+      >
+        Your jobs, and the jobs of groups whose library you can see. Plates sliced elsewhere can be uploaded (or
+        dropped here): .gcode.3mf for Bambu printers, .gcode for others.
+      </PageHeader>
+      {jobs.length > 0 && (
+        <div className="list-toolbar">
+          <label className="search-field">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Find a job, person or group…"
+              aria-label="Find a job"
+            />
+          </label>
+          <div className="segmented" role="group" aria-label="Status">
+            {STATUS_FILTERS.map(([key, label]) => (
+              <button key={key} className={statusFilter === key ? "active" : ""} aria-pressed={statusFilter === key} onClick={() => setStatusFilter(key)}>
+                {label}
+                <span className="segmented-count">{jobs.filter(STATUS_MATCH[key]).length}</span>
+              </button>
             ))}
-          </select>
-        )}
-        <span className="hint">
-          A plate sliced elsewhere: a .gcode.3mf from Bambu Studio or OrcaSlicer for Bambu printers, a .gcode file
-          for others. Its G-code is checked before it can be printed.
-        </span>
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".3mf,.gcode,.gco,.g"
-          hidden
-          onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
-        />
-      </div>
-      {deletable.length > 0 && (
-        <div className="page-actions job-selection">
-          <span className="hint">Select:</span>
-          <button className="btn-sm" onClick={() => setSelected(new Set(deletable.map((j) => j.id)))}>
-            All
-          </button>
-          <button
-            className="btn-sm"
-            onClick={() => setSelected(new Set(deletable.filter((j) => j.status === "failed" || j.status === "cancelled").map((j) => j.id)))}
-          >
-            Failed and cancelled
-          </button>
-          <button className="btn-sm" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
-            None
-          </button>
-          <button
-            className="btn-sm btn-danger"
-            disabled={selectedJobs.length === 0 || deleting}
-            onClick={() => deleteJobs(selectedJobs.map((j) => j.id))}
-          >
-            {deleting ? "Deleting…" : `Delete selected (${selectedJobs.length})`}
-          </button>
+          </div>
+          {deletable.length > 0 && (
+            <div className="job-selection">
+              {selected.size > 0 ? (
+                <>
+                  <span className="hint">{selected.size} selected</span>
+                  <button className="btn-sm btn-ghost" onClick={() => setSelected(new Set())}>
+                    Clear
+                  </button>
+                  <button
+                    className="btn-sm btn-danger"
+                    disabled={selectedJobs.length === 0 || deleting}
+                    onClick={() => deleteJobs(selectedJobs.map((j) => j.id))}
+                  >
+                    <Icon name="trash" /> {deleting ? "Deleting…" : `Delete ${selectedJobs.length}`}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="hint">Select</span>
+                  <button className="btn-sm btn-ghost" onClick={() => setSelected(new Set(deletable.filter(shownJob).map((j) => j.id)))}>
+                    All shown
+                  </button>
+                  <button
+                    className="btn-sm btn-ghost"
+                    onClick={() => setSelected(new Set(deletable.filter((j) => j.status === "failed" || j.status === "cancelled").map((j) => j.id)))}
+                  >
+                    Failed and cancelled
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
       {error && <p className="login-error">{error}</p>}
@@ -227,8 +318,28 @@ export default function JobsPage() {
           }}
         />
       )}
+      {dropping && (
+        <div className="drop-overlay">
+          <Icon name="upload" size={32} />
+          Drop a .gcode.3mf or .gcode to upload it
+        </div>
+      )}
       {jobs.length === 0 ? (
-        <p className="empty-state">No jobs yet. Start by slicing a model.</p>
+        <EmptyState
+          icon="jobs"
+          title="No jobs yet"
+          action={
+            <Link className="btn-primary btn-inline" to="/slice">
+              <Icon name="slice" /> Slice a model
+            </Link>
+          }
+        >
+          Slice a model here, or upload a plate sliced in Bambu Studio, OrcaSlicer or PrusaSlicer.
+        </EmptyState>
+      ) : shown.length === 0 ? (
+        <EmptyState icon="search" title="No jobs match">
+          Nothing matches “{filter}”{statusFilter !== "all" ? " with that status" : ""}.
+        </EmptyState>
       ) : (
         <table className="data-table cards">
           <thead>
@@ -238,16 +349,15 @@ export default function JobsPage() {
               <th>By</th>
               <th>Group</th>
               <th>Status</th>
-              <th>Progress</th>
               <th>Sliced on</th>
               <th>Printer</th>
-              <th>Time</th>
-              <th>Cost</th>
-              <th>Actions</th>
+              <th className="num">Time</th>
+              <th className="num">Cost</th>
+              <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
-            {jobs.map((job) => {
+            {shown.map((job) => {
               // Harmless notes (older jobs) aren't worth a warning count.
               const { support, other } = sortWarnings(parseWarnings(job.warnings));
               const warnings = [...support, ...other];
@@ -296,20 +406,20 @@ export default function JobsPage() {
                     )}
                   </td>
                   <td data-label="Status">
-                    <span className={`status-badge status-${job.status}`}>
-                      {job.status}
-                    </span>
-                  </td>
-                  <td data-label="Progress">
-                    <div className="progress-bar">
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${job.progress}%` }}
-                      />
+                    <div className="job-status">
+                      <span className={`status-badge status-${job.status}`}>
+                        {job.status === "slicing" && <span className="spinner" aria-hidden="true" />}
+                        {STATUS_LABELS[job.status] ?? job.status}
+                      </span>
+                      {!finished(job) && (
+                        <div className="progress-bar">
+                          <div className="progress-fill" style={{ width: `${job.progress}%` }} />
+                        </div>
+                      )}
+                      {job.status === "slicing" && job.progress_message && (
+                        <span className="hint">{job.progress_message}</span>
+                      )}
                     </div>
-                    {job.status === "slicing" && job.progress_message && (
-                      <span className="hint">{job.progress_message}</span>
-                    )}
                   </td>
                   <td data-label="Sliced on">
                     <span className={`source-badge source-${job.source}`}>
@@ -330,23 +440,25 @@ export default function JobsPage() {
                     )}
                   </td>
                   <td data-label="Printer">{job.printer_name ?? (job.routing === "auto" ? "Auto" : "—")}</td>
-                  <td data-label="Time">
+                  <td data-label="Time" className="num">
                     {job.print_time_sec ? formatTime(job.print_time_sec) : "—"}
                   </td>
-                  <td data-label="Cost">{job.status === "done" ? formatCost(job.estimated_cost, currency) : "—"}</td>
+                  <td data-label="Cost" className="num">
+                    {job.status === "done" ? formatCost(job.estimated_cost, currency) : "—"}
+                  </td>
                   <td className="cell-actions">
                     {job.status === "done" && job.package_json && (
-                      <button className="btn-sm" onClick={() => setSending(job)}>
-                        Print…
+                      <button className="btn-sm btn-accent" onClick={() => setSending(job)}>
+                        <Icon name="send" /> Print…
                       </button>
                     )}
                     {canReslice(job) && finished(job) && (
                       <button
-                        className="btn-sm"
+                        className="btn-sm btn-ghost"
                         title="Open this job's models and settings on the Slice page, change what you like, and slice it as a new job"
                         onClick={() => navigate(`/slice?from=${job.id}`)}
                       >
-                        Re-slice
+                        <Icon name="slice" /> Re-slice
                       </button>
                     )}
                     {(job.status === "queued" || job.status === "slicing") && (
@@ -358,8 +470,14 @@ export default function JobsPage() {
                       </button>
                     )}
                     {finished(job) && (isAdmin || job.user_id === user?.id) && (
-                      <button className="btn-sm btn-danger" disabled={deleting} onClick={() => deleteJobs([job.id])}>
-                        Delete
+                      <button
+                        className="btn-sm btn-ghost btn-icon btn-danger"
+                        disabled={deleting}
+                        onClick={() => deleteJobs([job.id])}
+                        title={`Delete ${job.model_name}`}
+                        aria-label={`Delete ${job.model_name}`}
+                      >
+                        <Icon name="trash" />
                       </button>
                     )}
                     {job.error && (
