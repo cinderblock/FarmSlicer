@@ -557,6 +557,12 @@ kbd {
     transition: transform 0.2s ease;
   }
 
+  /* The drawer scrolls as a whole, not its list alone. */
+  .sidebar .nav-sections {
+    flex: none;
+    overflow: visible;
+  }
+
   .sidebar-header {
     padding: 1rem;
   }
@@ -1275,7 +1281,8 @@ a.card:hover {
 /* Touch screens: no keyboard to press the shortcuts on, fingers for
    pointers. */
 @media (hover: none) {
-  .viewer-toolbar kbd {
+  .viewer-toolbar kbd,
+  .sidebar-search kbd {
     display: none;
   }
 
@@ -5638,4 +5645,11 @@ select.select-sm {
 
 .setting-row .hint {
   margin-top: 0.15rem;
+}
+
+/* A form's submit button on a page sizes to its label (sign-in cards and
+   dialogs keep theirs full width). */
+.page form .btn-primary {
+  width: auto;
+  align-self: flex-start;
 }
