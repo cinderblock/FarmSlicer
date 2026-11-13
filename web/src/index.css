@@ -2899,10 +2899,12 @@ a.card:hover {
   margin-bottom: -2px;
   color: var(--text-dim);
   font-size: 0.9rem;
+  font-weight: 500;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  transition: color 0.12s, border-color 0.12s;
 }
 
 .profile-tab:hover {
@@ -2910,7 +2912,8 @@ a.card:hover {
 }
 
 .profile-tab.active {
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
   border-bottom-color: var(--accent);
 }
 
@@ -5652,4 +5655,8 @@ select.select-sm {
 .page form .btn-primary {
   width: auto;
   align-self: flex-start;
+}
+
+.data-table td[data-label="Printer"] {
+  white-space: nowrap;
 }

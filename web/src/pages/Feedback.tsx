@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiJson, useAuth } from "../auth";
 import { errorText, localDateTime, useJson } from "../api";
+import PageHeader from "../components/PageHeader";
 import {
   FEEDBACK_CHANGED,
   feedbackChanged,
@@ -53,12 +54,11 @@ export default function FeedbackPage() {
 
   return (
     <div className="page feedback-page">
-      <h2>{isAdmin ? "Feedback" : "My feedback"}</h2>
-      <p className="hint feedback-intro">
+      <PageHeader title={isAdmin ? "Feedback" : "My feedback"} icon="feedback">
         {isAdmin
           ? "What people reported with the Feedback button, and errors reported automatically by browsers and the server (one entry per distinct error, with a count). Reporters see the status and your note."
           : "What you sent with the Feedback button, and errors your browser reported automatically. The admins set the status and may leave a note."}
-      </p>
+      </PageHeader>
 
       <div className="profile-tabs">
         {(["manual", "automatic"] as Tab[]).map((t) => (
