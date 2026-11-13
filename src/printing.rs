@@ -330,6 +330,13 @@ pub fn check_mapping(plate: &Plate, mapping: &[i64], status: Option<&PrinterStat
                 nozzle_name(f.nozzle.unwrap_or(1)),
                 nozzle_name(t.nozzle.unwrap_or(2))
             )),
+            // Only where the AMS knows what's left; an estimate, so whole grams.
+            Some(t) if t.remain_g.is_some_and(|left| f.used_g > left as f64) => problems.push(format!(
+                "filament {} needs {:.0} g but slot {slot} has about {} g left",
+                f.id,
+                f.used_g.ceil(),
+                t.remain_g.unwrap_or(0)
+            )),
             Some(_) => {}
         }
     }
@@ -692,10 +699,26 @@ mod tests {
             color: Some(color.into()),
             name: None,
             remain: None,
+            remain_g: None,
             nozzle_temp_min: None,
             nozzle_temp_max: None,
             nozzle: None,
         }
+    }
+
+    #[test]
+    fn mapping_warns_when_a_spool_runs_short() {
+        let low = Tray { remain: Some(5), remain_g: Some(50), ..tray(0, "PLA", "#FFFFFF") };
+        let unknown = tray(1, "PLA", "#000000");
+        let s = status_with(vec![low, unknown]);
+        let mut p = plate(vec![(1, "PLA", "#FFFFFF"), (2, "PLA", "#000000")]);
+        p.filaments[0].used_g = 49.5;
+        p.filaments[1].used_g = 900.0;
+        // Enough, and unknown: no problem.
+        assert!(check_mapping(&p, &[0, 1], Some(&s)).is_empty());
+        p.filaments[0].used_g = 120.2;
+        let problems = check_mapping(&p, &[0, 1], Some(&s));
+        assert_eq!(problems, vec!["filament 1 needs 121 g but slot 0 has about 50 g left"]);
     }
 
     fn status_with(trays: Vec<Tray>) -> PrinterStatus {

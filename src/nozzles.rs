@@ -250,6 +250,7 @@ mod tests {
                     color: Some((*color).into()),
                     name: None,
                     remain: None,
+                    remain_g: None,
                     nozzle_temp_min: None,
                     nozzle_temp_max: None,
                     nozzle: Some(nozzle),

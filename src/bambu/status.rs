@@ -253,6 +253,9 @@ fn tray(t: &Value, unit: Option<i64>, nozzle: Option<i64>) -> Option<Tray> {
         Some(u) => u * 4 + index,
         None => index,
     };
+    // -1 / "0" when the AMS doesn't know (spools without an RFID tag).
+    let remain = int(&t["remain"]).filter(|r| (0..=100).contains(r));
+    let weight = int(&t["tray_weight"]).filter(|&w| w > 0);
     Some(Tray {
         slot,
         unit,
@@ -262,7 +265,8 @@ fn tray(t: &Value, unit: Option<i64>, nozzle: Option<i64>) -> Option<Tray> {
             .filter(|c| c.len() >= 6)
             .map(|c| format!("#{}", &c[..6])),
         name: text(&t["tray_sub_brands"]),
-        remain: int(&t["remain"]).filter(|&r| r >= 0),
+        remain,
+        remain_g: remain.zip(weight).map(|(r, w)| (r * w + 50) / 100),
         nozzle_temp_min: int(&t["nozzle_temp_min"]),
         nozzle_temp_max: int(&t["nozzle_temp_max"]),
         nozzle,
@@ -377,8 +381,8 @@ mod tests {
             "print_error": 0, "bed_temper": 55.0, "bed_target_temper": 55.0,
             "device": {"extruder": {"info": [{"id": 0, "temp": (220 << 16) | 218}]}},
             "ams": {"tray_now": "255", "ams": [{"id": "0", "info": "2001", "humidity": "3",
-                "tray": [{"id": "2", "tray_type": "PLA", "tray_color": "0A0B0CFF", "remain": -1}]}]},
-            "vt_tray": {"id": "254", "tray_type": "TPU", "tray_color": "000000FF"}
+                "tray": [{"id": "2", "tray_type": "PLA", "tray_color": "0A0B0CFF", "remain": -1, "tray_weight": "1000"}]}]},
+            "vt_tray": {"id": "254", "tray_type": "TPU", "tray_color": "000000FF", "remain": 37, "tray_weight": "1000"}
         });
         let s = summarize(true, None, None, &report);
         assert_eq!(s.job_name.as_deref(), Some("Bracket"));
@@ -389,8 +393,10 @@ mod tests {
         assert_eq!(s.ams[0].nozzle, None);
         assert_eq!(s.ams[0].trays[0].slot, 2);
         assert_eq!(s.ams[0].trays[0].color.as_deref(), Some("#0A0B0C"));
-        assert_eq!(s.ams[0].trays[0].remain, None);
+        assert_eq!((s.ams[0].trays[0].remain, s.ams[0].trays[0].remain_g), (None, None));
         assert_eq!(s.external[0].slot, 254);
+        // Percent of the spool's weight, in grams.
+        assert_eq!((s.external[0].remain, s.external[0].remain_g), (Some(37), Some(370)));
     }
 
     #[test]

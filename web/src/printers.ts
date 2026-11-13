@@ -140,7 +140,10 @@ export interface Tray {
   material: string | null;
   color: string | null;
   name: string | null;
+  /** Percent left, when the AMS knows (Bambu RFID spools). */
   remain: number | null;
+  /** Grams left, when the AMS knows the spool's weight too. */
+  remain_g: number | null;
   nozzle_temp_min: number | null;
   nozzle_temp_max: number | null;
   /** Dual-nozzle printers: the nozzle it feeds (1 left, 2 right). */
@@ -501,6 +504,18 @@ export function trayNozzle(status: PrinterStatus | null | undefined, t: Tray): n
 }
 
 export const nozzleName = (n: number) => (n === 1 ? "left" : "right");
+
+/** What's left on a spool ("about 370 g left (37%)"), or that nobody knows. */
+export function trayLeft(t: Tray): string {
+  if (t.remain_g != null) return `about ${t.remain_g} g left${t.remain != null ? ` (${t.remain}%)` : ""}`;
+  if (t.remain != null) return `${t.remain}% left`;
+  return "amount unknown";
+}
+
+/** A spool that can't finish `neededG` grams; unknown amounts never are. */
+export function trayShort(t: Tray | undefined, neededG: number): boolean {
+  return t?.remain_g != null && neededG > t.remain_g;
+}
 
 export function slotLabel(t: Tray): string {
   if (t.slot === 254 || t.slot === 255) return "External";

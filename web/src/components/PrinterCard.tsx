@@ -17,7 +17,9 @@ import {
   plateLabel,
   PREHEAT_MATERIALS,
   type PrintRecord,
+  slotLabel,
   type Tray,
+  trayLeft,
 } from "../printers";
 
 function temp(t: { current: number; target: number }): string {
@@ -49,19 +51,30 @@ function finishAt(minutes: number): string {
   return sameDay ? time : `${end.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
 }
 
+/** A spool this low gets the warning colour. */
+const LOW_PERCENT = 15;
+
 function TraySwatch({ tray, active }: { tray: Tray; active: boolean }) {
-  const label = tray.material
-    ? [tray.name ?? tray.material, tray.remain != null ? `${tray.remain}% left` : null]
-        .filter(Boolean)
-        .join(", ")
-    : "Empty";
+  const label = tray.material ? `${tray.name ?? tray.material}, ${trayLeft(tray)}` : "Empty";
+  const left = tray.remain_g != null ? `${tray.remain_g} g` : tray.remain != null ? `${tray.remain}%` : "?";
+  const low = tray.remain != null && tray.remain <= LOW_PERCENT;
   return (
     <span
       className={`tray${active ? " tray-active" : ""}${tray.material ? "" : " tray-empty"}`}
-      title={`Slot ${tray.slot}: ${label}${active ? " (feeding now)" : ""}`}
+      title={`${slotLabel(tray)}: ${label}${active ? " (feeding now)" : ""}`}
     >
       <span className="tray-color" style={tray.color ? { background: tray.color } : undefined} />
       <span className="tray-material">{tray.material ?? "—"}</span>
+      {tray.material && (
+        <span className={`tray-left${low ? " low" : ""}${tray.remain == null ? " unknown" : ""}`}>
+          {left}
+          {tray.remain != null && (
+            <span className="tray-level" aria-hidden>
+              <span style={{ width: `${tray.remain}%` }} />
+            </span>
+          )}
+        </span>
+      )}
     </span>
   );
 }
@@ -296,6 +309,7 @@ export default function PrinterCard({
             {loadedTrays(status).map((t) => (
                 <option key={t.slot} value={t.slot}>
                   {t.name ?? t.material} ({t.slot >= 254 ? "external" : `slot ${t.slot + 1}`})
+                  {t.remain_g != null || t.remain != null ? ` · ${trayLeft(t)}` : ""}
                 </option>
               ))}
             {!caps.filament_mapping &&

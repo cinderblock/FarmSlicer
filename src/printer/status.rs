@@ -47,6 +47,8 @@ pub struct Tray {
     pub name: Option<String>,
     /// Percent left, when the AMS knows (Bambu RFID spools).
     pub remain: Option<i64>,
+    /// Grams left: `remain` of the spool's weight, when the AMS knows both.
+    pub remain_g: Option<i64>,
     pub nozzle_temp_min: Option<i64>,
     pub nozzle_temp_max: Option<i64>,
     /// Which nozzle the tray feeds on dual-nozzle printers, numbered like

@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-13b",
+    date: "2026-11-13",
+    title: "How much filament is left",
+    highlights: [
+      "Each AMS spool on a printer card shows how much filament is left, and the tray picker when sending a print shows it for every spool. FarmSlicer warns before a plate needs more than its spool has, and the queue won't send that plate on its own.",
+    ],
+  },
+  {
     id: "2026-11-13",
     date: "2026-11-13",
     title: "A new look, a light theme, and search everywhere",

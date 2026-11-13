@@ -1994,6 +1994,45 @@ a.card:hover {
   opacity: 0.6;
 }
 
+/* What's left on the spool: the amount, and a level bar when it's known. */
+.tray-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tray-left.unknown {
+  opacity: 0.6;
+}
+
+.tray-level {
+  display: block;
+  width: 1.8rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.tray-level > span {
+  display: block;
+  height: 100%;
+  background: var(--text-dim);
+}
+
+.tray-left.low {
+  color: var(--warning);
+}
+
+.tray-left.low .tray-level > span {
+  background: var(--warning);
+}
+
 .printer-actions {
   display: flex;
   align-items: center;
@@ -2399,6 +2438,16 @@ a.card:hover {
   padding: 0.35rem;
   border-radius: 4px;
   max-width: 100%;
+}
+
+/* What's left on the chosen spool, under its picker. */
+.mapping-table select + .hint {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.mapping-table .tray-short {
+  color: var(--warning);
 }
 
 .send-options {

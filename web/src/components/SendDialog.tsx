@@ -8,13 +8,16 @@ import {
   formatMinutes,
   loadedTrays,
   nozzleName,
+  trayLeft,
   trayNozzle,
+  trayShort,
   slotLabel,
   type GcodeCheck,
   type Plate,
   type PrintOptions,
   type PrintRecord,
   type Target,
+  type Tray,
 } from "../printers";
 
 interface Targets {
@@ -39,6 +42,17 @@ const OPTION_LABELS: [keyof PrintOptions, string, string][] = [
   ["vibration_calibration", "Vibration calibration", "Tune the motion system before printing."],
   ["timelapse", "Timelapse", "Record a timelapse (needs storage on the printer)."],
 ];
+
+/** What's left on the chosen spool, in the warning colour when it can't finish the plate. */
+function TrayLeft({ tray, neededG }: { tray: Tray | undefined; neededG: number }) {
+  if (!tray) return null;
+  const known = tray.remain_g != null || tray.remain != null;
+  return (
+    <span className={`hint${trayShort(tray, neededG) ? " tray-short" : ""}`}>
+      {known ? trayLeft(tray) : "Amount left unknown"}
+    </span>
+  );
+}
 
 /** Send a job with a printable package to a printer. */
 export default function SendDialog({
@@ -132,6 +146,10 @@ export default function SendDialog({
         if (f.nozzle && feeds && f.nozzle !== feeds)
           out.push(
             `Filament ${f.id} prints from the ${nozzleName(f.nozzle)} nozzle, but ${slotLabel(tray)} feeds the ${nozzleName(feeds)} one.`,
+          );
+        else if (trayShort(tray, f.used_g))
+          out.push(
+            `Filament ${f.id} needs ${Math.ceil(f.used_g)} g, but ${slotLabel(tray)} has about ${tray.remain_g} g left.`,
           );
       }
     }
@@ -301,12 +319,15 @@ export default function SendDialog({
                                     {slotLabel(t)}
                                     {feeds ? ` (${nozzleName(feeds)})` : ""}: {t.name ?? t.material}
                                     {t.color ? ` (${t.color})` : ""}
+                                    {` · ${trayLeft(t)}`}
                                     {t.material?.toUpperCase() !== f.material.toUpperCase() ? " ⚠ different material" : ""}
                                     {f.nozzle && feeds && f.nozzle !== feeds ? " ⚠ other nozzle" : ""}
+                                    {trayShort(t, f.used_g) ? " ⚠ not enough" : ""}
                                   </option>
                                 );
                               })}
                             </select>
+                            <TrayLeft tray={trays.find((t) => t.slot === slot)} neededG={f.used_g} />
                           </td>
                           <td>
                             <span
