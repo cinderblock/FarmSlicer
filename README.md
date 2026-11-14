@@ -29,6 +29,23 @@ can run in the user's browser.
   (copies of one model slice once). A part that leaves the printable volume
   or overlaps another turns red and can't be sliced. The slicer refuses one
   too.
+- **Editing models:** each copy scales (all axes or one, by percent or to a
+  size in mm) and mirrors; every change can be undone (Ctrl+Z, Ctrl+Shift+Z).
+  The Objects panel lists the models and their parts: rename them, pick a
+  model's or a part's filament, add parts, modifiers, negative volumes and
+  support enforcers or blockers (box, cylinder, sphere, cone), move and size
+  them, and give a model or a modifier its own settings. Cut (C) splits a
+  model on a plane at any height and tilt, keeps either half or both, turns
+  the upper half onto its cut face, and adds plugs or dowels (round, square,
+  hexagonal, with a gap for glue) so the halves fit back together.
+- **Multi-colour and painting:** the Slice page lists the model's filaments
+  as slots, each with a colour; models and parts pick a slot. Paint on the
+  models as in the desktop slicers: colours (N), supports to add or keep away
+  (L), seams (P) and fuzzy skin (H), with a circle or sphere brush, whole
+  triangles, smart fill, fill, or a band of heights. 3MF projects from Bambu
+  Studio, OrcaSlicer and PrusaSlicer keep their painting, parts, modifiers,
+  filaments and per-object settings; an edited model is sent as a 3MF the
+  browser writes in OrcaSlicer's dialect, so it opens there too.
 - **Supports:** their own section on the Slice page, on by default (the
   slicer only adds them where a part needs them): style, only from the
   plate, and which filaments print them. With an AMS the interface (the

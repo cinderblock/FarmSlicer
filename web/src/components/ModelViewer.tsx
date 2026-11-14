@@ -14,6 +14,9 @@ import { loadModel, mergeObjects, modelFile } from "../model/load";
 import { usedFilaments, type ModelObject } from "../model/document";
 import ObjectPanel from "./viewer/ObjectPanel";
 import { PaintControls, PaintSurface } from "./viewer/PaintTool";
+import { CutControls, CutPlane } from "./viewer/CutTool";
+import { cutNormal, DEFAULT_CUT, type CutSettings } from "./viewer/cutSettings";
+import { addConnectors, connectorPoints, cutObject, cutSection, planeInFrame, type Plane } from "../model/cut";
 import { DEFAULT_PAINT, PAINT_TOOLS, type PaintSettings } from "./viewer/paintSettings";
 import { ENFORCER, type PaintKind } from "../model/paint";
 import type { PaintChange } from "./viewer/history";
@@ -215,6 +218,7 @@ function Scene({
   tool,
   paint,
   paintNow,
+  cut,
   onSelect,
   onChange,
   onCommit,
@@ -227,6 +231,8 @@ function Scene({
   /** Painting with these settings (null: not painting). */
   paint: PaintSettings | null;
   paintNow: { readonly current: PaintSettings };
+  /** Cutting: the plane's settings and where the connectors would go. */
+  cut: { settings: CutSettings; points: THREE.Vector3[] } | null;
   onSelect: (part: Part) => void;
   onChange: () => void;
   onCommit: () => void;
@@ -255,6 +261,7 @@ function Scene({
         />
       ))}
       <Guides guides={guides} bed={bed} />
+      {cut && selected && <CutPlane part={selected} settings={cut.settings} points={cut.points} />}
       {paint && selected && (
         <PaintSurface key={selected.id} part={selected} settings={paint} current={paintNow} onStroke={onStroke} />
       )}
@@ -321,6 +328,7 @@ const TOOLS: { tool: Tool; label: string; key: string }[] = [
   { tool: "move", label: "Move", key: "M" },
   { tool: "rotate", label: "Rotate", key: "R" },
   { tool: "flat", label: "Lay on face", key: "F" },
+  { tool: "cut", label: "Cut", key: "C" },
 ];
 
 const MOUSE_HINTS: Record<Tool, string> = {
@@ -328,6 +336,7 @@ const MOUSE_HINTS: Record<Tool, string> = {
   move: "Drag an arrow or the part · snaps to 1 mm, the bed's centre and edges · Shift: free",
   rotate: "Drag a ring · snaps to 15° · Shift: free",
   flat: "Click a face to put it on the plate",
+  cut: "Set the plane's height and tilt, then Cut · the plane cuts every copy of the model",
 };
 
 /** Touch screens: no Shift, and a part is selected before it can be dragged. */
@@ -336,6 +345,7 @@ const TOUCH_HINTS: Record<Tool, string> = {
   move: "Drag an arrow or the part · snaps to 1 mm, the bed's centre and edges",
   rotate: "Drag a ring · snaps to 15°",
   flat: "Tap a face to put it on the plate",
+  cut: "Set the plane's height and tilt, then Cut",
 };
 
 const TOOL_HINTS = window.matchMedia("(hover: none)").matches ? TOUCH_HINTS : MOUSE_HINTS;
@@ -387,6 +397,7 @@ export default function ModelViewer({
   const [paintSettings, setPaintSettings] = useState<PaintSettings>(DEFAULT_PAINT);
   // The same, for the paint tool's pointer handlers (see PaintSurface).
   const paintNow = useRef<PaintSettings>(DEFAULT_PAINT);
+  const [cutSettings, setCutSettings] = useState<CutSettings>(DEFAULT_CUT);
   useEffect(() => {
     paintNow.current = painting ? { ...paintSettings, kind: painting } : paintSettings;
   });
@@ -633,6 +644,132 @@ export default function ModelViewer({
       });
     recordPaint({ shape: s, layers }, "Clear paint");
   }, [selected, painting, recordPaint]);
+
+  /** The cut tool opens: the plane level, half way up the selected part. */
+  const startCut = useCallback(() => {
+    if (!selected) return;
+    const h = selected.worldBox().max.z;
+    setCutSettings((s) => ({ ...s, height: Math.round((h / 2) * 10) / 10, tiltX: 0, tiltY: 0 }));
+  }, [selected]);
+
+  /** The world matrix of a part's model frame (the object's own coordinates). */
+  const objectFrame = (p: Part) => {
+    p.root.updateMatrixWorld(true);
+    p.content.updateMatrix();
+    return new THREE.Matrix4().multiplyMatrices(p.root.matrixWorld, p.content.matrix);
+  };
+  /** The cut plane in the selected part's model frame. */
+  const cutPlane = useCallback(
+    (p: Part, s: CutSettings): Plane => {
+      const n = cutNormal(s);
+      return planeInFrame(
+        { point: [p.center.x, p.center.y, s.height], normal: [n.x, n.y, n.z] },
+        Float64Array.from(objectFrame(p).elements),
+      );
+    },
+    [],
+  );
+  // Where the connectors would go (scene coordinates), as settings change.
+  const cutPreview = useMemo(() => {
+    // Again whenever the part moved (`settled`).
+    void settled;
+    if (tool !== "cut" || !selected || painting) return null;
+    const points: THREE.Vector3[] = [];
+    if (cutSettings.count > 0 && cutSettings.keep === "both") {
+      const plane = cutPlane(selected, cutSettings);
+      const section = cutSection(selected.shape.object, plane);
+      if (section) {
+        const frame = objectFrame(selected);
+        for (const q of connectorPoints(section, plane, cutSettings.count))
+          points.push(new THREE.Vector3(q[0], q[1], q[2]).applyMatrix4(frame));
+      }
+    }
+    return { settings: cutSettings, points };
+  }, [tool, selected, painting, cutSettings, cutPlane, settled]);
+
+  /** Cut every copy of the selected part's model; the halves take their place. */
+  const doCut = useCallback(() => {
+    if (!selected) return;
+    const shapeBefore = selected.shape;
+    const plane = cutPlane(selected, cutSettings);
+    const cut = cutObject(shapeBefore.object, plane);
+    let { upper, lower } = cut;
+    const { openLoops } = cut;
+    let pins: ModelObject | null = null;
+    if (cutSettings.keep === "both" && cutSettings.count > 0 && upper && lower) {
+      const section = cutSection(shapeBefore.object, plane);
+      if (section)
+        ({ upper, lower, pins } = addConnectors({ upper, lower }, plane, connectorPoints(section, plane, cutSettings.count), cutSettings.connector));
+    }
+    if (cutSettings.keep === "upper") lower = null;
+    if (cutSettings.keep === "lower") upper = null;
+    if (!upper && !lower) {
+      setNotice({ text: "The plane misses the model", bad: true });
+      return;
+    }
+    if (!upper || !lower) {
+      if (cutSettings.keep === "both") {
+        setNotice({ text: "The plane doesn't cross the model: move it into the part", bad: true });
+        return;
+      }
+    }
+    const upperShape = upper ? new PartShape(upper, null, colorsRef.current) : null;
+    const lowerShape = lower ? new PartShape(lower, null, colorsRef.current) : null;
+    const pinShape = pins ? new PartShape(pins, null, colorsRef.current) : null;
+    const copies = parts.filter((p) => p.shape === shapeBefore);
+    const rest = parts.filter((p) => p.shape !== shapeBefore);
+    const added: Part[] = [];
+    const down = new THREE.Vector3(0, 0, -1);
+    for (const copy of copies) {
+      const frame = objectFrame(copy);
+      const normal = new THREE.Vector3(...plane.normal).transformDirection(frame);
+      for (const [s, isUpper] of [
+        [upperShape, true],
+        [lowerShape, false],
+      ] as const) {
+        if (!s) continue;
+        const part = new Part(s);
+        part.setScale(copy.scale.clone());
+        part.setRotation(copy.quaternion.clone());
+        part.setPlate(copy.plate);
+        // Where the half is now, in the scene.
+        const mid = s.offset.clone().negate().applyMatrix4(frame);
+        part.setCenter(mid.x, mid.y);
+        if (isUpper && cutSettings.layUpper) {
+          // Its cut face (facing -normal) down onto the plate.
+          const turn = new THREE.Quaternion().setFromUnitVectors(normal.clone().negate(), down);
+          part.setRotation(turn.multiply(copy.quaternion.clone()));
+        }
+        added.push(part);
+      }
+      if (pinShape && copy === copies[0]) {
+        const pin = new Part(pinShape);
+        pin.setPlate(copy.plate);
+        added.push(pin);
+      }
+    }
+    // Each new part in free space on its plate (the lower half stays put).
+    const placed = [...rest];
+    for (const p of added) {
+      const others = placed.filter((q) => q.plate === p.plate);
+      if (overlapping([...others, p]).has(p)) {
+        const spot = findFreeSpot(p, others, shape);
+        if (spot) p.setCenter(spot.x, spot.y);
+      }
+      placed.push(p);
+    }
+    setPlate([...rest, ...added], "Cut");
+    setSelectedId(added[0]?.id ?? null);
+    setTool("none");
+    setSettled((n) => n + 1);
+    setNotice({
+      text:
+        openLoops > 0
+          ? "Cut, but the model isn't closed: some cut faces have holes (check the model in the preview)"
+          : `Cut into ${[upper, lower].filter(Boolean).length} ${pins ? "halves and dowel pins" : upper && lower ? "halves" : "half"}`,
+      bad: openLoops > 0,
+    });
+  }, [selected, cutSettings, cutPlane, parts, shape, setPlate]);
 
   /**
    * Show plate `index`, selecting its first part. Leaving an empty plate
@@ -976,11 +1113,12 @@ export default function ModelViewer({
       if (t) {
         setPainting(null);
         setTool((cur) => (cur === t.tool ? "none" : t.tool));
+        if (t.tool === "cut") startCut();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [parts, remove, arrangeAll, undo, redo, togglePaint]);
+  }, [parts, remove, arrangeAll, undo, redo, togglePaint, startCut]);
 
   const select = useCallback((part: Part) => setSelectedId(part.id), []);
 
@@ -1087,6 +1225,7 @@ export default function ModelViewer({
                 onClick={() => {
                   setPainting(null);
                   setTool(tool === t.tool && !painting ? "none" : t.tool);
+                  if (t.tool === "cut") startCut();
                 }}
               >
                 {t.label} <kbd>{t.key}</kbd>
@@ -1221,7 +1360,17 @@ export default function ModelViewer({
         />
       )}
 
-      {selected && !painting && box && sizeMm && euler && (
+      {selected && !painting && tool === "cut" && (
+        <CutControls
+          settings={cutSettings}
+          onChange={setCutSettings}
+          maxHeight={selected.worldBox().max.z}
+          onCut={doCut}
+          canConnect={cutSettings.keep === "both"}
+        />
+      )}
+
+      {selected && !painting && tool !== "cut" && box && sizeMm && euler && (
         <div className="placement-panel">
           {(shown.length > 1 || copiesOfSelected > 1) && (
             <div className="placement-size">
@@ -1302,6 +1451,7 @@ export default function ModelViewer({
           tool={tool}
           paint={painting ? paintSettings : null}
           paintNow={paintNow}
+          cut={cutPreview}
           onSelect={select}
           onStroke={recordPaint}
           onChange={refresh}

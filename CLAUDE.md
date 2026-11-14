@@ -272,6 +272,26 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   a dot on the sidebar link after an unattended update reload)
 - `src/config_policy.rs` — overrides/custom profiles: members get the
   settings-schema keys only (no G-code keys), nobody gets `post_process`
+- `src/model_check.rs` — uploaded 3MF models: zipcheck, then the settings
+  they carry per object and part (`model_settings.config`,
+  `Slic3r_PE_model.config`) go through `config_policy` like overrides.
+  slice_core loads 3MFs with `LoadStrategy::LoadModel` (without it every
+  3MF failed: "the file is empty") and refuses a model naming a filament
+  the job hasn't (`check_filaments`). The job's `colours` (one `#RRGGBB`
+  or "" per filament) set `filament_colour`
+- `web/src/model/` — the editor's model library (pure TS, `web/test/model.test.ts`):
+  `mesh.ts` (indexed meshes, column-major Mat4 like three's), `xml.ts`,
+  `stl.ts`, `threemf.ts` (reads core 3MF, the production extension,
+  Bambu/Orca/Prusa metadata and core colours; writes OrcaSlicer's dialect:
+  a mesh object per volume, components, `model_settings.config`, paint
+  attributes), `paint.ts` (TriangleSelector ported: the same split tree and
+  hex strings as `paint_color`/`paint_supports`/`paint_seam`/
+  `paint_fuzzy_skin`, brushes, fills), `document.ts` (ModelObject →
+  volumes: part, modifier, negative, enforcer, blocker; filament; settings;
+  paint), `load.ts` (files → objects; `modelFile`: the upload, the STL
+  while untouched else a 3MF, deterministic bytes), `primitives.ts`,
+  `cut.ts` (plane cut with capped faces, paint carried over; plug and dowel
+  connectors as part/negative volumes). Plan: `plans/model-editing.md`
 - `src/package/zipcheck.rs` — refuses ambiguous zips (duplicate names,
   hidden local entries) before anything reads a package
 - `src/query.rs` — `flag`: `?x=1` query booleans
@@ -468,6 +488,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (pointer rays, snapping, dragging a part), `Gizmo.tsx` (move arrows,
   rotate rings, lay on face, for the selected part). `ModelViewer.tsx`
   holds every plate's parts (`Part.plate`), shows one plate at a time
+  (a model = `PartShape` built from a `ModelObject`; a copy = `Part` with
+  rotation and scale; `history.ts` undo/redo; `ObjectPanel.tsx`;
+  `PaintTool.tsx` (BVH raycasts, settings through a ref: the canvas is a
+  React root of its own and gets props a frame late); `CutTool.tsx`)
   (tabs), and reports `PlateState` (files in plate order, the plates with
   parts, fit, overlaps) and the support check. No camera damping on purpose (CAD-style direct
   control)

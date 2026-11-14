@@ -6,6 +6,7 @@ import {
   connectedComponents,
   faceNeighbors,
   identity,
+  meshBounds,
   invert,
   mergeMeshes,
   multiply,
@@ -322,5 +323,101 @@ describe("primitives", () => {
       expect(openEdgeCount(mesh)).toBe(0);
       close(signedVolume(mesh), volume, 0.02);
     }
+  });
+});
+
+describe("cut", () => {
+  test("a cube cut flat: two closed halves of half the volume", async () => {
+    const { cutMesh } = await import("../src/model/cut");
+    const c = cutMesh(cube(), { point: [0, 0, 10], normal: [0, 0, 1] });
+    for (const half of [c.upper!, c.lower!]) {
+      expect(openEdgeCount(weld(half))).toBe(0);
+      expect(signedVolume(half)).toBeCloseTo(4000, 2);
+    }
+    expect(c.openLoops).toBe(0);
+  });
+
+  test("a tilted cut keeps the total", async () => {
+    const { cutMesh } = await import("../src/model/cut");
+    const c = cutMesh(cube(), { point: [10, 10, 10], normal: [0.3, -0.5, 0.8] });
+    expect(openEdgeCount(weld(c.upper!))).toBe(0);
+    expect(openEdgeCount(weld(c.lower!))).toBe(0);
+    expect(signedVolume(c.upper!) + signedVolume(c.lower!)).toBeCloseTo(8000, 1);
+    expect(signedVolume(c.upper!)).toBeGreaterThan(0);
+    expect(signedVolume(c.lower!)).toBeGreaterThan(0);
+  });
+
+  test("a tube's cut face has its hole", async () => {
+    const { cutMesh } = await import("../src/model/cut");
+    const { cylinder } = await import("../src/model/primitives");
+    const inner = cylinder(5, 20, 48);
+    const outer = cylinder(10, 20, 48);
+    // The inner wall faces in: flip it.
+    const flipped = { positions: inner.positions, indices: inner.indices.slice() };
+    for (let t = 0; t < flipped.indices.length; t += 3)
+      [flipped.indices[t + 1], flipped.indices[t + 2]] = [flipped.indices[t + 2], flipped.indices[t + 1]];
+    const tube = mergeMeshes([outer, flipped]);
+    const whole = signedVolume(tube);
+    const c = cutMesh(tube, { point: [0, 0, 0], normal: [0, 0, 1] });
+    expect(signedVolume(c.upper!)).toBeCloseTo(whole / 2, 0);
+    expect(openEdgeCount(weld(c.upper!))).toBe(0);
+  });
+
+  test("paint goes with the pieces", async () => {
+    const { cutObject } = await import("../src/model/cut");
+    const color = new PaintLayer(cube());
+    color.setTriangle(2, 3); // top face
+    color.setTriangle(3, 3);
+    color.setTriangle(0, 2); // bottom face
+    const o = makeObject("Block", [makeVolume(cube(), { paint: { color } })]);
+    const { upper, lower } = cutObject(o, { point: [0, 0, 10], normal: [0, 0, 1] });
+    expect(upper!.name).toBe("Block (upper)");
+    expect([...upper!.volumes[0].paint.color!.usedStates()]).toEqual([3]);
+    expect([...lower!.volumes[0].paint.color!.usedStates()]).toEqual([2]);
+  });
+
+  test("a plane past the model leaves one half", async () => {
+    const { cutObject } = await import("../src/model/cut");
+    const o = makeObject("Block", [makeVolume(cube())]);
+    const { upper, lower } = cutObject(o, { point: [0, 0, 50], normal: [0, 0, 1] });
+    expect(upper).toBeNull();
+    expect(lower!.volumes[0].mesh.indices.length).toBe(36);
+  });
+});
+
+describe("connectors", () => {
+  const plane = { point: [0, 0, 10] as [number, number, number], normal: [0, 0, 1] as [number, number, number] };
+
+  test("plugs: a peg on the lower half, a hole in the upper", async () => {
+    const { cutObject, addConnectors, cutSection, connectorPoints, DEFAULT_CONNECTOR } = await import("../src/model/cut");
+    const o = makeObject("Block", [makeVolume(cube())]);
+    const section = cutSection(o, plane)!;
+    expect(section.area).toBeCloseTo(400, 3);
+    expect(section.centroid.map((x) => Math.round(x))).toEqual([10, 10, 10]);
+    const points = connectorPoints(section, plane, 2);
+    expect(points.length).toBe(2);
+    const joined = addConnectors(cutObject(o, plane), plane, points, DEFAULT_CONNECTOR);
+    expect(joined.upper!.volumes.map((v) => v.type)).toEqual(["part", "negative", "negative"]);
+    expect(joined.lower!.volumes.map((v) => v.type)).toEqual(["part", "part", "part"]);
+    expect(joined.pins).toBeNull();
+    // The peg stands on the cut face, going up.
+    const peg = joined.lower!.volumes[1];
+    const b = meshBounds(peg.mesh, peg.matrix);
+    expect(b.min[2]).toBeCloseTo(10, 3);
+    expect(b.max[2]).toBeCloseTo(15, 3);
+    // Its hole is wider by the gap on each side, and deeper.
+    const hole = joined.upper!.volumes[1];
+    const h = meshBounds(hole.mesh, hole.matrix);
+    expect(h.max[0] - h.min[0]).toBeCloseTo(5.2, 1);
+    expect(h.max[2]).toBeGreaterThan(15);
+  });
+
+  test("dowels: holes both sides and pins", async () => {
+    const { cutObject, addConnectors, DEFAULT_CONNECTOR } = await import("../src/model/cut");
+    const o = makeObject("Block", [makeVolume(cube())]);
+    const joined = addConnectors(cutObject(o, plane), plane, [[10, 10, 10]], { ...DEFAULT_CONNECTOR, kind: "dowel" });
+    expect(joined.lower!.volumes.map((v) => v.type)).toEqual(["part", "negative"]);
+    expect(joined.pins!.volumes.length).toBe(1);
+    expect(joined.pins!.name).toBe("Block dowels");
   });
 });
