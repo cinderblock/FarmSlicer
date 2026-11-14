@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MySessions } from "../components/Sessions";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import { localDate, useJson } from "../api";
@@ -206,6 +207,8 @@ export default function AccountPage() {
       )}
 
       <NotificationSettings />
+
+      {!isGuest && <MySessions />}
 
       <h3>Passkeys</h3>
       <p className="hint">

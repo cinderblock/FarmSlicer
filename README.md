@@ -309,6 +309,10 @@ There are no passwords and no secrets to configure.
   or changes an account that has one they lack.
 - **Suspending** an account (Users page) ends its sessions and stops its
   API keys until it's reinstated; its history stays.
+- **Devices** (Account page): each signed-in session with its device and
+  last use; sign one out or all others. Account managers see a person's
+  sessions, passkeys and API keys (Users page, "Devices and keys") and
+  revoke them, within the same rank rule.
 - **Audit log** (`/audit`): who changed accounts, roles, groups, site
   settings and printer access, and what changed.
 - **Folders** (the Library page, `?lib=me|<group>|all&folder=`): each
@@ -607,6 +611,8 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}` | roles and the permission lists (`{roles, capabilities: {site, group}}`, anyone signed in); custom roles `{name, scope: site\|group, description, caps}` (`roles.manage`; group roles need `groups.manage_all`); a role someone holds can't be deleted |
 | `GET /api/printer-access`, `GET /api/printer-access/mine`, `POST /api/printer-access/rules`, `PUT/DELETE /api/printer-access/rules/{id}`, `PUT /api/printer-access/order` | printer access rules (`printers.manage`; reading also `certifications.grant`): `{target_kind: printer\|pool\|model\|site, target_id, who: {kind: everyone\|user\|group\|role\|certified, id}, effect: allow\|approve\|deny, approvers, note}` (a user by id or username); `mine`: where the caller stands per printer, and their certifications. Job targets carry `access` per printer, queue fits `needs_approval` |
 | `GET/POST /api/folders`, `PUT/DELETE /api/folders/{id}`, `PUT /api/folders/items` | folders of the libraries the caller sees, the libraries, and where items are filed (`items: {job\|project: {id: folder}}`); `{name, parent_id, library: user\|group, group_id}`; rename/move `{name, parent_id}`; file `{kind, item_id, folder_id}` (null = the top) |
+| `GET /api/me/sessions`, `DELETE /api/me/sessions/{id}`, `POST /api/me/sessions/sign-out-others` | your sessions (`id` = the start of the token's hash, `device`, `last_seen`, `current`); sign one or all others out |
+| `GET /api/users/{id}/access`, `DELETE /api/users/{id}/sessions[/{sid}]`, `DELETE /api/users/{id}/passkeys/{pid}`, `DELETE /api/users/{id}/api-keys/{kid}` | a person's sessions, passkeys and API keys, and revoking them (`users.manage`; nobody removes their own only passkey here) |
 | `GET/POST /api/shares?kind=&id=`, `DELETE /api/shares/{id}`, `GET /api/shares/mine` | shares of a target (its owners) `{kind: job\|project\|folder\|library, target_id, with: {kind: user\|group\|link, id}, level: view\|use\|edit, expires_days}` (sharing again changes the level); what's shared with the caller; the person it's shared with may drop it |
 | `GET /api/public/shares/{code}`, `…/jobs/{job}/thumbnail?plate=` | a public link's names, facts and plate pictures (no account; open from the internet; 404 when links are off) |
 | `GET/POST /api/labels`, `PUT/DELETE /api/labels/{id}`, `PUT /api/labels/{id}/items` | labels the caller sees and what they're on (`links: {job\|project\|printer\|group: {id: [label]}}`, only items the caller sees); `{name, color, scope: user\|group\|site, group_id}`; `{kind, target_id, on}` puts one on or takes it off |

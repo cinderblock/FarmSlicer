@@ -442,6 +442,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   audit log (`audit::record`), `GET /api/audit`. Web: `web/src/roles.ts`,
   `pages/Roles.tsx`, `pages/Audit.tsx`; `useAuth().can(cap)`, nav items
   carry `cap`. Plan: `plans/organization-and-access.md`
+- `src/sessions_api.rs` — signed-in devices (`src/db/sessions.rs`:
+  `sessions.last_seen`, `user_agent`, set by `auth::identify` at most
+  once a minute via `touch_session`); `components/Sessions.tsx`
+  (Account's devices, Users' "Devices and keys")
 - `src/shares.rs` — sharing (`shares`; storage `src/db/shares.rs`):
   `groups::Grants` (loaded in `Viewer::load`: shares with the user or a
   group on their path, folders expanded to their filed items, libraries

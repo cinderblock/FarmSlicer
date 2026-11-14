@@ -428,7 +428,10 @@ fn identify(state: &AppState, req: &Request) -> Result<User, Refusal> {
         };
     }
     if let Some(token) = session_token_from_request(req) {
-        if let Some((user, method)) = state.db.session_user(&sha256_hex(&token)) {
+        let hash = sha256_hex(&token);
+        if let Some((user, method)) = state.db.session_user(&hash) {
+            let ua = req.headers().get(header::USER_AGENT).and_then(|v| v.to_str().ok());
+            state.db.touch_session(&hash, ua);
             if remote {
                 remote_allowed(&user, method.as_deref()).map_err(Refusal::Remote)?;
             }

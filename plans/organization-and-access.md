@@ -204,8 +204,9 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 6. ~~Slice 3~~ (2026-11-14).
 7. ~~Slice 4~~ (2026-11-14).
 8. ~~Slice 5~~ (2026-11-14).
-9. **← current** Slice 6: sessions and devices per user, sign out
-   everywhere.
+9. ~~Slice 6~~ (2026-11-14).
+10. **← current** Done, pending the user's check of the open questions
+    below and a look at the pages in a browser.
 
 ## Findings / gotchas
 
@@ -259,6 +260,12 @@ Replace the single admin bit with **capabilities** granted by **roles**.
   setting only (no per-group override). Libraries can't be shared by
   link. "Shared with me" links folders and libraries to the flat view
   (the file browser only shows libraries the viewer belongs to).
+- Slice 6 as built (2026-11-14): sessions record `last_seen` and
+  `user_agent` on use (at most once a minute), not at sign-in, so a
+  session never used after signing in has no device yet (the web app
+  uses it at once). Session ids are the first 16 hex characters of the
+  token's hash. Admins may remove someone else's last passkey (a lost
+  device; they re-invite), never their own.
 - `tests/moonraker-e2e.mjs` can take ~4 min at its end: the fake's
   `close()` waits for an idle connection the server keeps open after the
   printer is deleted. It passes; seen once (2026-11-14).
@@ -296,11 +303,20 @@ Replace the single admin bit with **capabilities** granted by **roles**.
       browser)
 - [x] Slice 5: sharing and public links (`tests/sharing-e2e.mjs`; Share
       dialog on jobs, projects, folders, libraries; Shared with me; /s/)
-- [ ] Slice 6: sessions and devices
+- [x] Slice 6: sessions and devices (`tests/sessions-e2e.mjs`; Account
+      devices, Users "Devices and keys")
 
 ## Open questions for the user
 
-None open.
+1. **Public links show no layer preview** (slice 5). The approved design
+   said "facts, preview, plate pictures"; the 3D/layer preview needs the
+   G-code itself, which conflicts with "no G-code download". Built:
+   facts and plate pictures only. Recommendation: keep it that way; add
+   the preview only if you're fine with links handing out the G-code.
+2. Not built (small follow-ups, say if you want them): a `label:` filter
+   in the command palette; per-group override of the public-links site
+   setting; folders/libraries shared with you opening in the file
+   browser (they show in "Shared with me" and the flat view).
 
 ## Things not to do
 

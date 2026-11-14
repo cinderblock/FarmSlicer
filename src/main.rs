@@ -57,6 +57,7 @@ mod quota;
 mod safety;
 mod sdcp;
 mod server;
+mod sessions_api;
 mod shares;
 mod slicer;
 mod webhooks;

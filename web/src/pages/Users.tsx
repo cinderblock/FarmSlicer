@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { UserAccess } from "../components/Sessions";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import type { User } from "../auth";
@@ -33,6 +34,7 @@ export default function UsersPage() {
   const roles = useRoles().data?.roles;
   const assignable = assignableSiteRoles(roles, me);
   const [suspending, setSuspending] = useState<{ id: string; reason: string } | null>(null);
+  const [accessOf, setAccessOf] = useState<{ id: string; username: string } | null>(null);
   const [rev, setRev] = useState(0);
   const users = useJson<AdminUser[]>("/api/users", rev).data ?? [];
   const load = async () => setRev((r) => r + 1);
@@ -342,6 +344,9 @@ export default function UsersPage() {
                         <button className="btn-sm" onClick={() => reissue(u)}>
                           New invite link
                         </button>{" "}
+                        <button className="btn-sm" onClick={() => setAccessOf({ id: u.id, username: u.username })}>
+                          Devices and keys
+                        </button>{" "}
                         {u.role !== "owner" && u.id !== me?.id && (
                           <>
                             {u.suspended_at ? (
@@ -369,6 +374,7 @@ export default function UsersPage() {
       </table>
 
       <GcodeIncidents user={incidentsOf} onClear={() => setIncidentsOf(null)} rev={rev} />
+      {accessOf && <UserAccess userId={accessOf.id} username={accessOf.username} onClose={() => setAccessOf(null)} />}
 
       {manages && (
         <>
