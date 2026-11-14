@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router";
 import Icon from "../components/Icon";
 import ModelViewer, { type BedShape, type PlateState, type SupportCheck } from "../components/ModelViewer";
+import { FALLBACK_COLORS } from "../components/viewer/part";
 import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
 import NozzlePlanView from "../components/NozzlePlanView";
 import SliceResult from "../components/SliceResult";
@@ -19,6 +20,7 @@ import type { Project } from "../projects";
 import { BED_TYPES, loadedTrays, type NozzlePlan, type PrinterStatus } from "../printers";
 import {
   defaultSupportMaterials,
+  jobFilaments,
   materialsFromJob,
   supportFilaments,
   type FilamentOption,
@@ -51,6 +53,14 @@ const KEEP_LOCAL_KEY = "farmslicer.keepLocal";
 const DRAFT_SAVE_MS = 800;
 
 /** What the page keeps in its draft (sliceDraft.ts): its choices, not what it loads. */
+/** A filament for the model beyond the first (multi-colour). */
+interface FilamentSlot {
+  /** Its profile. */
+  name: string;
+  /** `#RRGGBB`, or "" for the profile's own. */
+  color: string;
+}
+
 interface SliceSettings {
   printerId: string;
   modelChoice: string;
@@ -74,6 +84,9 @@ interface SliceSettings {
   sliced: string | null;
   view: "prepare" | "preview";
   proposed: { process?: string; filament?: string };
+  /** Filaments 2.. of the model, and filament 1's colour. */
+  slots?: FilamentSlot[];
+  firstColor?: string;
 }
 
 interface MeGroups {
@@ -170,6 +183,7 @@ interface ResliceJob {
     printer_id: string | null;
     routing: string;
     color: string;
+    colours?: string[];
     group_id: string | null;
   } | null;
   /** The only plate (null with several, or from servers before plates). */
@@ -288,6 +302,14 @@ export default function SlicePage() {
   const [plateChoice, setPlateChoice] = useState("");
   const [process, setProcess] = useState("");
   const [filament, setFilament] = useState("");
+  // The model's other filaments (multi-colour): filament 2 onwards, slot 1
+  // being `filament`. Their colours show on the plate and go to the job.
+  const [slots, setSlots] = useState<FilamentSlot[]>([]);
+  const [firstColor, setFirstColor] = useState("");
+  const filamentRef = useRef(filament);
+  useEffect(() => {
+    filamentRef.current = filament;
+  });
   const [materialFilter, setMaterialFilter] = useState("");
   const [variantFilter, setVariantFilter] = useState("");
   const [color, setColor] = useState("");
@@ -420,6 +442,8 @@ export default function SlicePage() {
         if (s.overrides) setOverrides(s.overrides);
         if (s.supports) setSupports(s.supports);
         if (s.materialsChoice !== undefined) setMaterialsChoice(s.materialsChoice);
+        if (s.slots) setSlots(s.slots);
+        if (s.firstColor !== undefined) setFirstColor(s.firstColor);
         if (s.routing) setRouting(s.routing);
         if (s.groupChoice !== undefined) setGroupChoice(s.groupChoice);
         // ?project= in the address says which project; else the draft's.
@@ -452,6 +476,28 @@ export default function SlicePage() {
   const handlePlateChange = useCallback((state: PlateState | null) => {
     setLayout(state);
     if (state) setRestoring(false);
+    // A model names more filaments than there are: add them (as filament
+    // 1's profile, until changed).
+    if (state)
+      setSlots((s) =>
+        state.filaments - 1 > s.length
+          ? [...s, ...Array.from({ length: state.filaments - 1 - s.length }, () => ({ name: filamentRef.current, color: "" }))]
+          : s,
+      );
+  }, []);
+
+  /** A loaded file's own colours: filaments 1..N take them. */
+  const handlePalette = useCallback((palette: string[]) => {
+    if (palette.length === 0) return;
+    setFirstColor(palette[0]);
+    setSlots((s) => {
+      const next = [...s];
+      for (let i = 1; i < palette.length; i++) {
+        if (next[i - 1]) next[i - 1] = { ...next[i - 1], color: palette[i] };
+        else next.push({ name: filamentRef.current, color: palette[i] });
+      }
+      return next;
+    });
   }, []);
 
   const settings: SliceSettings = {
@@ -467,6 +513,8 @@ export default function SlicePage() {
     overrides,
     supports,
     materialsChoice,
+    slots,
+    firstColor,
     routing,
     groupChoice,
     projectChoice,
@@ -589,6 +637,18 @@ export default function SlicePage() {
       });
       if (inputs?.filaments[0])
         setMaterialsChoice({ part: inputs.filaments[0], value: materialsFromJob(inputs.filaments, saved) });
+      // The model's filaments: all but those only supports used.
+      if (inputs) {
+        const supportOnly = new Set(
+          [saved.support_interface_filament, saved.support_filament].map(Number).filter((n) => n > 1),
+        );
+        setSlots(
+          inputs.filaments
+            .map((name, i) => ({ name, color: inputs.colours?.[i] ?? "" }))
+            .filter((_, i) => i > 0 && !supportOnly.has(i + 1)),
+        );
+        setFirstColor(inputs.colours?.[0] ?? "");
+      }
       setOverrides(Object.fromEntries(Object.entries(saved).filter(([k]) => !SUPPORT_KEYS.includes(k))));
       setInitialPlate({ key: fromJob, files, plates: job.plates ?? (job.plate ? [job.plate] : null) });
       setLoadedFrom(fromJob);
@@ -700,9 +760,22 @@ export default function SlicePage() {
     [partFilament, filaments, multiMaterial, loadedMaterials],
   );
   const supportMaterials = materialsChoice && materialsChoice.part === filament ? materialsChoice.value : defaultMaterials;
+  const slotNames = useMemo(() => [filament, ...slots.map((s) => s.name)], [filament, slots]);
   const supportPlan = useMemo(
-    () => supportFilaments(filament, supports.enabled, supportMaterials),
-    [filament, supports.enabled, supportMaterials],
+    () => jobFilaments(slotNames, supports.enabled, supportMaterials),
+    [slotNames, supports.enabled, supportMaterials],
+  );
+  // Each filament's colour: the slots' ("" = the profile's), support-only
+  // filaments the profile's. Sent only when some are set.
+  const slotColors = useMemo(() => [firstColor, ...slots.map((s) => s.color)], [firstColor, slots]);
+  const jobColours = useMemo(() => {
+    const all = supportPlan.filaments.map((_, i) => (i < supportPlan.slots ? slotColors[i] : ""));
+    return all.some(Boolean) ? all : null;
+  }, [supportPlan, slotColors]);
+  /** What the plate shows (a stand-in colour where the profile's isn't known). */
+  const displayColors = useMemo(
+    () => slotColors.map((c, i) => c || FALLBACK_COLORS[i % FALLBACK_COLORS.length]),
+    [slotColors],
   );
   // The overrides the job goes out with: Quick Settings plus Supports.
   const jobOverrides = useMemo(() => {
@@ -732,9 +805,10 @@ export default function SlicePage() {
             filaments: supportPlan.filaments,
             overrides: jobOverrides,
             printer_id: printerId || null,
+            colours: jobColours ?? [],
           })
         : null,
-    [dualNozzle, resolvedMachine, process, filament, supportPlan, jobOverrides, printerId],
+    [dualNozzle, resolvedMachine, process, filament, supportPlan, jobOverrides, printerId, jobColours],
   );
   // The answer for the inputs it was asked with: shown only while they hold.
   const [nozzleAnswer, setNozzleAnswer] = useState<{ body: string; plan: NozzlePlan | null } | null>(null);
@@ -930,6 +1004,7 @@ export default function SlicePage() {
     if (resolvedMachine) formData.append("machine", resolvedMachine);
     if (process) formData.append("process", process);
     if (filament) for (const f of supportPlan.filaments) formData.append("filament", f);
+    if (filament && jobColours) formData.append("colours", JSON.stringify(jobColours));
     if (plate) formData.append("bed_type", plate);
     if (color) formData.append("color", color);
     formData.append("overrides", JSON.stringify(jobOverrides));
@@ -956,7 +1031,7 @@ export default function SlicePage() {
       }),
     );
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, projectChoice, newProjectName, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, projectChoice, newProjectName, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials, jobColours]);
 
   // What a slice now would be made from (sliceHistory.ts): the job form's
   // choices, the models by digest, the resolved profile, the dual-nozzle
@@ -976,8 +1051,9 @@ export default function SlicePage() {
       models: await Promise.all(modelFiles.map(async (f) => ({ name: f.name, sha256: await fileDigest(f) }))),
       profile: resolvedConfig ? await sha256Text(stableStringify(resolvedConfig)) : "",
       nozzle_plan: dualNozzle ? nozzlePlan : null,
+      colours: jobColours ?? undefined,
     }),
-    [resolvedMachine, process, filament, supportPlan, plate, color, jobOverrides, printerId, routing, groupId, layout, modelFiles, resolvedConfig, dualNozzle, nozzlePlan],
+    [resolvedMachine, process, filament, supportPlan, plate, color, jobOverrides, printerId, routing, groupId, layout, modelFiles, resolvedConfig, dualNozzle, nozzlePlan, jobColours],
   );
   // The remembered slice of exactly this (for the project chosen), if any:
   // Slice then shows it instead of slicing again.
@@ -1244,6 +1320,9 @@ export default function SlicePage() {
               supportThreshold={supportThreshold}
               supportsOn={supports.enabled}
               onSupportCheck={setSupportCheck}
+              colors={displayColors}
+              filamentCount={slotNames.length}
+              onPalette={handlePalette}
             />
           </div>
           {sliced && view === "preview" && (
@@ -1445,6 +1524,73 @@ export default function SlicePage() {
               )}
             </select>
           </label>
+
+          <div className="filament-slots" aria-label="The model's filaments">
+            <div className="filament-slot">
+              <span className="filament-slot-number">1</span>
+              <input
+                type="color"
+                value={displayColors[0]}
+                onChange={(e) => setFirstColor(e.target.value.toUpperCase())}
+                title={firstColor ? "Filament 1's colour" : "Filament 1's colour (the profile's until you pick one)"}
+                disabled={!resolvedMachine}
+              />
+              <span className="filament-slot-name">{filament ? filamentDisplayName(filament) : "—"}</span>
+            </div>
+            {slots.map((slot, i) => {
+              const n = i + 2;
+              const used = (layout?.filaments ?? 1) >= n;
+              return (
+                <div className="filament-slot" key={i}>
+                  <span className="filament-slot-number">{n}</span>
+                  <input
+                    type="color"
+                    value={displayColors[i + 1]}
+                    onChange={(e) =>
+                      setSlots((all) => all.map((x, j) => (j === i ? { ...x, color: e.target.value.toUpperCase() } : x)))
+                    }
+                    title={`Filament ${n}'s colour`}
+                  />
+                  <select
+                    value={slot.name}
+                    onChange={(e) => setSlots((all) => all.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                    aria-label={`Filament ${n}`}
+                  >
+                    {!filaments.some((f) => f.name === slot.name) && <option value={slot.name}>{filamentDisplayName(slot.name)}</option>}
+                    {filaments.map((f) => (
+                      <option key={f.name} value={f.name}>
+                        {filamentDisplayName(f.name)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-sm btn-ghost"
+                    disabled={used || i !== slots.length - 1}
+                    onClick={() => setSlots((all) => all.slice(0, -1))}
+                    title={
+                      used
+                        ? `A model on the plate prints with filament ${n}`
+                        : i !== slots.length - 1
+                          ? "Remove the last filament first"
+                          : `Remove filament ${n}`
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={!filament}
+              onClick={() => setSlots((all) => [...all, { name: filament, color: "" }])}
+              title="Another filament for the model: pick it for a part, or paint with it"
+            >
+              + Filament
+            </button>
+          </div>
 
           <label>
             Color

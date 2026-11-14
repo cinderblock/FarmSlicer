@@ -3,6 +3,7 @@ import {
   baseCandidates,
   defaultSupportMaterials,
   interfaceCandidates,
+  jobFilaments,
   materialsFromJob,
   polymer,
   supportFilaments,
@@ -122,5 +123,34 @@ describe("job filaments", () => {
     const { filaments, overrides } = supportFilaments(PLA_CF.name, true, choice);
     expect(materialsFromJob(filaments, overrides)).toEqual(choice);
     expect(materialsFromJob([PLA.name], { support_filament: "0", support_interface_filament: "0" })).toEqual({ mode: "same" });
+  });
+});
+
+describe("jobFilaments", () => {
+  const separate = { mode: "separate" as const, interface: "Support For PLA", base: "PLA Basic" };
+  test("one slot: as supportFilaments", () => {
+    expect(jobFilaments(["PLA Basic"], true, separate)).toEqual({
+      ...supportFilaments("PLA Basic", true, separate),
+      slots: 1,
+    });
+    const other = { mode: "separate" as const, interface: "Support For PLA", base: "PLA Matte" };
+    expect(jobFilaments(["PLA Basic"], true, other).filaments).toEqual(supportFilaments("PLA Basic", true, other).filaments);
+  });
+
+  test("support filaments after the slots, reusing a slot that has them", () => {
+    expect(jobFilaments(["PLA Basic", "PLA Basic", "PETG"], true, separate)).toEqual({
+      filaments: ["PLA Basic", "PLA Basic", "PETG", "Support For PLA"],
+      overrides: { support_filament: "1", support_interface_filament: "4" },
+      slots: 3,
+    });
+    expect(jobFilaments(["PLA Basic", "Support For PLA"], true, separate).overrides).toEqual({
+      support_filament: "1",
+      support_interface_filament: "2",
+    });
+    expect(jobFilaments(["PLA Basic", "PETG"], false, separate)).toEqual({
+      filaments: ["PLA Basic", "PETG"],
+      overrides: { support_filament: "0", support_interface_filament: "0" },
+      slots: 2,
+    });
   });
 });

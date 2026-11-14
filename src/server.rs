@@ -557,6 +557,7 @@ pub(crate) fn job_inputs(job: &Job) -> Option<JobInputs> {
         printer_id: job.printer_id.clone(),
         routing: job.routing.clone(),
         color: String::new(),
+        colours: Vec::new(),
         group_id: job.group_id.clone(),
         source: job.source.clone(),
     })
@@ -689,6 +690,11 @@ pub struct JobInputs {
     pub routing: String,
     #[serde(default)]
     pub color: String,
+    /// Each filament's colour (`#RRGGBB`, "" = the profile's), in filament
+    /// order: what the Slice page's filament slots say. Empty = the
+    /// profiles' own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub colours: Vec<String>,
     #[serde(default)]
     pub group_id: Option<String>,
     /// "server" or "browser".
@@ -823,6 +829,9 @@ async fn create_job(
             "process" => inputs.process = text,
             "filament" if !text.is_empty() => inputs.filaments.push(text),
             "color" => inputs.color = text.trim().to_string(),
+            "colours" => {
+                inputs.colours = serde_json::from_str(&text).map_err(|e| bad(&format!("colours: {e}")))?;
+            }
             "overrides" => overrides_str = text,
             "bed_type" => inputs.bed_type = text.trim().to_string(),
             "placement" => placement_str = text.trim().to_string(),
@@ -854,6 +863,7 @@ async fn create_job(
     if !matches!(inputs.source.as_str(), "server" | "browser") {
         return Err(bad(&"source must be 'server' or 'browser'"));
     }
+    check_colours(&inputs.colours, inputs.filaments.len()).map_err(|e| bad(&e))?;
     // An integration key's jobs are its group's.
     if let Some(g) = scope.as_ref().and_then(|s| s.group_id.clone()) {
         match &inputs.group_id {
@@ -1153,12 +1163,42 @@ fn job_config(
     if !inputs.bed_type.is_empty() {
         config.insert("curr_bed_type".into(), json!(inputs.bed_type));
     }
+    // The job's own colours; "" keeps the profile's.
+    if inputs.colours.iter().any(|c| !c.is_empty()) {
+        let own: Vec<Value> = config.get("filament_colour").and_then(Value::as_array).cloned().unwrap_or_default();
+        let colours = inputs
+            .colours
+            .iter()
+            .enumerate()
+            .map(|(i, c)| match c.as_str() {
+                "" => own.get(i).cloned().unwrap_or_else(|| json!("#808080")),
+                c => json!(c),
+            })
+            .collect();
+        config.insert("filament_colour".into(), Value::Array(colours));
+    }
     let plan = if map_given { None } else { plan_nozzles(state, inputs, &config) };
     if let Some(plan) = &plan {
         config.insert("filament_map_mode".into(), json!("Manual"));
         config.insert("filament_map".into(), json!(plan.map().iter().map(i64::to_string).collect::<Vec<_>>()));
     }
     Ok((config, plan))
+}
+
+/// A job's filament colours: one `#RRGGBB` (or `#RRGGBBAA`) per filament,
+/// "" for the profile's own, or none at all.
+fn check_colours(colours: &[String], filaments: usize) -> Result<(), String> {
+    if colours.is_empty() {
+        return Ok(());
+    }
+    if colours.len() != filaments {
+        return Err(format!("colours: {} given for {filaments} filament(s)", colours.len()));
+    }
+    let hex = |c: &str| c.len() > 1 && c[1..].chars().all(|d| d.is_ascii_hexdigit());
+    match colours.iter().find(|c| !c.is_empty() && !(c.starts_with('#') && matches!(c.len(), 7 | 9) && hex(c))) {
+        Some(c) => Err(format!("colours: {c:?} isn't a #RRGGBB colour")),
+        None => Ok(()),
+    }
 }
 
 /// Each filament's nozzle on a dual-nozzle printer (src/nozzles.rs), from
@@ -1226,6 +1266,8 @@ struct NozzlePlanQuery {
     overrides: serde_json::Map<String, Value>,
     #[serde(default)]
     printer_id: Option<String>,
+    #[serde(default)]
+    colours: Vec<String>,
 }
 
 async fn nozzle_plan(
@@ -1239,11 +1281,13 @@ async fn nozzle_plan(
     if !state.profile_store.maps_filaments_to_nozzles(&q.machine) {
         return Ok(Json(json!({"plan": null})));
     }
+    check_colours(&q.colours, q.filaments.len()).map_err(|e| bad(&e))?;
     let inputs = JobInputs {
         machine: q.machine,
         process: q.process,
         filaments: q.filaments,
         printer_id: q.printer_id.filter(|id| !id.is_empty()),
+        colours: q.colours,
         ..Default::default()
     };
     let (_, plan) = job_config(&state, &inputs, q.overrides).map_err(|e| bad(&e))?;

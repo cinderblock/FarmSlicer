@@ -289,6 +289,11 @@ describe("3mf", () => {
     expect(v.paint.color!.getString(0)).toBe("4");
   });
 
+  test("the same objects make the same bytes", () => {
+    const o = makeObject("Cube", [makeVolume(cube())]);
+    expect(write3mf([o])).toEqual(write3mf([o]));
+  });
+
   const bambu = "../extern/OrcaSlicer/resources/calib/pressure_advance/auto_pa_line_dual.3mf";
   test.skipIf(!existsSync(bambu))("reads a Bambu Studio project", () => {
     const back = read3mf(readFileSync(bambu));
@@ -301,5 +306,21 @@ describe("3mf", () => {
     const again = read3mf(write3mf(back.objects.map((o) => o.object)));
     const count = (l: typeof back) => l.objects.reduce((n, o) => n + o.object.volumes.reduce((m, v) => m + v.mesh.indices.length, 0), 0);
     expect(count(again)).toBe(count(back));
+  });
+});
+
+describe("primitives", () => {
+  test("closed and the right volume", async () => {
+    const { box, cylinder, sphere, cone } = await import("../src/model/primitives");
+    const close = (a: number, b: number, rel: number) => expect(Math.abs(a - b) / b).toBeLessThan(rel);
+    for (const [mesh, volume] of [
+      [box(10, 20, 30), 6000],
+      [cylinder(5, 10), Math.PI * 25 * 10],
+      [cone(5, 9), (Math.PI * 25 * 9) / 3],
+      [sphere(10), (4 / 3) * Math.PI * 1000],
+    ] as const) {
+      expect(openEdgeCount(mesh)).toBe(0);
+      close(signedVolume(mesh), volume, 0.02);
+    }
   });
 });

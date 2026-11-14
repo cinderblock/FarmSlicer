@@ -69,7 +69,8 @@ export function findOverhangs(root: THREE.Object3D, content: THREE.Object3D, thr
   const n = new THREE.Vector3();
   content.traverse((child) => {
     const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
+    // Model parts only: not modifiers, negative volumes or paint.
+    if (!mesh.isMesh || mesh.userData?.overhangs !== true) return;
     const pos = mesh.geometry.getAttribute("position");
     const idx = mesh.geometry.getIndex();
     const count = idx ? idx.count : pos.count;

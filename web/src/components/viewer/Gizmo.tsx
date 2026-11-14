@@ -371,7 +371,7 @@ export function FaceTool({ part, onChange, onCommit }: GizmoProps) {
           // A drag (orbiting) isn't a click.
           if (e.delta > 4 || e.faceIndex == null) return;
           e.stopPropagation();
-          const normal = part.hullFaces[e.faceIndex].normal.clone().applyQuaternion(part.quaternion);
+          const normal = part.worldNormal(part.hullFaces[e.faceIndex].normal);
           const turn = new THREE.Quaternion().setFromUnitVectors(normal, new THREE.Vector3(0, 0, -1));
           part.setRotation(turn.multiply(part.quaternion.clone()));
           setFaces(null);

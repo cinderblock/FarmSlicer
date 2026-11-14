@@ -177,6 +177,29 @@ export function supportFilaments(
   return { filaments, overrides: { support_filament: base, support_interface_filament: "2" } };
 }
 
+/**
+ * The job's filaments with several for the model (multi-colour): its
+ * filament slots in order (slot 1 the part's), then the support materials
+ * that aren't a slot already. With one slot this is `supportFilaments`.
+ */
+export function jobFilaments(
+  slots: string[],
+  enabled: boolean,
+  materials: SupportMaterials,
+): { filaments: string[]; overrides: Record<string, string>; slots: number } {
+  const filaments = [...slots];
+  if (!enabled || materials.mode === "same")
+    return { filaments, overrides: { support_filament: "0", support_interface_filament: "0" }, slots: slots.length };
+  const index = (name: string) => {
+    let i = filaments.indexOf(name);
+    if (i < 0) i = filaments.push(name) - 1;
+    return String(i + 1);
+  };
+  const iface = index(materials.interface);
+  const base = materials.base === slots[0] ? "1" : index(materials.base);
+  return { filaments, overrides: { support_filament: base, support_interface_filament: iface }, slots: slots.length };
+}
+
 /** The support choice a job was made with (re-slicing), from its filaments and overrides. */
 export function materialsFromJob(filaments: string[], overrides: Record<string, string>): SupportMaterials {
   const at = (key: string) => filaments[Number(overrides[key] ?? 0) - 1];

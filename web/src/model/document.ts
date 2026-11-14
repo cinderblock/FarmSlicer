@@ -3,7 +3,7 @@
 // and every copy of it on the plates is an instance placed by the page
 // (src/placement.rs): the object itself has no position.
 
-import { identity, multiply, type Mat4, type Mesh } from "./mesh";
+import { emptyBox, identity, meshBounds, multiply, type Box, type Mat4, type Mesh } from "./mesh";
 import type { PaintKind, PaintLayer } from "./paint";
 
 /** ModelVolumeType, by the names model_settings.config uses. */
@@ -122,4 +122,11 @@ export function isPlain(o: ModelObject): boolean {
 /** A volume's matrix composed with a parent's. */
 export function volumeWorld(parent: Mat4, v: Volume): Mat4 {
   return multiply(parent, v.matrix);
+}
+
+/** The object's bounding box in its own frame: its model parts' (or every volume's). */
+export function objectBounds(o: ModelObject, partsOnly = true): Box {
+  const box = emptyBox();
+  for (const v of o.volumes) if (!partsOnly || v.type === "part") meshBounds(v.mesh, v.matrix, box);
+  return box;
 }

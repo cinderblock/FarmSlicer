@@ -9,6 +9,10 @@ import { useBodyDrag, type GizmoProps, type Guide, type Tool } from "./viewer/dr
 import { arrange, arrangeOnPlates, fillCopies, findFreeSpot, overlapping } from "./viewer/layout";
 import type { SupportCheck } from "./viewer/overhangs";
 import { DEFAULT_BED, Part, PartShape, sceneBed, type Bed as BedShape, type Fit, type SceneBed } from "./viewer/part";
+import { applyPaint, History, restore, sameSnapshot, snapshot, type Change, type PlateSnapshot } from "./viewer/history";
+import { loadModel, mergeObjects, modelFile } from "../model/load";
+import { usedFilaments, type ModelObject } from "../model/document";
+import ObjectPanel from "./viewer/ObjectPanel";
 
 export type { Fit } from "./viewer/part";
 export type { SupportCheck } from "./viewer/overhangs";
@@ -18,6 +22,9 @@ export type { BedShape };
 const EULER_ORDER = "ZYX";
 /** How long a notice ("Added 12 copies") stays up (ms). */
 const NOTICE_MS = 4000;
+/** A copy's scale limits (src/placement.rs). */
+const MIN_SCALE = 0.001;
+const MAX_SCALE = 1000;
 
 /** What's on the plates, for the page: the model files and every part on them. */
 export interface PlateState {
@@ -29,12 +36,20 @@ export interface PlateState {
   fit: Fit;
   /** Some parts overlap each other (on the same plate). */
   overlaps: boolean;
+  /** The highest filament any model names (its parts' or painted colours): the job needs at least this many. */
+  filaments: number;
 }
 
-/** A model file and its shape, once per file however many copies there are. */
-interface LoadedModel {
-  file: File;
-  shape: PartShape;
+/** Each model's upload, made again only when the model changed. */
+const exported = new WeakMap<PartShape, { version: number; file: File }>();
+
+/** What the job uploads for a model: its STL while untouched, else a 3MF of it as edited. */
+function shapeFile(shape: PartShape): File {
+  const hit = exported.get(shape);
+  if (hit && hit.version === shape.version) return hit.file;
+  const file = modelFile(shape.object, shape.source);
+  exported.set(shape, { version: shape.version, file });
+  return file;
 }
 
 /** The worse of two fits. */
@@ -76,18 +91,26 @@ function plateStatus(
 }
 
 /** What the page gets: the models in use, in order, and every part on every plate that has some. */
-function plateState(parts: Part[], models: LoadedModel[], bed: SceneBed, plateCount: number): PlateState | null {
+function plateState(parts: Part[], bed: SceneBed, plateCount: number): PlateState | null {
   if (parts.length === 0) return null;
   const { fit, clash } = plateStatus(parts, bed, plateCount);
-  const used = models.filter((m) => parts.some((p) => p.shape === m.shape));
+  const used: PartShape[] = [];
+  for (const p of parts) if (!used.includes(p.shape)) used.push(p.shape);
   const plates: PlateLayout[] = [];
   for (let i = 0; i < plateCount; i++) {
     const objects = parts
       .filter((p) => p.plate === i)
-      .map((p) => ({ model: used.findIndex((m) => m.shape === p.shape), placement: p.placement() }));
+      .map((p) => ({ model: used.indexOf(p.shape), placement: p.placement() }));
     if (objects.length > 0) plates.push({ objects });
   }
-  return { files: used.map((m) => m.file), plates, fit, overlaps: clash.size > 0 };
+  let filaments = 1;
+  for (const shape of used) for (const f of usedFilaments(shape.object)) filaments = Math.max(filaments, f);
+  return { files: used.map(shapeFile), plates, fit, overlaps: clash.size > 0, filaments };
+}
+
+/** A file name without its extension. */
+function baseName(name: string): string {
+  return name.replace(/\.[^.]+$/, "");
 }
 
 /** What's wrong with a plate, in a few words (null: nothing). */
@@ -307,6 +330,9 @@ export default function ModelViewer({
   supportThreshold = 0,
   supportsOn = true,
   onSupportCheck,
+  colors = [],
+  filamentCount = 1,
+  onPalette,
 }: {
   /** The selected printer's bed; a 256 mm bed until there is one. */
   bed?: BedShape | null;
@@ -320,15 +346,23 @@ export default function ModelViewer({
   supportsOn?: boolean;
   /** What would print in the air on the plate (null: no parts). */
   onSupportCheck?: (check: SupportCheck | null) => void;
+  /** Each filament's colour (filament 1 first): parts and colour paint show in them. */
+  colors?: string[];
+  /** How many filaments the job has (the choices for a model's filament). */
+  filamentCount?: number;
+  /** A loaded file named its own colours for filaments 1..N. */
+  onPalette?: (colors: string[]) => void;
 }) {
-  const [models, setModels] = useState<LoadedModel[]>([]);
   // Every part on every plate (`Part.plate`); the view shows the active one.
   const [parts, setParts] = useState<Part[]>([]);
   const [plateCount, setPlateCount] = useState(1);
   const [active, setActive] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // The volume picked in the object panel (its settings and size show).
+  const [volumeId, setVolumeId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("move");
   const [showOverhangs, setShowOverhangs] = useState(true);
+  const [uniformScale, setUniformScale] = useState(true);
   // Bumped when a manipulation ends: overhangs are found again then (not
   // on every frame of a drag).
   const [settled, setSettled] = useState(0);
@@ -340,6 +374,28 @@ export default function ModelViewer({
   const [, setTick] = useState(0);
   const tickPending = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Undo/redo: what the plate was after the last change, and what changed.
+  const history = useRef(new History());
+  const committed = useRef<PlateSnapshot>(snapshot([], 1));
+  /** What the next recorded change is called ("Move", "Delete", ...). */
+  const pendingLabel = useRef("Edit");
+  /** The next state is a new start (a job's models loaded): forget the history. */
+  const resetHistory = useRef(false);
+  // What the Undo and Redo buttons show (the stacks live in `history`).
+  const [undoable, setUndoable] = useState<{ undo?: string; redo?: string }>({});
+  const syncHistory = useCallback(
+    () => setUndoable({ undo: history.current.undoLabel, redo: history.current.redoLabel }),
+    [],
+  );
+  const colorsKey = colors.join(",");
+  const colorsRef = useRef(colors);
+  useEffect(() => {
+    colorsRef.current = colors;
+  });
+  const paletteRef = useRef(onPalette);
+  useEffect(() => {
+    paletteRef.current = onPalette;
+  });
   // Keyed on the bed's numbers: the page hands over a new object whenever it
   // re-resolves the profile (a different filament), and a new bed reframes
   // the camera.
@@ -380,12 +436,35 @@ export default function ModelViewer({
     });
   }, []);
 
-  /** A manipulation finished: tell the page what's on the plates. */
-  const commit = useCallback(() => {
-    refresh();
-    setSettled((n) => n + 1);
-    report.current?.(plateState(parts, models, shape, plateCount));
-  }, [refresh, parts, models, shape, plateCount]);
+  /** Record the plate as it is now, if it changed since the last record. */
+  const record = useCallback(
+    (label: string, now: Part[], count: number) => {
+      const after = snapshot(now, count);
+      if (resetHistory.current) {
+        resetHistory.current = false;
+        history.current.clear();
+        committed.current = after;
+        syncHistory();
+        return;
+      }
+      if (sameSnapshot(committed.current, after)) return;
+      history.current.push({ label, change: { kind: "plate", before: committed.current, after } });
+      committed.current = after;
+      syncHistory();
+    },
+    [syncHistory],
+  );
+
+  /** A manipulation finished: record it and tell the page what's on the plates. */
+  const commit = useCallback(
+    (label = "Move") => {
+      refresh();
+      setSettled((n) => n + 1);
+      record(label, parts, plateCount);
+      report.current?.(plateState(parts, shape, plateCount));
+    },
+    [refresh, parts, shape, plateCount, record],
+  );
 
   // What would print in the air: painted on the parts, totalled for the page.
   const reportCheck = useRef(onSupportCheck);
@@ -407,24 +486,78 @@ export default function ModelViewer({
     reportCheck.current?.({ overhangArea, floating });
   }, [parts, settled, supportThreshold, supportsOn, showOverhangs]);
 
-  // New parts, plates, or a different printer's bed: report the plates again.
+  // New parts or plates: record the change (undo), report the plates.
   useEffect(() => {
-    report.current?.(plateState(parts, models, shape, plateCount));
-  }, [parts, models, shape, plateCount]);
+    record(pendingLabel.current, parts, plateCount);
+    pendingLabel.current = "Edit";
+  }, [parts, plateCount, record]);
+  useEffect(() => {
+    report.current?.(plateState(parts, shape, plateCount));
+  }, [parts, shape, plateCount]);
 
-  // Free each part's GPU resources once it's off the plate.
-  const live = useRef<Part[]>([]);
+  // New filament colours: every model shows them.
   useEffect(() => {
-    for (const p of live.current) if (!parts.includes(p)) p.dispose();
-    live.current = parts;
+    for (const s of new Set(parts.map((p) => p.shape))) s.setColors(colorsRef.current);
+  }, [parts, colorsKey]);
+
+  // Free each part's GPU resources once it's off the plate (an undo step
+  // that still refers to it can bring it back).
+  const live = useRef(new Set<Part>());
+  useEffect(() => {
+    for (const p of parts) live.current.add(p);
+    const keep = history.current.referencedParts();
+    for (const p of live.current)
+      if (!parts.includes(p)) {
+        p.dispose();
+        if (!keep.has(p)) live.current.delete(p);
+      }
   }, [parts]);
   useEffect(() => () => live.current.forEach((p) => p.dispose()), []);
 
-  /** Set the parts, forgetting models no part uses any more. */
-  const setPlate = useCallback((next: Part[]) => {
+  /** Set the parts (a change worth an undo step called `label`). */
+  const setPlate = useCallback((next: Part[], label = "Edit") => {
+    pendingLabel.current = label;
     setParts(next);
-    setModels((ms) => ms.filter((m) => next.some((p) => p.shape === m.shape)));
   }, []);
+
+  /** Put the plate (or a model's paint) back as a recorded change has it. */
+  const applyChange = useCallback(
+    (change: Change, which: "before" | "after") => {
+      if (change.kind === "paint") {
+        applyPaint(change, which);
+        for (const p of parts) if (p.shape !== change.shape) p.shape.refreshAllPaint();
+        refresh();
+        report.current?.(plateState(parts, shape, plateCount));
+        return;
+      }
+      const state = change[which];
+      const next = restore(state);
+      for (const s of new Set(next.map((p) => p.shape))) {
+        s.setColors(colorsRef.current);
+        s.refreshAllPaint();
+      }
+      committed.current = state;
+      setParts([...next]);
+      setPlateCount(state.plateCount);
+      setActive((a) => Math.min(a, state.plateCount - 1));
+      setSelectedId((id) => (next.some((p) => p.id === id) ? id : null));
+      setSettled((n) => n + 1);
+      refresh();
+    },
+    [parts, shape, plateCount, refresh],
+  );
+
+  const undo = useCallback(() => {
+    const e = history.current.undo();
+    if (e) applyChange(e.change, "before");
+    syncHistory();
+  }, [applyChange, syncHistory]);
+
+  const redo = useCallback(() => {
+    const e = history.current.redo();
+    if (e) applyChange(e.change, "after");
+    syncHistory();
+  }, [applyChange, syncHistory]);
 
   /**
    * Show plate `index`, selecting its first part. Leaving an empty plate
@@ -453,24 +586,46 @@ export default function ModelViewer({
       setError("");
       setLoading(true);
       try {
-        const loaded: LoadedModel[] = [];
         const added: Part[] = [];
         const placed = [...shown];
         for (const file of files) {
-          const s = PartShape.load(await file.arrayBuffer(), file.name);
-          loaded.push({ file, shape: s });
-          const part = new Part(s);
-          part.setPlate(active);
-          if (placed.length > 0) {
-            const spot = findFreeSpot(part, placed, shape);
-            if (spot) part.setCenter(spot.x, spot.y);
-            else setNotice({ text: `No free room for ${file.name}: it's in the middle, overlapping`, bad: true });
+          const loaded = loadModel(file.name, await file.arrayBuffer());
+          if (loaded.palette.length) paletteRef.current?.(loaded.palette);
+          const stl = /\.stl$/i.test(file.name) ? file : null;
+          // Each object of the file, each instance where the file put it
+          // (relative to the others, centred on the plate when it's empty).
+          const fromFile: { part: Part; at: THREE.Vector3 }[] = [];
+          for (const { object, items } of loaded.objects) {
+            const s = new PartShape(object, stl, colorsRef.current);
+            const mid = s.offset.clone().negate();
+            for (const item of items) {
+              const part = new Part(s);
+              const m = new THREE.Matrix4().fromArray(item);
+              const q = new THREE.Quaternion();
+              const sc = new THREE.Vector3();
+              m.decompose(new THREE.Vector3(), q, sc);
+              part.setScale(sc);
+              part.setRotation(q);
+              part.setPlate(active);
+              fromFile.push({ part, at: mid.clone().applyMatrix4(m) });
+            }
           }
-          added.push(part);
-          placed.push(part);
+          const box = new THREE.Box3();
+          for (const f of fromFile) box.expandByPoint(f.at);
+          const groupMid = box.getCenter(new THREE.Vector3());
+          for (const { part, at } of fromFile) {
+            if (placed.length > 0) {
+              const spot = findFreeSpot(part, placed, shape);
+              if (spot) part.setCenter(spot.x, spot.y);
+              else setNotice({ text: `No free room for ${part.name}: it's in the middle, overlapping`, bad: true });
+            } else part.setCenter(at.x - groupMid.x, at.y - groupMid.y);
+            added.push(part);
+          }
+          // The file's own layout counts as placed once all of it is down.
+          placed.push(...fromFile.map((f) => f.part));
+          for (const w of loaded.warnings) setNotice({ text: `${file.name}: ${w}` });
         }
-        setModels((ms) => [...ms, ...loaded]);
-        setParts([...parts, ...added]);
+        setPlate([...parts, ...added], files.length > 1 ? "Add parts" : `Add ${files[0].name}`);
         setSelectedId(added[added.length - 1].id);
         setTool("move");
       } catch (err) {
@@ -479,7 +634,7 @@ export default function ModelViewer({
         setLoading(false);
       }
     },
-    [parts, shown, active, shape],
+    [parts, shown, active, shape, setPlate],
   );
 
   // A job's models and plates (re-slicing): replace them all.
@@ -495,21 +650,28 @@ export default function ModelViewer({
     setLoading(true);
     setError("");
     (async () => {
-      const loaded: LoadedModel[] = [];
-      for (const file of start.files) loaded.push({ file, shape: PartShape.load(await file.arrayBuffer(), file.name) });
+      // One model per file, as the job placed them (a file of several
+      // objects was one rigid part).
+      const loaded: PartShape[] = [];
+      for (const file of start.files) {
+        const { objects, palette } = loadModel(file.name, await file.arrayBuffer());
+        if (palette.length) paletteRef.current?.(palette);
+        const stl = /\.stl$/i.test(file.name) ? file : null;
+        loaded.push(new PartShape(mergeObjects(objects, baseName(file.name)), stl, colorsRef.current));
+      }
       if (cancelled) return;
       const plates = start.plates ?? [{ objects: loaded.map((_, i) => ({ model: i, placement: null })) }];
       const next = plates.flatMap((plate, index) =>
         plate.objects
           .filter((o) => o.model < loaded.length)
           .map((o) => {
-            const part = new Part(loaded[o.model].shape);
+            const part = new Part(loaded[o.model]);
             if (o.placement) part.setPlacement(o.placement);
             part.setPlate(index);
             return part;
           }),
       );
-      setModels(loaded);
+      resetHistory.current = true;
       setParts(next);
       setPlateCount(Math.max(1, plates.length));
       setActive(0);
@@ -534,14 +696,69 @@ export default function ModelViewer({
   const center = useCallback(() => {
     if (!selected) return;
     selected.setCenter(0, 0);
-    commit();
+    commit("Center");
   }, [selected, commit]);
 
   const resetOrientation = useCallback(() => {
     if (!selected) return;
     selected.setRotation(new THREE.Quaternion());
-    commit();
+    commit("Reset rotation");
   }, [selected, commit]);
+
+  /** Mirror the selected part along a scene axis (it stays where it is). */
+  const mirror = useCallback(
+    (axis: 0 | 1 | 2) => {
+      if (!selected) return;
+      // D·R·S = (D·R·E)·(E·S): D mirrors the scene axis, E the model's X;
+      // D·R·E is a rotation again, E·S a scale.
+      const d = new THREE.Matrix4().makeScale(axis === 0 ? -1 : 1, axis === 1 ? -1 : 1, axis === 2 ? -1 : 1);
+      const e = new THREE.Matrix4().makeScale(-1, 1, 1);
+      const r = new THREE.Matrix4().makeRotationFromQuaternion(selected.quaternion);
+      const turned = new THREE.Matrix4().multiplyMatrices(d, r).multiply(e);
+      const s = selected.scale.clone();
+      s.x = -s.x;
+      selected.setScale(s);
+      selected.setRotation(new THREE.Quaternion().setFromRotationMatrix(turned));
+      commit(`Mirror ${"XYZ"[axis]}`);
+    },
+    [selected, commit],
+  );
+
+  /**
+   * Change a model: every copy of it shows the new one (an undo step
+   * brings the old one back).
+   */
+  const editShape = useCallback(
+    (old: PartShape, label: string, change: (o: ModelObject) => ModelObject) => {
+      const next = new PartShape(change(old.object), old.source, colorsRef.current);
+      for (const p of parts) if (p.shape === old) p.setShape(next);
+      setPlate([...parts], label);
+      setSettled((n) => n + 1);
+    },
+    [parts, setPlate],
+  );
+
+  // The models on the plates (each once, with its copies), for the object panel.
+  const modelsOnPlates = useMemo(() => {
+    const out: { shape: PartShape; copies: number }[] = [];
+    for (const p of parts) {
+      const hit = out.find((m) => m.shape === p.shape);
+      if (hit) hit.copies++;
+      else out.push({ shape: p.shape, copies: 1 });
+    }
+    return out;
+  }, [parts]);
+  /** Select a copy of `s`: on the plate shown if it has one, else the first plate that does. */
+  const selectShape = useCallback(
+    (s: PartShape) => {
+      const here = parts.find((p) => p.shape === s && p.plate === active) ?? parts.find((p) => p.shape === s);
+      if (!here) return;
+      if (here.plate !== active) setActive(here.plate);
+      setSelectedId(here.id);
+      setVolumeId(null);
+    },
+    [parts, active],
+  );
 
   const duplicate = useCallback(() => {
     if (!selected) return;
@@ -553,9 +770,9 @@ export default function ModelViewer({
       return;
     }
     copy.setCenter(spot.x, spot.y);
-    setParts([...parts, copy]);
+    setPlate([...parts, copy], "Duplicate");
     setSelectedId(copy.id);
-  }, [selected, parts, shown, shape]);
+  }, [selected, parts, shown, shape, setPlate]);
 
   const fill = useCallback(() => {
     if (!selected) return;
@@ -568,14 +785,14 @@ export default function ModelViewer({
       setNotice({ text: "No free room on this plate for another copy", bad: true });
       return;
     }
-    setParts([...parts, ...copies]);
+    setPlate([...parts, ...copies], "Fill plate");
     setNotice({ text: `Added ${copies.length} ${copies.length === 1 ? "copy" : "copies"} of ${selected.name}` });
-  }, [selected, parts, shown, shape]);
+  }, [selected, parts, shown, shape, setPlate]);
 
   // Pack the plate shown; what doesn't fit goes onto new plates at the end.
   const arrangeAll = useCallback(() => {
     if (arrange(shown, shape)) {
-      commit();
+      commit("Arrange");
       setNotice({ text: "Arranged" });
       return;
     }
@@ -586,19 +803,19 @@ export default function ModelViewer({
     }
     groups.forEach((group, i) => group.forEach((p) => p.setPlate(i === 0 ? active : plateCount + i - 1)));
     setPlateCount(plateCount + groups.length - 1);
-    setParts([...parts]);
+    setPlate([...parts], "Arrange");
     setNotice({ text: `They don't all fit: arranged onto ${groups.length} plates` });
-  }, [shown, shape, commit, parts, active, plateCount]);
+  }, [shown, shape, commit, parts, active, plateCount, setPlate]);
 
   const remove = useCallback(() => {
     if (!selected) return;
     const rest = parts.filter((p) => p !== selected);
-    setPlate(rest);
+    setPlate(rest, "Delete");
     setSelectedId(rest.filter((p) => p.plate === active).at(-1)?.id ?? null);
   }, [selected, parts, active, setPlate]);
 
   const clear = useCallback(() => {
-    setPlate([]);
+    setPlate([], "Clear");
     setPlateCount(1);
     setActive(0);
     setSelectedId(null);
@@ -615,7 +832,7 @@ export default function ModelViewer({
     if (plateCount < 2) return;
     const rest = parts.filter((p) => p.plate !== active);
     for (const p of rest) if (p.plate > active) p.setPlate(p.plate - 1);
-    setPlate(rest);
+    setPlate(rest, "Delete plate");
     setPlateCount(plateCount - 1);
     const next = Math.min(active, plateCount - 2);
     setActive(next);
@@ -641,14 +858,13 @@ export default function ModelViewer({
       }
       setPlateCount(count);
       setActive(next);
-      setParts([...parts]);
+      setPlate([...parts], `Move to plate ${target + 1}`);
     },
-    [selected, active, parts, shape, plateCount],
+    [selected, active, parts, shape, plateCount, setPlate],
   );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (parts.length === 0 || e.ctrlKey || e.metaKey || e.altKey) return;
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -656,6 +872,13 @@ export default function ModelViewer({
       )
         return;
       const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === "z" || key === "y")) {
+        e.preventDefault();
+        if (key === "y" || e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (parts.length === 0 || e.ctrlKey || e.metaKey || e.altKey) return;
       if (key === "escape") setTool("none");
       if (key === "delete" || key === "backspace") {
         e.preventDefault();
@@ -671,7 +894,7 @@ export default function ModelViewer({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [parts, remove, arrangeAll]);
+  }, [parts, remove, arrangeAll, undo, redo]);
 
   const select = useCallback((part: Part) => setSelectedId(part.id), []);
 
@@ -684,13 +907,44 @@ export default function ModelViewer({
     const next = euler.clone();
     next[axis] = THREE.MathUtils.degToRad(degrees);
     selected.setRotation(new THREE.Quaternion().setFromEuler(next));
-    commit();
+    commit("Rotate");
   };
   const setPosition = (axis: 0 | 1, absolute: number) => {
     if (!selected) return;
     const v = absolute - (axis === 0 ? shape.center.x : shape.center.y);
     selected.setCenter(axis === 0 ? v : selected.center.x, axis === 1 ? v : selected.center.y);
-    commit();
+    commit("Move");
+  };
+  /** Scale along a model axis to `factor` (1 = as loaded); with `uniform`, every axis by the same ratio. */
+  const setScale = (axis: 0 | 1 | 2, factor: number) => {
+    if (!selected) return;
+    const f = THREE.MathUtils.clamp(Math.abs(factor), MIN_SCALE, MAX_SCALE);
+    const s = selected.scale.clone();
+    const current = Math.abs(s.getComponent(axis)) || 1;
+    if (uniformScale) {
+      const ratio = f / current;
+      for (const a of [0, 1, 2] as const)
+        s.setComponent(a, Math.sign(s.getComponent(a)) * THREE.MathUtils.clamp(Math.abs(s.getComponent(a)) * ratio, MIN_SCALE, MAX_SCALE));
+    } else s.setComponent(axis, Math.sign(s.getComponent(axis)) * f);
+    selected.setScale(s);
+    commit("Scale");
+  };
+  /**
+   * Make the part `mm` long along a scene axis: uniformly, or by scaling
+   * the model axis that lies most along it.
+   */
+  const setSize = (axis: 0 | 1 | 2, mm: number) => {
+    if (!selected || !sizeMm || mm <= 0) return;
+    const ratio = mm / (sizeMm.getComponent(axis) || 1);
+    if (uniformScale) {
+      setScale(0, Math.abs(selected.scale.x) * ratio);
+      return;
+    }
+    const r = new THREE.Matrix4().makeRotationFromQuaternion(selected.quaternion).elements;
+    // Column j of R is model axis j in the scene; its component on `axis` is r[j*4 + axis].
+    let best: 0 | 1 | 2 = 0;
+    for (const j of [1, 2] as const) if (Math.abs(r[j * 4 + axis]) > Math.abs(r[best * 4 + axis])) best = j;
+    setScale(best, Math.abs(selected.scale.getComponent(best)) * ratio);
   };
   const copiesOfSelected = selected ? parts.filter((p) => p.shape === selected.shape).length : 0;
   const problemHere = plateProblem(here, shown.length > 1);
@@ -732,6 +986,13 @@ export default function ModelViewer({
       {parts.length > 0 && (
         <div className="viewer-top">
           <div className="viewer-toolbar">
+            <button onClick={undo} disabled={!undoable.undo} title={undoable.undo ? `Undo ${undoable.undo} (Ctrl+Z)` : "Undo (Ctrl+Z)"}>
+              Undo
+            </button>
+            <button onClick={redo} disabled={!undoable.redo} title={undoable.redo ? `Redo ${undoable.redo} (Ctrl+Shift+Z)` : "Redo (Ctrl+Shift+Z)"}>
+              Redo
+            </button>
+            <span className="toolbar-sep" />
             {TOOLS.map((t) => (
               <button
                 key={t.tool}
@@ -876,11 +1137,51 @@ export default function ModelViewer({
             ))}
             <span className="placement-unit">°</span>
           </div>
-          <div className="placement-size">
-            Size {sizeMm.x.toFixed(1)} × {sizeMm.y.toFixed(1)} × {sizeMm.z.toFixed(1)} mm
+          <div className="placement-row">
+            <span className="placement-label">Scale</span>
+            {([0, 1, 2] as const).map((a) => (
+              <NumberField
+                key={a}
+                label={"XYZ"[a]}
+                value={Math.abs(selected.scale.getComponent(a)) * 100}
+                digits={1}
+                onCommit={(v) => setScale(a, v / 100)}
+              />
+            ))}
+            <span className="placement-unit">%</span>
+            <label className="placement-check" title="Scale every axis together">
+              <input type="checkbox" checked={uniformScale} onChange={(e) => setUniformScale(e.target.checked)} />
+              Uniform
+            </label>
+          </div>
+          <div className="placement-row">
+            <span className="placement-label">Size</span>
+            {([0, 1, 2] as const).map((a) => (
+              <NumberField key={a} label={"XYZ"[a]} value={sizeMm.getComponent(a)} digits={1} onCommit={(v) => setSize(a, v)} />
+            ))}
+            <span className="placement-unit">mm</span>
+          </div>
+          <div className="placement-row">
+            <span className="placement-label">Mirror</span>
+            {([0, 1, 2] as const).map((a) => (
+              <button key={a} className="btn-sm" onClick={() => mirror(a)} title={`Mirror along ${"XYZ"[a]}`}>
+                {"XYZ"[a]}
+              </button>
+            ))}
           </div>
         </div>
       )}
+
+      <ObjectPanel
+        models={modelsOnPlates}
+        selected={selected?.shape ?? null}
+        volumeId={volumeId}
+        colors={colors}
+        filamentCount={filamentCount}
+        onSelect={selectShape}
+        onSelectVolume={setVolumeId}
+        onEdit={editShape}
+      />
 
       <Canvas camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 1, far: 5000 }}>
         <Scene
@@ -890,7 +1191,7 @@ export default function ModelViewer({
           tool={tool}
           onSelect={select}
           onChange={refresh}
-          onCommit={commit}
+          onCommit={() => commit(tool === "rotate" ? "Rotate" : tool === "flat" ? "Lay on face" : "Move")}
         />
       </Canvas>
     </div>

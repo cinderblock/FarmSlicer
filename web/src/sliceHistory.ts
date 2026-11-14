@@ -27,6 +27,8 @@ export interface SliceInputs {
   /** Digest of the resolved profile the page showed. */
   profile: string;
   nozzle_plan: unknown;
+  /** The filaments' colours, when the page set any ("" = the profile's). */
+  colours?: string[];
 }
 
 export interface SliceStats {

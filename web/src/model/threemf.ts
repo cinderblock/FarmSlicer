@@ -24,6 +24,7 @@ const PRODUCTION_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2
 const BAMBU_NS = "http://schemas.bambulab.com/package/2021";
 const MODEL_TYPE = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel";
 const MODEL_SETTINGS = "Metadata/model_settings.config";
+const FIXED_MTIME = new Date(1980, 0, 2);
 const PRUSA_SETTINGS = "Metadata/Slic3r_PE_model.config";
 
 /** Millimetres per unit (3MF `unit`). */
@@ -621,7 +622,9 @@ export function write3mf(objects: ModelObject[], opts: Write3mfOptions = {}): Ui
     "3D/3dmodel.model": model.toBytes(),
     [MODEL_SETTINGS]: settings.toBytes(),
   };
-  return zipSync(files, { level: 6 });
+  // A fixed timestamp: the same objects make the same bytes (the slice
+  // cache knows models by their digest).
+  return zipSync(files, { level: 6, mtime: FIXED_MTIME });
 }
 
 function writeMesh(w: XmlWriter, id: number, v: Volume) {
