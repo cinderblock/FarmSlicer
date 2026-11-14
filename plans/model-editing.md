@@ -245,6 +245,13 @@ Bring the Slice page's plate up to what desktop slicers offer
   (that stage is GCC 13; 26.04's GCC 15 fails linking: "bytecode stream
   ... generated with LTO version 13.1 instead of the expected 15.1").
   Context: `~/farmslicer-model-edit-docker` with `Dockerfile.local`.
+- The section's "longest direction" used to be the widest of 18 sampled
+  directions: for a 60 x 20 bar that is the diagonal (63 mm), so a
+  dovetail key ran corner to corner. Now the principal axis of the
+  face's area (second moments).
+- The ops checkout is shared and dirty: pin changes go through a
+  worktree of origin/master (`bun install` there, or lefthook fails:
+  "Could not find an existing 'lefthook' binary").
 - Guide page (`web/src/pages/Guide.tsx:94`) says Slice takes OBJ and STEP,
   but the picker takes STL and 3MF only.
 
@@ -317,11 +324,21 @@ Bring the Slice page's plate up to what desktop slicers offer
   origin/master (other threads' local commits stay theirs to push) as
   `7a415db`, with a fix: the multi-colour changelog entry shared the id
   "2026-11-14" with Roles (now "2026-11-14f"; same fix on local master).
-- [ ] Phase 9 (current): multi-select, measure, dovetail and snap
-  connectors, dragging the cut plane in 3D, changes by height per plate.
-  The user called all of these critical (2026-11-14).
-- [ ] Deploy: ops pin of the image CI builds from `7a415db` (user OK'd
-  deploying, 2026-11-14).
+- [x] Phase 9 code (2026-11-14), local commits: `dce1d24` snap and
+  dovetail connectors + the cut plane's arrow and tilt rings (+ `shift`:
+  a steep plane moves sideways; before, a vertical cut always went
+  through the part's centre); `99c0470` changes by height per plate
+  (`plate` field, `fs_version.height_change_plates`); `9f9330a`
+  multi-select (Ctrl+click, Ctrl+drag box, Ctrl+A, group move, merge) and
+  measure (U). Unit tests: 33 model tests; cargo test 194 passed, e2e
+  model-3mf + placement exit 0 on buildhost.
+- [ ] Phase 9 checks (current): real image build, a two-plate slice with a
+  change on plate 2 only, the headless browser run
+  (`ui-test5.mjs`: group select/move/delete/box/merge, measure, arrow
+  drag, dovetail + snap cut, slice).
+- [ ] Deploy: ops `1def164e` pins `7a415db` (digest `sha256:e4e9b0f0…`;
+  user OK'd deploying, 2026-11-14); "Server Deploys" run 43621505382.
+  Phase 9 isn't in it: it needs another push and pin.
 
 ## Open questions for the user
 
