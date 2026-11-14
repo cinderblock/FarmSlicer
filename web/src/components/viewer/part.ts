@@ -283,7 +283,8 @@ export class PartShape {
       mesh.matrixAutoUpdate = false;
       mesh.matrix.fromArray(v.matrix);
       const info: MeshInfo = { role: "volume", volumeId: v.id, volumeType: v.type, overhangs: v.type === "part" };
-      mesh.userData = { ...info, base: material };
+      // (Only plain data in userData: three's clone copies it through JSON.)
+      mesh.userData = { ...info };
       // Non-parts draw after the parts, so the parts show through them.
       if (v.type !== "part") mesh.renderOrder = 1;
       content.add(mesh);
@@ -322,6 +323,11 @@ export class PartShape {
 
   get name(): string {
     return this.object.name;
+  }
+
+  /** The material volume `id` is drawn with (shared by every copy). */
+  material(id: string): THREE.Material | undefined {
+    return this.materials.get(id);
   }
 
   /** The mesh showing volume `id` in the template (copies have their own). */
@@ -467,7 +473,12 @@ export class Part {
     this.meshes = [];
     this.content.traverse((child) => {
       const mesh = child as THREE.Mesh;
-      if (mesh.isMesh && meshInfo(mesh)?.role === "volume") this.meshes.push(mesh);
+      if (!mesh.isMesh) return;
+      const role = meshInfo(mesh)?.role;
+      if (role === "volume") this.meshes.push(mesh);
+      // Paint lies on the surface: picking goes to the volume under it
+      // (clones don't keep the template's no-op raycast).
+      if (role === "paint") mesh.raycast = () => {};
     });
     this.applyPaintView();
     const look = this.look;
@@ -672,7 +683,8 @@ export class Part {
     for (const mesh of this.meshes) {
       const info = meshInfo(mesh);
       if (info?.volumeType !== "part") continue;
-      mesh.material = look === "error" ? errorMaterial : (mesh.userData.base as THREE.Material);
+      const base = info.volumeId ? this.shape.material(info.volumeId) : undefined;
+      mesh.material = look === "error" ? errorMaterial : (base ?? mesh.material);
     }
   }
 
