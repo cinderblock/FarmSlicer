@@ -7,6 +7,9 @@ import Bed from "./viewer/Bed";
 import { FaceTool, MoveGizmo, RotateGizmo } from "./viewer/Gizmo";
 import { useBodyDrag, type GizmoProps, type Guide, type Tool } from "./viewer/drag";
 import { arrange, arrangeOnPlates, fillCopies, findFreeSpot, overlapping } from "./viewer/layout";
+
+/** Room kept round a piece cut to fit (mm): the skirt, a brim. */
+const FIT_MARGIN = 6;
 import type { SupportCheck } from "./viewer/overhangs";
 import { DEFAULT_BED, Part, PartShape, sceneBed, type Bed as BedShape, type Fit, type SceneBed } from "./viewer/part";
 import { applyPaint, History, restore, sameSnapshot, snapshot, type Change, type PlateSnapshot } from "./viewer/history";
@@ -16,7 +19,16 @@ import ObjectPanel from "./viewer/ObjectPanel";
 import { PaintControls, PaintSurface } from "./viewer/PaintTool";
 import { CutControls, CutPlane } from "./viewer/CutTool";
 import { cutNormal, DEFAULT_CUT, type CutSettings } from "./viewer/cutSettings";
-import { addConnectors, connectorPoints, cutObject, cutSection, planeInFrame, type Plane } from "../model/cut";
+import {
+  addConnectors,
+  connectorPoints,
+  cutIntoPieces,
+  cutObject,
+  cutSection,
+  fitPlanes,
+  planeInFrame,
+  type Plane,
+} from "../model/cut";
 import { mergeInto, splitToObjects } from "../model/ops";
 import { DEFAULT_PAINT, PAINT_TOOLS, type PaintSettings } from "./viewer/paintSettings";
 import { ENFORCER, type PaintKind } from "../model/paint";
@@ -738,6 +750,82 @@ export default function ModelViewer({
     [selected, parts, replaceModel],
   );
 
+  /** How long a piece may be along each scene axis to fit the printer (room left for plugs). */
+  const fitLimits = useCallback((): [number, number, number] => {
+    const plug = cutSettings.connector.kind === "plug" ? cutSettings.connector.depth : 0;
+    const w = shape.max.x - shape.min.x - FIT_MARGIN - plug;
+    const d = shape.max.y - shape.min.y - FIT_MARGIN - plug;
+    const h = shape.height > 0 ? shape.height - 1 - plug : Infinity;
+    return [w, d, h];
+  }, [shape, cutSettings]);
+
+  /** Does the part need cutting to fit the printer at all? */
+  const tooBig = useCallback(
+    (p: Part) => {
+      const size = p.worldBox().getSize(new THREE.Vector3());
+      const [w, d, h] = fitLimits();
+      return size.x > w || size.y > d || size.z > h;
+    },
+    [fitLimits],
+  );
+
+  /**
+   * Cut the part (this copy) into as few pieces as fit the printer, joined
+   * by the cut tool's connectors (one per cut at least: plugs unless it
+   * says dowels), and pack them onto plates of their own.
+   */
+  const cutToFit = useCallback(
+    (part: Part) => {
+      const frame = objectFrame(part);
+      const planes = fitPlanes(part.shape.object, Float64Array.from(frame.elements), fitLimits());
+      if (planes.length === 0) {
+        setNotice({ text: "It fits the printer as it is" });
+        return;
+      }
+      // The pieces always get connectors (the cut tool's kind and number, one at least).
+      const connector = { spec: cutSettings.connector, count: Math.max(1, cutSettings.count) };
+      const { pieces, pins, openLoops } = cutIntoPieces(part.shape.object, planes, connector);
+      const made: Part[] = [];
+      for (const o of [...pieces, ...pins]) {
+        const s = new PartShape(o, null, colorsRef.current);
+        const p = new Part(s);
+        if (pieces.includes(o)) {
+          p.setScale(part.scale.clone());
+          p.setRotation(part.quaternion.clone());
+          const mid = s.offset.clone().negate().applyMatrix4(frame);
+          p.setCenter(mid.x, mid.y);
+        }
+        made.push(p);
+      }
+      const groups = arrangeOnPlates(made, shape);
+      if (!groups) {
+        setNotice({ text: "A piece still doesn't fit: turn the part, or cut it by hand", bad: true });
+        return;
+      }
+      const rest = parts.filter((p) => p !== part);
+      // The pieces' plates: the part's own if nothing else is on it, then new ones.
+      const alone = !rest.some((p) => p.plate === part.plate);
+      let next = plateCount;
+      groups.forEach((group, i) => {
+        const plate = i === 0 && alone ? part.plate : next++;
+        for (const p of group) p.setPlate(plate);
+      });
+      setPlateCount(next);
+      setPlate([...rest, ...made], "Cut to fit");
+      setActive(groups[0][0]?.plate ?? active);
+      setSelectedId(made[0]?.id ?? null);
+      setTool("none");
+      setSettled((n) => n + 1);
+      setNotice({
+        text:
+          `Cut into ${pieces.length} pieces${pins.length ? " and dowel pins" : ""}, on ${groups.length} ${groups.length === 1 ? "plate" : "plates"}` +
+          (openLoops ? " (the model isn't closed: some cut faces have holes)" : ""),
+        bad: openLoops > 0,
+      });
+    },
+    [fitLimits, cutSettings, shape, parts, plateCount, active, setPlate],
+  );
+
   /** Cut every copy of the selected part's model; the halves take their place. */
   const doCut = useCallback(() => {
     if (!selected) return;
@@ -1382,6 +1470,14 @@ export default function ModelViewer({
           {problemHere ? (
             <div className="viewer-fit-warning">
               {problemHere} It can't be sliced like this.
+              {(() => {
+                const big = shown.find((p) => tooBig(p));
+                return big ? (
+                  <button onClick={() => cutToFit(big)} title="Cut it into as few pieces as fit, with plugs to join them">
+                    Cut to fit
+                  </button>
+                ) : null;
+              })()}
               {shown.length > 1 ? (
                 <button onClick={arrangeAll}>Arrange</button>
               ) : (
@@ -1417,6 +1513,7 @@ export default function ModelViewer({
           onChange={setCutSettings}
           maxHeight={selected.worldBox().max.z}
           onCut={doCut}
+          onCutToFit={tooBig(selected) ? () => cutToFit(selected) : null}
           canConnect={cutSettings.keep === "both"}
         />
       )}

@@ -29,6 +29,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Scale parts (all together or along one axis, by percent or to a size in millimetres) and mirror them. Each copy on the plate can be scaled on its own.",
       "Paint on models: filament colours, where supports must or mustn't go, where seams go, and fuzzy skin. Brush with a circle or a sphere, paint whole triangles, fill a smooth region or a region of one colour, or colour a band of heights.",
       "Cut a model on a plane at any height and angle: keep both halves or one, turn the top half onto its cut face, and add plugs or dowels (with a gap for glue) so the halves fit back together.",
+      "A model too big for the printer: Cut to fit cuts it into as few pieces as fit, joined by plugs or dowels, and lays them out over as many plates as they need.",
+      "Split a model that's several pieces into models or parts, and merge two models into one.",
       "Undo and redo every change on the plate (Ctrl+Z, Ctrl+Shift+Z).",
       "The Objects panel lists the models on the plate and what they're made of: rename them, add modifiers, negative volumes and support enforcers or blockers, and give a model or a modifier its own settings.",
     ],

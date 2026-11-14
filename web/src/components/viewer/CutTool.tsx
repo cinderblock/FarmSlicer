@@ -80,6 +80,7 @@ export function CutControls({
   onChange,
   maxHeight,
   onCut,
+  onCutToFit,
   canConnect,
 }: {
   settings: CutSettings;
@@ -87,6 +88,8 @@ export function CutControls({
   /** The part's height on the plate (mm). */
   maxHeight: number;
   onCut: () => void;
+  /** Cut into as many pieces as it takes to fit the printer (null: it fits). */
+  onCutToFit: (() => void) | null;
   /** Both halves are kept: connectors make sense. */
   canConnect: boolean;
 }) {
@@ -156,6 +159,15 @@ export function CutControls({
         <button className="btn-sm btn-accent" onClick={onCut}>
           Cut
         </button>
+        {onCutToFit && (
+          <button
+            className="btn-sm"
+            onClick={onCutToFit}
+            title="Too big for the printer: cut it into as few pieces as fit, with these connectors"
+          >
+            Cut to fit
+          </button>
+        )}
         <span className="paint-hint">Every copy of the model is cut · Esc leaves the tool</span>
       </div>
     </div>

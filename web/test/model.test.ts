@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "fs";
 import { zipSync } from "fflate";
-import { makeObject, makeVolume, usedFilaments, isPlain } from "../src/model/document";
+import { makeObject, makeVolume, objectBounds, usedFilaments, isPlain } from "../src/model/document";
 import {
   connectedComponents,
   faceNeighbors,
@@ -441,5 +441,37 @@ describe("split and merge", () => {
     expect(merged.volumes.length).toBe(2);
     expect(merged.volumes[1].matrix[12]).toBe(5);
     expect(merged.volumes[1].extruder).toBe(3);
+  });
+});
+
+describe("cut to fit", () => {
+  test("a 300 mm bar in 250 mm makes two halves, joined", async () => {
+    const { fitPlanes, cutIntoPieces, DEFAULT_CONNECTOR } = await import("../src/model/cut");
+    const { box } = await import("../src/model/primitives");
+    const o = makeObject("Bar", [makeVolume(box(300, 40, 30))]);
+    const planes = fitPlanes(o, identity(), [250, 250, 250]);
+    expect(planes.length).toBe(1);
+    expect(planes[0].normal).toEqual([1, 0, 0]);
+    const { pieces, pins } = cutIntoPieces(o, planes, { spec: DEFAULT_CONNECTOR, count: 1 });
+    expect(pieces.map((p) => p.name)).toEqual(["Bar 1/2", "Bar 2/2"]);
+    expect(pins).toEqual([]);
+    for (const p of pieces) {
+      const b = objectBounds(p);
+      // Half the bar, and the peg standing out of one half.
+      expect(b.max[0] - b.min[0]).toBeLessThanOrEqual(150 + DEFAULT_CONNECTOR.depth + 0.01);
+    }
+    // One half has the peg, the other the hole.
+    expect(pieces.flatMap((p) => p.volumes.map((v) => v.type)).sort()).toEqual(["negative", "part", "part", "part"]);
+  });
+
+  test("a big cube in a small printer: a grid of pieces", async () => {
+    const { fitPlanes, cutIntoPieces } = await import("../src/model/cut");
+    const o = makeObject("Cube", [makeVolume(cube(100))]);
+    const planes = fitPlanes(o, identity(), [60, 60, 1000]);
+    expect(planes.length).toBe(2);
+    const { pieces } = cutIntoPieces(o, planes, null);
+    expect(pieces.length).toBe(4);
+    const total = pieces.reduce((v, p) => v + signedVolume(p.volumes[0].mesh), 0);
+    expect(total).toBeCloseTo(1e6, -1);
   });
 });

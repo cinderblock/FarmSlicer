@@ -494,3 +494,83 @@ export function connectorPoints(section: { centroid: Vec3; points: Vec3[] }, pla
   }
   return out;
 }
+
+// ---- Cutting to fit the printer ----------------------------------------------
+
+/**
+ * Planes (in the object's coordinates) that cut the model, as it sits in
+ * the scene (`toWorld`: the object's frame to the scene), into pieces at
+ * most `fit` long along each scene axis: evenly spaced, as few as do.
+ * Plugs stand out of their piece by their depth: leave room for it in
+ * `fit`.
+ */
+export function fitPlanes(o: ModelObject, toWorld: Mat4, fit: Vec3): Plane[] {
+  const box = { min: [Infinity, Infinity, Infinity] as Vec3, max: [-Infinity, -Infinity, -Infinity] as Vec3 };
+  for (const v of o.volumes) {
+    if (v.type !== "part") continue;
+    const m = multiply(toWorld, v.matrix);
+    const p = v.mesh.positions;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = [
+        m[0] * p[i] + m[4] * p[i + 1] + m[8] * p[i + 2] + m[12],
+        m[1] * p[i] + m[5] * p[i + 1] + m[9] * p[i + 2] + m[13],
+        m[2] * p[i] + m[6] * p[i + 1] + m[10] * p[i + 2] + m[14],
+      ];
+      for (let k = 0; k < 3; k++) {
+        box.min[k] = Math.min(box.min[k], x[k]);
+        box.max[k] = Math.max(box.max[k], x[k]);
+      }
+    }
+  }
+  const planes: Plane[] = [];
+  for (let k = 0; k < 3; k++) {
+    const size = box.max[k] - box.min[k];
+    if (!(fit[k] > 0) || !Number.isFinite(fit[k]) || size <= fit[k]) continue;
+    const pieces = Math.ceil(size / fit[k]);
+    for (let i = 1; i < pieces; i++) {
+      const point: Vec3 = [0, 0, 0];
+      point[k] = box.min[k] + (size * i) / pieces;
+      const normal: Vec3 = [0, 0, 0];
+      normal[k] = 1;
+      planes.push(planeInFrame({ point, normal }, toWorld));
+    }
+  }
+  return planes;
+}
+
+/**
+ * Cut a model on every plane in turn. With `connector`, each cut gets
+ * `count` of them where its face is wide enough (three connectors across,
+ * at least). The pieces are numbered; dowel pins come as models of their
+ * own.
+ */
+export function cutIntoPieces(
+  o: ModelObject,
+  planes: Plane[],
+  connector: { spec: ConnectorSpec; count: number } | null,
+): { pieces: ModelObject[]; pins: ModelObject[]; openLoops: number } {
+  let pieces = [o];
+  const pins: ModelObject[] = [];
+  let openLoops = 0;
+  for (const plane of planes) {
+    const next: ModelObject[] = [];
+    for (const piece of pieces) {
+      const cut = cutObject(piece, plane);
+      openLoops += cut.openLoops;
+      let halves: { upper: ModelObject | null; lower: ModelObject | null } = cut;
+      if (connector && connector.count > 0 && cut.upper && cut.lower) {
+        const section = cutSection(piece, plane);
+        const room = connector.spec.size * 3;
+        if (section && section.area >= room * room) {
+          const joined = addConnectors(cut, plane, connectorPoints(section, plane, connector.count), connector.spec);
+          halves = joined;
+          if (joined.pins) pins.push(joined.pins);
+        }
+      }
+      for (const h of [halves.lower, halves.upper]) if (h) next.push(h);
+    }
+    pieces = next;
+  }
+  if (pieces.length > 1) pieces = pieces.map((p, i) => ({ ...p, name: `${o.name} ${i + 1}/${pieces.length}` }));
+  return { pieces, pins: pins.map((p, i) => ({ ...p, name: `${o.name} dowels${pins.length > 1 ? ` ${i + 1}` : ""}` })), openLoops };
+}
