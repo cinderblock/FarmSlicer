@@ -311,6 +311,19 @@ There are no passwords and no secrets to configure.
   API keys until it's reinstated; its history stays.
 - **Audit log** (`/audit`): who changed accounts, roles, groups, site
   settings and printer access, and what changed.
+- **Folders** (the Library page, `?lib=me|<group>|all&folder=`): each
+  library (yours: what's charged to no group; a group's: what's charged
+  to it) has a tree of folders. A folder holds only its own library's
+  jobs and projects; moving an item to another group takes it out.
+  Group folders are arranged by holders of the group's `folders`
+  capability; anyone who can change an item files it. Deleting a folder
+  moves its contents up a level.
+- **Labels** (`/labels`, and the tag button in the Jobs, Projects,
+  Printers and Groups lists, which filter by them): personal labels (only
+  their owner sees them; they go on anything the owner can see), group
+  labels (made by holders of the group's `labels` capability, seen by its
+  members and its subgroups') and site labels (`labels.manage`, everyone).
+  Shared labels go on what you may change.
 - **Printer access** (`/access`): rules for a printer, a pool, a printer
   model or every printer say whether someone (everyone, a person, a
   group's members, a site role, or holders of a **certification**) may
@@ -586,6 +599,8 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/invite` | accounts (`users.view`; changes `users.manage`, only for accounts with no permission you lack): `{role, quotas, remote_access, suspended, suspend_reason}` |
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}` | roles and the permission lists (`{roles, capabilities: {site, group}}`, anyone signed in); custom roles `{name, scope: site\|group, description, caps}` (`roles.manage`; group roles need `groups.manage_all`); a role someone holds can't be deleted |
 | `GET /api/printer-access`, `GET /api/printer-access/mine`, `POST /api/printer-access/rules`, `PUT/DELETE /api/printer-access/rules/{id}`, `PUT /api/printer-access/order` | printer access rules (`printers.manage`; reading also `certifications.grant`): `{target_kind: printer\|pool\|model\|site, target_id, who: {kind: everyone\|user\|group\|role\|certified, id}, effect: allow\|approve\|deny, approvers, note}` (a user by id or username); `mine`: where the caller stands per printer, and their certifications. Job targets carry `access` per printer, queue fits `needs_approval` |
+| `GET/POST /api/folders`, `PUT/DELETE /api/folders/{id}`, `PUT /api/folders/items` | folders of the libraries the caller sees, the libraries, and where items are filed (`items: {job\|project: {id: folder}}`); `{name, parent_id, library: user\|group, group_id}`; rename/move `{name, parent_id}`; file `{kind, item_id, folder_id}` (null = the top) |
+| `GET/POST /api/labels`, `PUT/DELETE /api/labels/{id}`, `PUT /api/labels/{id}/items` | labels the caller sees and what they're on (`links: {job\|project\|printer\|group: {id: [label]}}`, only items the caller sees); `{name, color, scope: user\|group\|site, group_id}`; `{kind, target_id, on}` puts one on or takes it off |
 | `POST /api/certifications`, `PUT/DELETE /api/certifications/{id}`, `POST /api/certifications/{id}/holders`, `DELETE /api/certifications/{id}/holders/{user_id}` | certifications `{name, description, valid_days}` (`printers.manage`; one a rule names can't be deleted); sign someone off `{username, valid_days, note}` or take it back (`certifications.grant`) |
 | `GET /api/audit?actor=&action=<prefix>&target_kind=&target=&before=&limit=` | the audit log, newest first, `next_before` for the next page (`audit.view`) |
 | `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue; a machine's filaments say what each is (`material`, `support`, `soluble`, `tray_material` as printers name it, `price_per_kg`) |

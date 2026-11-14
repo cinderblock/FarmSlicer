@@ -362,6 +362,9 @@ async fn delete_group(
         .db
         .delete_group(&id)
         .map_err(|e| err(StatusCode::CONFLICT, e))?;
+    state.db.delete_label_links_for("group", &id);
+    state.db.delete_labels_of("group", &id);
+    state.db.delete_library_folders("group", &id);
     audit::record(&state.db, &user, "group.delete", group_target(&g), json!({"parent_id": g.parent_id}));
     Ok(StatusCode::NO_CONTENT)
 }

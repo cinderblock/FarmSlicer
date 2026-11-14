@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { GroupSummary } from "../groups";
 import { roleName, useRoles } from "../roles";
+import { ItemLabels } from "./Labels";
 
 /** Groups with their path, member count and the viewer's role. */
 export default function GroupTable({ groups }: { groups: GroupSummary[] }) {
@@ -19,6 +20,7 @@ export default function GroupTable({ groups }: { groups: GroupSummary[] }) {
           <tr key={c.id}>
             <td>
               <Link to={`/groups/${c.id}`}>{c.path}</Link>
+              <ItemLabels kind="group" id={c.id} />
               {c.description && <div className="hint">{c.description}</div>}
             </td>
             <td>{c.member_count}</td>

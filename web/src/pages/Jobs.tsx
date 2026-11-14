@@ -4,6 +4,8 @@ import { apiJson, useAuth } from "../auth";
 import { errorText, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
 import Icon from "../components/Icon";
+import { ItemLabels, LabelFilter } from "../components/Labels";
+import { labelsOn, useLabelFilter, useLabels } from "../labels";
 import PageHeader, { EmptyState, Skeleton } from "../components/PageHeader";
 import { GcodeChip } from "../components/GcodeCheck";
 import { formatCost, packageVerdict, type Prices } from "../printers";
@@ -102,6 +104,9 @@ export default function JobsPage() {
   const [dropping, setDropping] = useState(false);
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const labels = useLabels();
+  const labelled = useLabelFilter("job", labelFilter);
   const navigate = useNavigate();
   const jobsQuery = useJson<Job[]>("/api/jobs", rev);
   const jobs = jobsQuery.data ?? [];
@@ -179,7 +184,14 @@ export default function JobsPage() {
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
   const shownJob = (j: Job) =>
     STATUS_MATCH[statusFilter](j) &&
-    words.every((w) => `${j.model_name} ${j.username ?? ""} ${j.group_name ?? "personal"} ${j.printer_name ?? ""}`.toLowerCase().includes(w));
+    (!labelled || labelled.has(j.id)) &&
+    words.every((w) =>
+      `${j.model_name} ${j.username ?? ""} ${j.group_name ?? "personal"} ${j.printer_name ?? ""} ${labelsOn(labels, "job", j.id)
+        .map((l) => l.name)
+        .join(" ")}`
+        .toLowerCase()
+        .includes(w),
+    );
   const shown = jobs.filter(shownJob);
 
   const moveJob = async (id: string, groupId: string) => {
@@ -267,6 +279,7 @@ export default function JobsPage() {
               aria-label="Find a job"
             />
           </label>
+          <LabelFilter value={labelFilter} onChange={setLabelFilter} />
           <div className="segmented" role="group" aria-label="Status">
             {STATUS_FILTERS.map(([key, label]) => (
               <button key={key} className={statusFilter === key ? "active" : ""} aria-pressed={statusFilter === key} onClick={() => setStatusFilter(key)}>
@@ -393,6 +406,7 @@ export default function JobsPage() {
                           Not sliced
                         </span>
                       )}
+                      <ItemLabels kind="job" id={job.id} />
                     </div>
                   </td>
                   <td data-label="By">{job.username ?? "—"}</td>

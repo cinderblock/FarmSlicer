@@ -31,6 +31,7 @@ import ReportsPage from "./pages/Reports";
 import RolesPage from "./pages/Roles";
 import AuditPage from "./pages/Audit";
 import AccessPage from "./pages/Access";
+import LabelsPage from "./pages/Labels";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
@@ -87,6 +88,7 @@ function Gate() {
         <Route path="account" element={<AccountPage />} />
         <Route path="groups" element={<GroupsPage />} />
         <Route path="groups/:id" element={<GroupPage />} />
+        <Route path="labels" element={<LabelsPage />} />
         <Route path="users" element={only(can("users.view"), <UsersPage />)} />
         <Route path="roles" element={only(can("roles.manage") || can("users.manage"), <RolesPage />)} />
         <Route path="audit" element={only(can("audit.view"), <AuditPage />)} />

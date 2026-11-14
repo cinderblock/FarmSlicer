@@ -87,6 +87,8 @@ capabilities!(Cap {
         "Every feedback report and error, and changing their status.";
     IntegrationsManage = "integrations.manage", "Manage integrations",
         "Webhooks, every integration key and every group's usage report.";
+    LabelsManage = "labels.manage", "Site labels",
+        "Make, rename and delete the labels everyone sees.";
     ReportsView = "reports.view", "Reports",
         "The Reports page: what the Slice page proposed against what jobs were made with.";
     AuditView = "audit.view", "Audit log",
@@ -114,6 +116,10 @@ capabilities!(GroupCap {
         "Pause, resume and stop the group's prints and manage its queued plates.";
     PrintsUnrestricted = "prints.unrestricted", "No print rules",
         "Not held to the group's print rules or upload policy.";
+    Folders = "folders", "Folders",
+        "Make, rename, move and delete folders in the group's library.";
+    Labels = "labels", "Labels",
+        "Make, rename and delete the group's labels (its members and subgroups see them).";
     Integrations = "integrations", "Integrations",
         "The group's integration keys and usage report.";
 });

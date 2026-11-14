@@ -442,6 +442,22 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   audit log (`audit::record`), `GET /api/audit`. Web: `web/src/roles.ts`,
   `pages/Roles.tsx`, `pages/Audit.tsx`; `useAuth().can(cap)`, nav items
   carry `cap`. Plan: `plans/organization-and-access.md`
+- `src/folders.rs` — library folders (`folders`, `folder_items`; storage
+  `src/db/folders.rs`): a library is `("user", creator)` for items with no
+  group or `("group", id)` (`library_of`); a folder holds only its
+  library's items; `GET /api/folders` returns folders, libraries and
+  placements, joined in `web/src/pages/Library.tsx` (file browser, drag
+  to file). Changing a job's or project's group clears its placement;
+  deleting a folder moves its contents to its parent
+- `src/labels.rs` — labels (`labels`, `label_links`; storage
+  `src/db/labels.rs`): scope user | group | site, `can_see` /
+  `can_manage`, putting a shared label on an item needs `edits_item`.
+  `GET /api/labels` returns the links too, filtered to what the caller
+  sees, so list endpoints carry no labels: the web app joins them
+  (`web/src/labels.ts` store, `components/Labels.tsx` chips, picker and
+  filter, `pages/Labels.tsx`). Colours are names mapped to `--label-*`
+  tokens. Deleting a job, project, printer or group drops its links; a
+  group's or account's own labels go with it
 - `src/access.rs` — printer access: rules (`printer_access`: target
   printer|pool|model (= `machine_profile`)|site, principal, allow|approve|
   deny, approvers), first match from the printer down (`decide`);

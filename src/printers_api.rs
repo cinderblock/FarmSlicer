@@ -190,6 +190,7 @@ async fn delete_printer(
 ) -> Result<StatusCode, ApiError> {
     auth::require(&user, Cap::PrintersManage)?;
     state.db.delete_access_rules_for("printer", &id);
+    state.db.delete_label_links_for("printer", &id);
     if !state.db.delete_printer(&id) {
         return Err(not_found());
     }

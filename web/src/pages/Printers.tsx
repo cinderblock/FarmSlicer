@@ -1,3 +1,5 @@
+import { LabelFilter } from "../components/Labels";
+import { useLabelFilter } from "../labels";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../auth";
 import { localDateTime, useJson } from "../api";
@@ -134,6 +136,8 @@ export default function PrintersPage() {
     a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, undefined, { numeric: true }),
   );
   const [show, setShow] = useState<SummaryKey>("all");
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const labelled = useLabelFilter("printer", labelFilter);
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState("");
@@ -338,6 +342,7 @@ export default function PrintersPage() {
               </button>
             );
           })}
+          <LabelFilter value={labelFilter} onChange={setLabelFilter} />
         </div>
       )}
 
@@ -579,7 +584,12 @@ export default function PrintersPage() {
         </EmptyState>
       ) : (
         areas.map((area) => {
-          const shown = printers.filter((p) => p.area === area && (show === "all" || toneGroup(statuses[p.id]) === show));
+          const shown = printers.filter(
+            (p) =>
+              p.area === area &&
+              (show === "all" || toneGroup(statuses[p.id]) === show) &&
+              (!labelled || labelled.has(p.id)),
+          );
           if (shown.length === 0) return null;
           return (
           <section key={area} className="printer-area">

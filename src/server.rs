@@ -493,6 +493,10 @@ async fn update_job(
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
         }
     }
+    if body.group_id != job.group_id {
+        // Another library: out of its folder.
+        state.db.file_item("job", &id, None, &user.id);
+    }
     state.db.set_job_group(&id, body.group_id.as_deref());
     Ok(Json(json!(state.db.get_job(&id))))
 }
@@ -626,6 +630,8 @@ fn delete_one_job(state: &AppState, user: &User, id: &str) -> Result<(), ApiErro
         return Err(api_err(StatusCode::CONFLICT, "a print of this job is waiting or in progress"));
     }
     let files = state.db.delete_job(id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "job not found"))?;
+    state.db.delete_label_links_for("job", id);
+    state.db.file_item("job", id, None, "");
     for f in files {
         // Only ever files the server made, under its data directory.
         let path = std::path::Path::new(&f);
@@ -1965,6 +1971,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::reports_api::routes())
         .merge(crate::roles_api::routes())
         .merge(crate::access_api::routes())
+        .merge(crate::labels::routes())
+        .merge(crate::folders::routes())
         .merge(crate::audit::routes())
         .route(
             "/api/custom-profiles",

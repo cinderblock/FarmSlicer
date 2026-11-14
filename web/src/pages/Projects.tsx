@@ -1,6 +1,8 @@
 // /projects: what people need printed, most urgent first, and a form for a
 // new one.
 
+import { ItemLabels, LabelFilter } from "../components/Labels";
+import { useLabelFilter } from "../labels";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { apiJson } from "../auth";
@@ -23,6 +25,8 @@ export default function ProjectsPage() {
   if (search.trim()) params.set("q", search.trim());
   const projects = useJson<Project[]>(`/api/projects?${params}`, rev);
   const [creating, setCreating] = useState(false);
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const labelled = useLabelFilter("project", labelFilter);
 
   return (
     <div className="page">
@@ -57,6 +61,7 @@ export default function ProjectsPage() {
             aria-label="Search projects"
           />
         </label>
+        <LabelFilter value={labelFilter} onChange={setLabelFilter} />
         <div className="segmented" role="group" aria-label="Which projects">
           <button className={show === "active" ? "active" : ""} aria-pressed={show === "active"} onClick={() => setShow("active")}>
             In progress
@@ -95,10 +100,11 @@ export default function ProjectsPage() {
             </tr>
           </thead>
           <tbody>
-            {projects.data.map((p) => (
+            {projects.data.filter((p) => !labelled || labelled.has(p.id)).map((p) => (
               <tr key={p.id}>
                 <td className="cell-title">
                   <Link to={`/projects/${p.id}`}>{p.name}</Link>
+                  <ItemLabels kind="project" id={p.id} />
                   {p.priority !== 0 && <span className="hint"> · priority {p.priority}</span>}
                   {p.external_ref && <div className="hint">{p.external_ref}</div>}
                 </td>

@@ -268,6 +268,8 @@ async fn create_project(
             if let Err(e) = add_item(&state, &user, &project, i) {
                 // All or nothing: a half-made order helps nobody.
                 state.db.delete_project(&project.id);
+                state.db.delete_label_links_for("project", &project.id);
+                state.db.file_item("project", &project.id, None, "");
                 return Err(e);
             }
         }
@@ -401,6 +403,10 @@ async fn update_project(
         .db
         .update_project(&id, &name, client_ref.as_deref(), external_ref.as_deref(), priority, due.as_deref(), &notes, group.as_deref())
         .map_err(|e| api_err(StatusCode::CONFLICT, e))?;
+    if group != p.group_id {
+        // Another library: out of its folder.
+        state.db.file_item("project", &id, None, &user.id);
+    }
     let p = state.db.get_project(&id).expect("project exists");
     Ok(Json(project_json(&state, &tree, &viewer, &p)))
 }
@@ -449,6 +455,8 @@ async fn delete_project(
 ) -> Result<StatusCode, ApiError> {
     editable(&state, &user, &scope, &id)?;
     state.db.delete_project(&id);
+    state.db.delete_label_links_for("project", &id);
+    state.db.file_item("project", &id, None, "");
     Ok(StatusCode::NO_CONTENT)
 }
 

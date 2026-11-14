@@ -1,3 +1,4 @@
+import { ItemLabels } from "./Labels";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { printPath } from "../links";
@@ -159,6 +160,7 @@ export default function PrinterCard({
               auto
             </span>
           )}
+          <ItemLabels kind="printer" id={printer.id} />
         </h3>
         <span className={`printer-state tone-${tone}`}>
           <span className={`status-dot status-${tone}`} />

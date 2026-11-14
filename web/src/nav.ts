@@ -31,6 +31,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: "/profiles", label: "Profiles", icon: "profiles", keywords: "filament process machine presets" },
       { to: "/groups", label: "Groups", icon: "groups", keywords: "teams members quotas" },
+      { to: "/labels", label: "Labels", icon: "tag", keywords: "tags colours sort organize" },
       { to: "/guide", label: "Guide", icon: "guide", keywords: "help how to docs" },
     ],
   },

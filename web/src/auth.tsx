@@ -22,6 +22,7 @@ export type SiteCap =
   | "gcode.custom"
   | "feedback.triage"
   | "integrations.manage"
+  | "labels.manage"
   | "reports.view"
   | "audit.view";
 
@@ -37,6 +38,8 @@ export type GroupCap =
   | "prints.approve"
   | "prints.control"
   | "prints.unrestricted"
+  | "labels"
+  | "folders"
   | "integrations";
 
 export interface User {

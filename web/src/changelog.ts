@@ -48,6 +48,15 @@ export const CHANGELOG: ChangelogEntry[] = [
     fixes: "3MF files slice on the server again (they failed with \"the file is empty\").",
   },
   {
+    id: "2026-11-14d",
+    date: "2026-11-14",
+    title: "Labels and folders",
+    highlights: [
+      "The Library is now a file browser: your sliced jobs and projects, and each of your groups', in folders. Drag a job or project onto a folder (or use its Move to) to file it; a group's managers arrange its folders.",
+      "Put coloured labels on jobs, projects, printers and groups with the tag button in each list, and filter the lists by them. Your own labels are only yours; a group's managers can make labels its members share, and admins labels everyone sees. The Labels page renames, recolours and deletes them.",
+    ],
+  },
+  {
     id: "2026-11-14c",
     date: "2026-11-14",
     title: "Who may use which printer",

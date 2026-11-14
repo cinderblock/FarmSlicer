@@ -201,8 +201,10 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 3. ~~Design review~~ (approved 2026-11-14).
 4. ~~Slice 1~~ (2026-11-14).
 5. ~~Slice 2~~ (2026-11-14).
-6. **← current** Slice 3: labels on jobs, projects, printers, groups.
-   Then slices 4–6.
+6. ~~Slice 3~~ (2026-11-14).
+7. ~~Slice 4~~ (2026-11-14).
+8. **← current** Slice 5: sharing (items, folders, cross-group libraries,
+   public links). Then slice 6.
 
 ## Findings / gotchas
 
@@ -233,6 +235,23 @@ Replace the single admin bit with **capabilities** granted by **roles**.
   plate whose fit says `needs_approval`. Held prints record what held
   them (`print_access_holds`); `can_approve_print` needs every reason
   liftable by the viewer. Rules on a deleted printer or pool go with it.
+- Slice 3 as built (2026-11-14): labels come with their links from one
+  endpoint (`GET /api/labels`, filtered to what the caller sees) and the
+  web app joins them to its lists, so no list endpoint changed. Personal
+  labels go on anything their owner sees; shared ones need the item's
+  edit rights. Colours are ten names mapped to `--label-*` tokens (both
+  themes). Not done: a `label:` filter in the command palette (lists have
+  a label filter instead; lists keep it in state, not the URL).
+- Slice 4 as built (2026-11-14): placements live in `folder_items`
+  (kind, item, folder), not a column on jobs/projects, so no job or
+  project query changed. A group library holds the group's own items
+  (not its subgroups'; each subgroup has its own). Members see a group's
+  folders but only the items they can see in them. The Library page lists
+  slices (finished jobs) and projects; "Everything I can see" keeps the
+  old flat list. New folders use the browser's prompt for a name.
+- `tests/moonraker-e2e.mjs` can take ~4 min at its end: the fake's
+  `close()` waits for an idle connection the server keeps open after the
+  printer is deleted. It passes; seen once (2026-11-14).
 - Shared working tree: other threads stage whole files (`git add file`),
   which can sweep this thread's hunks into their commits; check
   `git diff --cached` before they commit, and build from HEAD + this
@@ -261,8 +280,10 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 - [x] Slice 2: printer access, certifications, approvals
       (`tests/printer-access-e2e.mjs`; web Printer access page, Send
       dialog, queue, Account)
-- [ ] Slice 3: labels
-- [ ] Slice 4: folders
+- [x] Slice 3: labels (`tests/labels-e2e.mjs`; Labels page, chips,
+      picker and filters on Jobs, Projects, Printers, Groups)
+- [x] Slice 4: folders (`tests/folders-e2e.mjs`; Library page as a file
+      browser)
 - [ ] Slice 5: sharing and public links
 - [ ] Slice 6: sessions and devices
 
