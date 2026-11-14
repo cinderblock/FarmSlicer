@@ -72,12 +72,14 @@ SliceResult Slicer::slice(
     opts.overlay.logo_height = options.logo_height;
     opts.overlay.font_path = std::string(options.font_path);
     const size_t changes = options.height_z.size();
-    if (options.height_kind.size() == changes && options.height_filament.size() == changes)
+    if (options.height_kind.size() == changes && options.height_filament.size() == changes &&
+        options.height_plate.size() == changes)
         for (size_t i = 0; i < changes; ++i) {
             core::HeightChange h;
             h.z = options.height_z[i];
             h.kind = core::HeightChange::Kind(options.height_kind[i] <= 2 ? options.height_kind[i] : 0);
             h.filament = int(options.height_filament[i]);
+            h.plate = int(options.height_plate[i]);
             opts.height_changes.push_back(h);
         }
 

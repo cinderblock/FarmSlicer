@@ -718,6 +718,9 @@ pub struct HeightChange {
     pub kind: HeightChangeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filament: Option<u32>,
+    /// Only on this plate (1-based); none: on every plate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plate: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -752,8 +755,23 @@ fn parse_height_changes(text: &str, filaments: usize) -> Result<Vec<HeightChange
             (_, None) => {}
             (_, Some(_)) => return Err("height_changes: only filament changes name a filament".into()),
         }
+        if c.plate == Some(0) {
+            return Err("height_changes: plates are numbered from 1".into());
+        }
     }
     Ok(list)
+}
+
+/// Changes by height for a plate the job doesn't have are refused.
+fn check_height_change_plates(changes: &[HeightChange], plates: usize) -> Result<(), String> {
+    match changes.iter().find(|c| c.plate.is_some_and(|p| p as usize > plates)) {
+        Some(c) => Err(format!(
+            "height_changes: the change at {} mm is for plate {}, but the job has {plates}",
+            c.z,
+            c.plate.unwrap_or(0)
+        )),
+        None => Ok(()),
+    }
 }
 
 /// The most filaments a job may use (a plate's parts and supports; AMS
@@ -978,6 +996,7 @@ async fn create_job(
     } else {
         JobPlates::single(Some(Placement::parse(&placement_str).map_err(|e| bad(&e))?))
     };
+    check_height_change_plates(&inputs.height_changes, plate.plates.len()).map_err(|e| bad(&e))?;
     let proposed = if proposed_str.is_empty() {
         None
     } else if proposed_str.len() > MAX_PROPOSED_BYTES
@@ -1475,6 +1494,7 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
                 HeightChangeKind::Swap => 2,
             });
             options.height_filament.push(c.filament.unwrap_or(1));
+            options.height_plate.push(c.plate.unwrap_or(0));
         }
         let overlay = crate::overlay::overlay_for_job(state, &job);
         options.font_path = crate::overlay::font_path();
@@ -2032,6 +2052,18 @@ fn cache_control(service_worker: bool, res: &axum::response::Response) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn height_changes_on_one_plate() {
+        let list = parse_height_changes(r#"[{"z":5,"kind":"pause","plate":2},{"z":8,"kind":"swap"}]"#, 1).unwrap();
+        assert_eq!(list[0].plate, Some(2));
+        assert_eq!(list[1].plate, None);
+        assert!(check_height_change_plates(&list, 2).is_ok());
+        assert!(check_height_change_plates(&list, 1).unwrap_err().contains("plate 2"));
+        assert!(parse_height_changes(r#"[{"z":5,"kind":"pause","plate":0}]"#, 1).is_err());
+        // Every plate: not written out, so older jobs' inputs read the same.
+        assert!(!serde_json::to_string(&list[1]).unwrap().contains("plate"));
+    }
 
     #[test]
     fn pages_are_not_transformed() {

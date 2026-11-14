@@ -365,7 +365,7 @@ EMSCRIPTEN_KEEPALIVE const char* fs_version()
         // model with an engine that would ignore it), and a plate of several
         // parts with fs_stage_model for the further models, and several
         // plates (`plates`; their G-code goes into the package).
-        ",\"placement\":true,\"plate\":true,\"plates\":true,\"height_changes\":true}";
+        ",\"placement\":true,\"plate\":true,\"plates\":true,\"height_changes\":true,\"height_change_plates\":true}";
     return v.c_str();
 }
 
@@ -420,6 +420,7 @@ EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const ui
                        : kind == "swap"  ? farmslicer::core::HeightChange::Swap
                                          : farmslicer::core::HeightChange::Filament;
                 h.filament = c.value("filament", 1);
+                h.plate = c.value("plate", 0);
                 o.height_changes.push_back(h);
             }
         n.model_name = j.value("model_name", std::string());

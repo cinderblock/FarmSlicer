@@ -406,8 +406,8 @@ export default function ModelViewer({
   filamentCount?: number;
   /** A loaded file named its own colours for filaments 1..N. */
   onPalette?: (colors: string[]) => void;
-  /** Heights (mm) to show across the bed: the job's changes by height. */
-  heightMarks?: { z: number; color: string }[];
+  /** Heights (mm) to show across the bed: the job's changes by height (`plate`: only on that one, 1-based). */
+  heightMarks?: { z: number; color: string; plate?: number }[];
 }) {
   // Every part on every plate (`Part.plate`); the view shows the active one.
   const [parts, setParts] = useState<Part[]>([]);
@@ -1680,7 +1680,7 @@ export default function ModelViewer({
           paint={painting ? paintSettings : null}
           paintNow={paintNow}
           cut={cutPreview}
-          heightMarks={heightMarks}
+          heightMarks={heightMarks.filter((m) => !m.plate || m.plate === active + 1)}
           onSelect={select}
           onStroke={recordPaint}
           onCutSettings={setCutSettings}

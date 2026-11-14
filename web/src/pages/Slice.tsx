@@ -1304,6 +1304,7 @@ export default function SlicePage() {
   const supportThreshold = Number(profileValue("support_threshold_angle")) || 0;
   const offBed = !!layout && (layout.fit !== "inside" || layout.overlaps);
   const partCount = layout?.plates.reduce((n, p) => n + p.objects.length, 0) ?? 0;
+  const plateCount = Math.max(1, layout?.plates.length ?? 1);
 
   const handleCancelBrowserSlice = useCallback(() => {
     engineRef.current?.cancel();
@@ -1343,6 +1344,7 @@ export default function SlicePage() {
               onPalette={handlePalette}
               heightMarks={heightChanges.map((h) => ({
                 z: h.z,
+                plate: h.plate,
                 color: h.kind === "filament" ? displayColors[(h.filament ?? 1) - 1] ?? "#ffffff" : "#ffd23f",
               }))}
             />
@@ -1615,7 +1617,7 @@ export default function SlicePage() {
           </div>
 
           <div className="filament-slots" aria-label="Changes by height">
-            {heightChanges.length > 0 && <span className="filament-slot-name">Changes by height (every plate)</span>}
+            {heightChanges.length > 0 && <span className="filament-slot-name">Changes by height</span>}
             {heightChanges.map((h, i) => (
               <div className="filament-slot" key={i}>
                 <input
@@ -1640,7 +1642,9 @@ export default function SlicePage() {
                   onChange={(e) => {
                     const v = e.target.value;
                     const next: HeightChange =
-                      v === "pause" || v === "swap" ? { z: h.z, kind: v } : { z: h.z, kind: "filament", filament: Number(v.slice(1)) };
+                      v === "pause" || v === "swap"
+                        ? { z: h.z, kind: v, ...(h.plate ? { plate: h.plate } : {}) }
+                        : { z: h.z, kind: "filament", filament: Number(v.slice(1)), ...(h.plate ? { plate: h.plate } : {}) };
                     setHeightChanges((all) => all.map((x, j) => (j === i ? next : x)));
                   }}
                 >
@@ -1652,6 +1656,33 @@ export default function SlicePage() {
                   <option value="pause">Pause</option>
                   <option value="swap">Swap the spool</option>
                 </select>
+                {(plateCount > 1 || h.plate) && (
+                  <select
+                    value={h.plate ?? 0}
+                    aria-label="On which plate"
+                    title={h.plate && h.plate > plateCount ? "That plate is gone: pick another" : "On every plate, or just one"}
+                    aria-invalid={Boolean(h.plate && h.plate > plateCount)}
+                    onChange={(e) => {
+                      const plate = Number(e.target.value);
+                      setHeightChanges((all) =>
+                        all.map((x, j) => {
+                          if (j !== i) return x;
+                          const { plate: _, ...rest } = x;
+                          void _;
+                          return plate ? { ...rest, plate } : rest;
+                        }),
+                      );
+                    }}
+                  >
+                    <option value={0}>Every plate</option>
+                    {Array.from({ length: Math.max(plateCount, h.plate ?? 0) }, (_, p) => (
+                      <option key={p} value={p + 1}>
+                        Plate {p + 1}
+                        {p + 1 > plateCount ? " (gone)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   type="button"
                   className="btn-sm btn-ghost"
@@ -1676,7 +1707,7 @@ export default function SlicePage() {
                   ].sort((a, b) => a.z - b.z),
                 )
               }
-              title="From a height on: another filament, a pause, or a spool swap (on every plate)"
+              title="From a height on: another filament, a pause, or a spool swap (on every plate, or one)"
             >
               + Change by height
             </button>

@@ -75,11 +75,15 @@ r = await twoFilamentJob([
 check(r.status === 201, "a job with changes by height", json(r));
 check(JSON.parse(r.json?.inputs_json ?? "{}").height_changes?.length === 3, "kept with its inputs", r.json?.inputs_json);
 check(r.json?.slice_options?.height_changes?.[0]?.filament === 2, "the browser engine gets them", json(r));
+r = await twoFilamentJob([{ z: 4, kind: "pause", plate: 1 }]);
+check(r.status === 201 && r.json?.slice_options?.height_changes?.[0]?.plate === 1, "a change on one plate", json(r));
 for (const [label, bad] of [
   ["a filament the job hasn't", [{ z: 5, kind: "filament", filament: 3 }]],
   ["no height", [{ z: 0, kind: "pause" }]],
   ["an unknown kind", [{ z: 5, kind: "gcode", filament: 1 }]],
   ["free-form G-code", [{ z: 5, kind: "pause", gcode: "M104 S300" }]],
+  ["plate 0", [{ z: 5, kind: "pause", plate: 0 }]],
+  ["a plate the job hasn't", [{ z: 5, kind: "pause", plate: 2 }]],
 ]) {
   r = await twoFilamentJob(bad);
   check(r.status === 400 && /height_changes/.test(r.json?.error ?? ""), `refuses ${label}`, json(r));

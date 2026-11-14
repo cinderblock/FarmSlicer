@@ -290,8 +290,9 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   volumes: part, modifier, negative, enforcer, blocker; filament; settings;
   paint), `load.ts` (files → objects; `modelFile`: the upload, the STL
   while untouched else a 3MF, deterministic bytes), `primitives.ts`,
-  `cut.ts` (plane cut with capped faces, paint carried over; plug and dowel
-  connectors as part/negative volumes). Plan: `plans/model-editing.md`
+  `cut.ts` (plane cut with capped faces, paint carried over; plug, dowel,
+  snap and dovetail connectors as part/negative volumes, placed along the
+  cut face's principal axis). Plan: `plans/model-editing.md`
 - `src/package/zipcheck.rs` — refuses ambiguous zips (duplicate names,
   hidden local entries) before anything reads a package
 - `src/query.rs` — `flag`: `?x=1` query booleans

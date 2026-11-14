@@ -35,9 +35,11 @@ can run in the user's browser.
   model's or a part's filament, add parts, modifiers, negative volumes and
   support enforcers or blockers (box, cylinder, sphere, cone), move and size
   them, and give a model or a modifier its own settings. Cut (C) splits a
-  model on a plane at any height and tilt, keeps either half or both, turns
-  the upper half onto its cut face, and adds plugs or dowels (round, square,
-  hexagonal, with a gap for glue) so the halves fit back together.
+  model on a plane (dragged and tilted in the view, or set by numbers),
+  keeps either half or both, turns the upper half onto its cut face, and
+  joins the halves with plugs or dowels (round, square, hexagonal), snaps
+  (a split peg with a bulb) or dovetails (a key the upper half slides onto),
+  with a gap for glue.
 - **Multi-colour and painting:** the Slice page lists the model's filaments
   as slots, each with a colour; models and parts pick a slot. Paint on the
   models as in the desktop slicers: colours (N), supports to add or keep away
@@ -47,7 +49,8 @@ can run in the user's browser.
   filaments and per-object settings; an edited model is sent as a 3MF the
   browser writes in OrcaSlicer's dialect, so it opens there too. Changes by
   height switch filament, pause, or swap the spool (the printer profile's
-  colour-change G-code) from a layer on, on every plate; no free-form G-code.
+  colour-change G-code) from a layer on, on every plate or one; no free-form
+  G-code.
 - **Supports:** their own section on the Slice page, on by default (the
   slicer only adds them where a part needs them): style, only from the
   plate, and which filaments print them. With an AMS the interface (the

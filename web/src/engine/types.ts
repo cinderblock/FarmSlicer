@@ -73,7 +73,7 @@ export interface SliceOptions {
   plates?: PlateLayout[];
   /** The job's models, in order. */
   models?: { name: string }[];
-  /** Changes by height, on every plate (server::HeightChange). */
+  /** Changes by height (server::HeightChange). */
   height_changes?: HeightChange[];
 }
 
@@ -83,6 +83,8 @@ export interface HeightChange {
   kind: "filament" | "pause" | "swap";
   /** `filament` changes: which one (1-based). */
   filament?: number;
+  /** Only on this plate (1-based); left out: every plate. */
+  plate?: number;
 }
 
 export interface SliceOutput {

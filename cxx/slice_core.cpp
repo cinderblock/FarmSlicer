@@ -478,13 +478,18 @@ void check_filaments(const Slic3r::Model& model, int filament_count)
     }
 }
 
-// The job's changes by height as libslic3r's custom G-code for a plate.
-// A switch to a filament the job doesn't have is refused.
-Slic3r::CustomGCode::Info height_changes(const std::vector<HeightChange>& changes, int filament_count)
+// The job's changes by height on plate `plate` (1-based) as libslic3r's
+// custom G-code. A switch to a filament the job doesn't have, or a change
+// for a plate it doesn't have, is refused.
+Slic3r::CustomGCode::Info height_changes(const std::vector<HeightChange>& changes, int filament_count, int plate,
+                                         int plate_count)
 {
     using namespace Slic3r;
     CustomGCode::Info info;
     for (const HeightChange& h : changes) {
+        if (h.plate < 0 || h.plate > plate_count)
+            throw std::runtime_error("a change by height is for plate " + std::to_string(h.plate) + ", which the job doesn't have");
+        if (h.plate != 0 && h.plate != plate) continue;
         if (!(h.z > 0) || !std::isfinite(h.z)) throw std::runtime_error("a change by height needs a height above the plate");
         CustomGCode::Item item;
         item.print_z = h.z;
@@ -647,7 +652,8 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 
         const int filament_count = int(std::max<size_t>(1, vector_size(base_config, "filament_diameter")));
         check_filaments(model, filament_count);
-        const CustomGCode::Info changes = height_changes(options.height_changes, filament_count);
+        // Checked for every plate up front, so a bad change fails the job before any slicing.
+        for (unsigned p = 0; p < plate_count; ++p) height_changes(options.height_changes, filament_count, int(p) + 1, int(plate_count));
         const bool bambu = base_config.opt_string("printer_model", true).rfind("Bambu Lab", 0) == 0;
 
         // Thumbnails: the G-code exporter asks for the sizes the printer
@@ -695,6 +701,7 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                 // The changes by height: libslic3r reads the plate's.
                 model.curr_plate_index = int(p);
                 model.plates_custom_gcodes.clear();
+                const CustomGCode::Info changes = height_changes(options.height_changes, filament_count, int(p) + 1, int(plate_count));
                 if (!changes.gcodes.empty()) model.plates_custom_gcodes[int(p)] = changes;
 
                 // The prime tower's position and the filament map can move

@@ -44,15 +44,18 @@ struct ModelInput {
     std::vector<Placement> parts;
 };
 
-/// A change at a height, on every plate (the desktop slicers' custom G-code
-/// per print height): from that layer on, print with another filament, or
-/// pause there, or swap the spool there (the profile's colour-change G-code).
+/// A change at a height, on one plate or every plate (the desktop slicers'
+/// custom G-code per print height): from that layer on, print with another
+/// filament, or pause there, or swap the spool there (the profile's
+/// colour-change G-code).
 struct HeightChange {
     /// Where (mm above the plate): the first layer at or above it.
     double z = 0;
     enum Kind { Filament = 0, Pause = 1, Swap = 2 } kind = Filament;
     /// Filament: which one (1-based).
     int filament = 1;
+    /// Only on this plate (1-based); 0 = every plate.
+    int plate = 0;
 };
 
 struct Options {
@@ -66,7 +69,7 @@ struct Options {
     /// Label/logo drawn on every thumbnail. An empty font path means
     /// fonts/Sarabun-SemiBold.ttf in the resources directory.
     ThumbnailOverlay overlay;
-    /// Changes by height, the same on every plate.
+    /// Changes by height (each on one plate or every plate).
     std::vector<HeightChange> height_changes;
 };
 

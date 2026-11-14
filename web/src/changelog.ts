@@ -31,7 +31,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Cut a model on a plane: drag it into place and tilt it, keep both halves or one, turn the top half onto its cut face, and join the halves with plugs, dowels, snaps that click together, or dovetails that slide on (with a gap for glue).",
       "A model too big for the printer: Cut to fit cuts it into as few pieces as fit, joined by plugs or dowels, and lays them out over as many plates as they need.",
       "Split a model that's several pieces into models or parts, and merge two models into one.",
-      "Change filament, pause, or swap the spool at a height (Changes by height, under the filaments): stripes of colour on any printer, inserts dropped in mid-print.",
+      "Change filament, pause, or swap the spool at a height (Changes by height, under the filaments), on every plate or just one: stripes of colour on any printer, inserts dropped in mid-print.",
       "Undo and redo every change on the plate (Ctrl+Z, Ctrl+Shift+Z); copy a part and paste it onto another plate (Ctrl+C, Ctrl+V); Auto orient (O) turns a part the way it prints with the least overhang.",
       "The Objects panel lists the models on the plate and what they're made of: rename them, add modifiers, negative volumes and support enforcers or blockers, and give a model or a modifier its own settings.",
     ],
