@@ -285,17 +285,32 @@ Bring the Slice page's plate up to what desktop slicers offer
   even cuts per axis, room for skirt and plugs, connectors on every cut,
   pieces packed over plates. Headless: 320 mm bar → 2 pieces, 1 plate,
   slices.
-- [ ] (current) Phase 8: colour changes and pauses at a height (job field,
-  slice_core custom G-code per plate, both bridges, Slice page list).
-- [ ] Not done yet: multi-select and copy/paste, measure, dovetail and snap
-  connectors, auto-orient, dragging the cut plane in 3D.
-- [ ] Clean up on buildhost when done: container `fs-me-ui` (127.0.0.1:9354),
-  images `farmslicer:model-edit*`, `~/farmslicer-model-edit*`, /tmp/fsui.*.
-- [x] Docs: README, CLAUDE.md (in `584f700`).
+- [x] Phase 8 committed `0d5c652`: Changes by height (filament, pause,
+  spool swap; every plate; snapped to layers; no free-form G-code): job
+  `height_changes`, slice_core `Options::height_changes` →
+  `plates_custom_gcodes`, both bridges, `fs_version.height_changes` (older
+  browser engines refuse). Real slice: two-filament tower → T1 at 10 mm,
+  M400 U1 at 15 mm.
+- [x] Auto orient (O) and copy/paste (Ctrl+C/V) `b06a40b`.
+- [x] Full check on HEAD `b06a40b` (buildhost, stub): cargo test 193
+  passed, `tests/run-e2e.sh` every suite, exit 0. Buildhost cleaned
+  (containers, model-edit images, /tmp files; `~/farmslicer-model-edit*`
+  dirs kept like earlier sessions').
+- [ ] Not done (next): multi-select (group delete/move/arrange), a measure
+  tool, dovetail and snap connectors, dragging the cut plane in 3D,
+  changes by height per plate instead of job-wide.
+- [ ] Unverified: a FarmSlicer-written 3MF opened in OrcaSlicer / Bambu
+  Studio desktop (no desktop app here; libslic3r reads them, which is the
+  same reader). The browser (wasm) engine isn't rebuilt with
+  `height_changes`; CI builds it on push.
+- [ ] Not pushed: every commit of this plan is local on master.
 
 ## Open questions for the user
 
-(none)
+1. Push these commits (CI builds the image and the wasm engine; ops then
+   pins the digest)? Recommendation: yes, once you've had a look.
+2. Keep going here on the "Not done" list (multi-select, measure, dovetail
+   and snap connectors, dragging the cut plane), or split it out?
 
 ## Things not to do
 
