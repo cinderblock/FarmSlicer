@@ -108,6 +108,9 @@ can run in the user's browser.
   to the REST API with the agent's key, so it can do what the key can do
   and nothing more. Claude Code: `claude mcp add --transport http
   farmslicer https://<farm>/api/mcp --header "Authorization: Bearer fsk_…"`.
+  An agent built into the browser gets the same tools from the signed-in
+  page through WebMCP (`document.modelContext`, where the browser has it),
+  acting as that account.
 - **Printers:** five kinds, each on the LAN (see [Printers](#printers)):
   Bambu Lab, Klipper (Moonraker), OctoPrint, Prusa (PrusaLink) and Elegoo
   Centauri Carbon (SDCP). Discovery, live status (state, progress,
@@ -536,6 +539,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` or `.gcode` becomes a finished, sendable job (what it needs is read from the slicer's comments); its G-code is checked at once (each plate's `check` in `package_json`). 400 for ambiguous archives or G-code changed after slicing; 403 where uploads are denied |
 | `GET /api/octoprint/api/version`, `POST /api/octoprint/api/files/local` (multipart `file`, `print`, `plateindex`) | OctoPrint's upload API for desktop slicers (key in `X-Api-Key`): the file becomes a job as with `/api/uploads`; `print=true` also queues the plate `plateindex` names (else every plate). Errors are plain text |
 | `POST /api/mcp` | MCP (Streamable HTTP, stateless, JSON answers; GET/DELETE 405): JSON-RPC `initialize`, `ping`, `tools/list`, `tools/call`. API keys only, not session cookies. Tools: whoami, list_printers, list_jobs, get_job, list_queue, queue_plates, cancel_queue_entry, list_prints, control_print, list_projects, get_project, create_project, add_project_item; an integration key sees only those its routes allow |
+| `GET /api/mcp/tools`, `POST /api/mcp/call` (`{name, arguments}`) | the same tools for the signed-in web app (WebMCP, `web/src/webmcp.ts`): the list, and one call's tools/call result. The call takes JSON only and refuses `Sec-Fetch-Site: cross-site`/`same-site` |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability, its capabilities and (Bambu) a suggested AMS mapping, plus the plate's `gcode_check`, `blocked` and `needs_review` findings |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems, acknowledge_review}`: upload and start. 409 when the plate's G-code is blocked; findings that need review make a member's print wait for an admin, and an admin's send needs `acknowledge_review` |
 | `GET /api/prints?printer=&active=1&pending=1&unchecked=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status (each print's `lines`: what it holds, one per kind of part, and `outcome`); pause/resume/stop/speed as the printer allows (sender, group managers, admins) |

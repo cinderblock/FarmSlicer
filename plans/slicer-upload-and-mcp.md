@@ -66,8 +66,12 @@ with no export and manual upload. Then let AI agents do the same, and more.
       by what the key reaches.
    4. [x] e2e test `tests/mcp-e2e.mjs`; Account page "Connect an agent";
       README; changelog.
-9. [ ] **(next, not started)** WebMCP (later, when the spec settles), and
-   MCP tools for slicing and uploads if agents need them (see below).
+9. [x] WebMCP: the signed-in page registers the MCP tools with the
+   browser (`web/src/webmcp.ts`), calls run on the server with the session
+   (`GET /api/mcp/tools`, `POST /api/mcp/call`).
+10. [ ] **(current)** Folder → group: the slicer dialog's folder picks the
+    group a job is charged to (the user said yes, 2026-11-14).
+11. [ ] MCP tools for slicing and uploads, if agents need them (not asked for).
 
 ## MCP design (step 8)
 
@@ -94,6 +98,28 @@ with no export and manual upload. Then let AI agents do the same, and more.
 - **Not in v1**: slicing (`POST /api/jobs` is multipart with models) and
   uploads (binary): an agent with a file uses `POST /api/uploads` or the
   OctoPrint host with the same key; the server's `instructions` say so.
+
+## WebMCP design (step 9)
+
+- Spec state (2026-11-14): W3C Web Machine Learning CG draft dated
+  2026-11-13. `document.modelContext.registerTool(tool, {signal})`; the
+  tool has `name`, `title`, `description`, `inputSchema`, `execute(input)`
+  and `annotations` (`readOnlyHint`, `untrustedContentHint`,
+  `consequentialHint`). Aborting the signal unregisters. It moved from
+  `navigator` to `document` in May 2026, and `provideContext`/
+  `clearContext` are gone; `webmcp.ts` also takes `navigator.modelContext`
+  and a returned `unregister()` handle for older builds. Chrome has it as
+  an origin trial; we haven't signed up for one, so it works where the
+  browser turns it on (flag, or an agent built into the browser).
+- One source of tools: the page lists them from the server and each call
+  runs there, so WebMCP and MCP can't drift apart.
+- Session calls are safe from other sites: `POST /api/mcp/call` takes only
+  `application/json` (a cross-origin fetch needs a preflight nobody
+  answers) and refuses `Sec-Fetch-Site: cross-site`/`same-site`. Integration
+  keys can't reach these two routes (`integration::allows` lists only
+  `/api/mcp`).
+- Every tool is marked `untrustedContentHint` (job, project and printer
+  names are free text), and every non-read-only tool `consequentialHint`.
 
 ## Findings / gotchas
 
@@ -131,16 +157,19 @@ with no export and manual upload. Then let AI agents do the same, and more.
   AI agent", README, CLAUDE.md, changelog.
 - 2026-11-14 1:10 AM PST (09:10Z): pushed (`1e4e654`), CI image built;
   Renovate deploys it in its next app window (7-8 AM PST).
+- 2026-11-14: WebMCP done: `src/mcp.rs` page routes, `web/src/webmcp.ts`,
+  `web/test/webmcp.test.ts`, e2e checks in `tests/mcp-e2e.mjs` (passes on
+  buildhost with print-host and integration, `cargo test` 189; checked on a
+  clean `HEAD` copy because another thread's uncommitted permissions work
+  doesn't build yet). Account page, README, CLAUDE.md, changelog.
+- [ ] Try WebMCP in a browser that has it (manual).
 - [ ] Try the adapter from a real OrcaSlicer against the dev instance (manual).
 - [ ] Try the MCP server from a real Claude Code against the dev instance
   (manual).
 
 ## Open questions for the user
 
-1. Should the upload dialog's folder (`path`) pick the group a job is
-   charged to (e.g. `Team X/part.gcode.3mf`)? Recommendation: yes, later,
-   matching a group the uploader can charge by name; for now jobs are
-   personal (or the integration key's group).
+(none open: folder → group answered yes on 2026-11-14, now step 10)
 
 ## Things not to do
 

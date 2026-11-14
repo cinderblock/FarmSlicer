@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-14b",
+    date: "2026-11-14",
+    title: "Agents in your browser",
+    highlights: [
+      "An AI agent built into your browser can use FarmSlicer while you're signed in, with no API key: the same tools as connected agents, acting as you. It needs a browser with WebMCP (Chrome has it as a trial).",
+    ],
+  },
+  {
     id: "2026-11-13e",
     date: "2026-11-13",
     title: "AI agents can run the farm",

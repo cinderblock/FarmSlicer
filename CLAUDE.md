@@ -335,6 +335,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   forwards to REST routes through the protected router (`mcp::install`,
   `oneshot` with the caller's headers), so permissions and integration
   scopes apply unchanged; `Tool.routes` filters tools/list per scope.
+  `GET /api/mcp/tools` + `POST /api/mcp/call` serve the same tools to the
+  signed-in page, which registers them with the browser (WebMCP,
+  `web/src/webmcp.ts`: `document.modelContext`, unregistered by an abort
+  signal on sign-out).
   Plan: `plans/slicer-upload-and-mcp.md`
 - `src/events.rs` — every event goes through `emit` → `webhooks::enqueue`
   (print status from `printing::apply` and the send task, outcomes from

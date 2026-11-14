@@ -147,6 +147,26 @@ check(t.error?.code === -32602, "an unknown tool is a protocol error", JSON.stri
 t = await call(key, "get_job", {});
 check(t.isError && /job_id is required/.test(t.data), "a missing argument", JSON.stringify(t.raw));
 
+// ---- the web app's tools (WebMCP, web/src/webmcp.ts) ---------------------------------------------
+r = await owner.get("/api/mcp/tools");
+check(r.status === 200 && r.json.tools.some((t) => t.name === "queue_plates"), "the signed-in page lists the tools", json(r));
+r = await owner.post("/api/mcp/call", { name: "get_job", arguments: { job_id: job.id } });
+check(r.status === 200 && !r.json.isError && r.json.structuredContent.id === job.id, "and runs them with its session", json(r));
+r = await owner.post("/api/mcp/call", { name: "no_such_tool", arguments: {} });
+check(r.status === 400 && /unknown tool/.test(r.json.error), "an unknown tool", json(r));
+const pageCall = (headers) =>
+  fetch(`${BASE}/api/mcp/call`, {
+    method: "POST",
+    headers: { cookie: owner.cookie, ...headers },
+    body: JSON.stringify({ name: "whoami", arguments: {} }),
+  });
+let pr = await pageCall({ "content-type": "application/json", "sec-fetch-site": "cross-site" });
+check(pr.status === 403, "not from another site's page", String(pr.status));
+pr = await pageCall({ "content-type": "text/plain" });
+check(pr.status === 415, "nor as a form post", String(pr.status));
+pr = await fetch(`${BASE}/api/mcp/tools`);
+check(pr.status === 401, "signed out: no tools", String(pr.status));
+
 // ---- integration keys --------------------------------------------------------------------------
 r = await owner.post("/api/groups", { name: "Shop" });
 const shop = r.json.id;

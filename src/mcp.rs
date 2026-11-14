@@ -50,7 +50,52 @@ pub fn install(router: Router) {
 }
 
 pub fn routes() -> Router<Arc<AppState>> {
-    Router::new().route("/api/mcp", post(handle).get(no_stream).delete(no_stream))
+    Router::new()
+        .route("/api/mcp", post(handle).get(no_stream).delete(no_stream))
+        .route("/api/mcp/tools", axum::routing::get(page_tools))
+        .route("/api/mcp/call", post(page_call))
+}
+
+// -- The web app's own tools (WebMCP) ---------------------------------------------------------------
+//
+// The signed-in page registers the same tools with the browser
+// (`document.modelContext`, web/src/webmcp.ts) and runs them here with its
+// session. Not JSON-RPC: one list, one call. A cross-site page can't use
+// them: the call takes only `application/json` (a cross-origin fetch of
+// that needs a CORS preflight nobody answers) and refuses a browser's
+// `Sec-Fetch-Site: cross-site`/`same-site`.
+
+/// `GET /api/mcp/tools`: the tools the signed-in account can use.
+async fn page_tools(Extension(KeyScope(scope)): Extension<KeyScope>, headers: HeaderMap) -> Json<Value> {
+    let ctx = Ctx { headers: forwarded(&headers, true), scope };
+    Json(json!({"tools": ctx.visible_tools()}))
+}
+
+/// `POST /api/mcp/call` `{name, arguments}`: a tools/call result.
+async fn page_call(Extension(KeyScope(scope)): Extension<KeyScope>, headers: HeaderMap, body: Bytes) -> Response {
+    let site = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()).unwrap_or("none");
+    if matches!(site, "cross-site" | "same-site") {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "tools run from FarmSlicer's own pages only"}))).into_response();
+    }
+    if !is_json(&headers) {
+        return (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(json!({"error": "send application/json"}))).into_response();
+    }
+    let params: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response(),
+    };
+    let ctx = Ctx { headers: forwarded(&headers, true), scope };
+    match ctx.call(&params).await {
+        Ok(result) => Json(result).into_response(),
+        Err((_, msg)) => (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response(),
+    }
+}
+
+fn is_json(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("application/json"))
 }
 
 /// No server-to-client stream and no sessions to end: the spec's answer
@@ -80,18 +125,14 @@ async fn handle(
             "the MCP endpoint takes an API key (Authorization: Bearer fsk_...), not a browser session",
         );
     }
-    let json_body = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("application/json"));
-    if !json_body {
+    if !is_json(&headers) {
         return http_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "send application/json");
     }
     let message: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(rpc_error(Value::Null, -32700, format!("parse error: {e}")))).into_response(),
     };
-    let ctx = Ctx { headers: forwarded(&headers), scope };
+    let ctx = Ctx { headers: forwarded(&headers, false), scope };
     match message {
         Value::Array(batch) if !batch.is_empty() => {
             let mut answers = Vec::new();
@@ -113,14 +154,16 @@ async fn handle(
     }
 }
 
-/// What the tools' requests carry: the key and whatever the proxy said
-/// about where the request came from, not the cookie or the MCP framing.
-fn forwarded(headers: &HeaderMap) -> HeaderMap {
+/// What the tools' requests carry: the key (or, for the web app's own
+/// calls, the session cookie) and whatever the proxy said about where the
+/// request came from, not the MCP framing.
+fn forwarded(headers: &HeaderMap, session: bool) -> HeaderMap {
     let mut out = HeaderMap::new();
     for (name, value) in headers {
-        let skip = matches!(
+        let skip = (name.as_str() == "cookie" && !session)
+            || matches!(
             name.as_str(),
-            "cookie" | "content-type" | "content-length" | "transfer-encoding" | "host" | "connection"
+            "content-type" | "content-length" | "transfer-encoding" | "host" | "connection"
                 | "accept" | "accept-encoding" | "origin" | "referer"
         ) || name.as_str().starts_with("mcp-");
         if !skip {
