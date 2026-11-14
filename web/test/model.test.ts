@@ -421,3 +421,25 @@ describe("connectors", () => {
     expect(joined.pins!.name).toBe("Block dowels");
   });
 });
+
+describe("split and merge", () => {
+  test("a model of two pieces splits into models or parts, paint and all", async () => {
+    const { splitToObjects, splitToParts, pieceCount, mergeInto } = await import("../src/model/ops");
+    const two = mergeMeshes([cube(), cube(10, [50, 0, 0])]);
+    const paint = new PaintLayer(two);
+    paint.setTriangle(14, 2); // a face of the small cube
+    const o = makeObject("Kit", [makeVolume(two, { paint: { color: paint } })], { extruder: 3 });
+    expect(pieceCount(o)).toBe(2);
+    const objects = splitToObjects(o);
+    expect(objects.map((x) => x.name)).toEqual(["Kit 1", "Kit 2"]);
+    expect(objects.map((x) => x.extruder)).toEqual([3, 3]);
+    expect(objects[0].volumes[0].paint.color).toBeUndefined();
+    expect([...objects[1].volumes[0].paint.color!.usedStates()]).toEqual([2]);
+    const parts = splitToParts(o);
+    expect(parts.volumes.length).toBe(2);
+    const merged = mergeInto(objects[0], objects[1], translation(5, 0, 0));
+    expect(merged.volumes.length).toBe(2);
+    expect(merged.volumes[1].matrix[12]).toBe(5);
+    expect(merged.volumes[1].extruder).toBe(3);
+  });
+});

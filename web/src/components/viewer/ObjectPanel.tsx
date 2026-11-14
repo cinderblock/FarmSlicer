@@ -9,6 +9,7 @@ import type { SettingDef } from "../SettingInput";
 import { makeVolume, objectBounds, VOLUME_SUBTYPE, type ModelObject, type Volume, type VolumeType } from "../../model/document";
 import { meshBounds, multiply, translation, scaling, type Mat4 } from "../../model/mesh";
 import { PRIMITIVES, primitive, type Primitive } from "../../model/primitives";
+import { pieceCount, splitToParts } from "../../model/ops";
 import { filamentColor, type PartShape } from "./part";
 
 const schema = settingsSchema as SettingDef[];
@@ -46,6 +47,10 @@ export interface ObjectPanelProps {
   onSelect: (shape: PartShape) => void;
   onSelectVolume: (id: string | null) => void;
   onEdit: (shape: PartShape, label: string, change: (o: ModelObject) => ModelObject) => void;
+  /** Each piece of the model as a model of its own. */
+  onSplit: (shape: PartShape) => void;
+  /** `other` joins `shape` (as they sit on the plate now). */
+  onMerge: (shape: PartShape, other: PartShape) => void;
 }
 
 function FilamentPick({
@@ -200,7 +205,7 @@ function volumeBox(v: Volume) {
 }
 
 export default function ObjectPanel(props: ObjectPanelProps) {
-  const { models, selected, volumeId, colors, filamentCount, onSelect, onSelectVolume, onEdit } = props;
+  const { models, selected, volumeId, colors, filamentCount, onSelect, onSelectVolume, onEdit, onSplit, onMerge } = props;
   // Open on wide screens; on phones it would cover the plate until asked for.
   const [open, setOpen] = useState(() => !window.matchMedia("(max-width: 800px)").matches);
   const [addType, setAddType] = useState<VolumeType>("modifier");
@@ -211,6 +216,7 @@ export default function ObjectPanel(props: ObjectPanelProps) {
   const editVolume = (label: string, change: (v: Volume) => Volume) =>
     volume && edit(label, (o) => ({ ...o, volumes: o.volumes.map((v) => (v.id === volume.id ? change(v) : v)) }));
   const partCount = useMemo(() => object?.volumes.filter((v) => v.type === "part").length ?? 0, [object]);
+  const pieces = useMemo(() => (object ? pieceCount(object) : 0), [object]);
 
   if (models.length === 0) return null;
   return (
@@ -255,6 +261,44 @@ export default function ObjectPanel(props: ObjectPanelProps) {
                   }}
                 />
               </label>
+
+              <div className="object-add">
+                <button
+                  className="btn-sm"
+                  disabled={pieces <= 1}
+                  onClick={() => selected && onSplit(selected)}
+                  title={pieces > 1 ? `Make each of its ${pieces} pieces a model of its own` : "The model is in one piece"}
+                >
+                  Split to models
+                </button>
+                <button
+                  className="btn-sm"
+                  disabled={pieces <= partCount}
+                  onClick={() => edit("Split to parts", splitToParts)}
+                  title="Make each piece a part of this model (each can take its own filament)"
+                >
+                  Split to parts
+                </button>
+                {models.length > 1 && (
+                  <select
+                    value=""
+                    aria-label="Merge another model into this one"
+                    onChange={(e) => {
+                      const other = models.find((m) => m.shape.object.id === e.target.value);
+                      if (other && selected) onMerge(selected, other.shape);
+                    }}
+                  >
+                    <option value="">Merge with…</option>
+                    {models
+                      .filter((m) => m.shape !== selected)
+                      .map((m) => (
+                        <option key={m.shape.object.id} value={m.shape.object.id}>
+                          {m.shape.name}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
 
               <div className="object-section-title">Parts</div>
               <ul className="volume-list">

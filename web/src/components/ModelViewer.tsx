@@ -17,6 +17,7 @@ import { PaintControls, PaintSurface } from "./viewer/PaintTool";
 import { CutControls, CutPlane } from "./viewer/CutTool";
 import { cutNormal, DEFAULT_CUT, type CutSettings } from "./viewer/cutSettings";
 import { addConnectors, connectorPoints, cutObject, cutSection, planeInFrame, type Plane } from "../model/cut";
+import { mergeInto, splitToObjects } from "../model/ops";
 import { DEFAULT_PAINT, PAINT_TOOLS, type PaintSettings } from "./viewer/paintSettings";
 import { ENFORCER, type PaintKind } from "../model/paint";
 import type { PaintChange } from "./viewer/history";
@@ -686,6 +687,56 @@ export default function ModelViewer({
     }
     return { settings: cutSettings, points };
   }, [tool, selected, painting, cutSettings, cutPlane, settled]);
+
+  /**
+   * Put new models where every copy of `old` was: each copy becomes a copy
+   * of each new model (same turn and scale), where its pieces were.
+   */
+  const replaceModel = useCallback(
+    (old: PartShape, objects: ModelObject[], label: string, drop: Part[] = []) => {
+      const shapes = objects.map((o) => new PartShape(o, null, colorsRef.current));
+      const copies = parts.filter((p) => p.shape === old);
+      const added: Part[] = [];
+      for (const copy of copies) {
+        const frame = objectFrame(copy);
+        for (const s of shapes) {
+          const part = new Part(s);
+          part.setScale(copy.scale.clone());
+          part.setRotation(copy.quaternion.clone());
+          part.setPlate(copy.plate);
+          const mid = s.offset.clone().negate().applyMatrix4(frame);
+          part.setCenter(mid.x, mid.y);
+          added.push(part);
+        }
+      }
+      setPlate([...parts.filter((p) => p.shape !== old && !drop.includes(p)), ...added], label);
+      setSelectedId(added[0]?.id ?? null);
+      setVolumeId(null);
+      setSettled((n) => n + 1);
+    },
+    [parts, setPlate],
+  );
+
+  const splitModel = useCallback(
+    (s: PartShape) => {
+      const objects = splitToObjects(s.object);
+      if (objects.length > 1) replaceModel(s, objects, "Split to models");
+    },
+    [replaceModel],
+  );
+
+  /** `other` joins `s`: one copy of it (on the same plate, if any), as it sits now. */
+  const mergeModels = useCallback(
+    (s: PartShape, other: PartShape) => {
+      const here = (selected?.shape === s ? selected : null) ?? parts.find((p) => p.shape === s);
+      if (!here) return;
+      const there = parts.find((p) => p.shape === other && p.plate === here.plate) ?? parts.find((p) => p.shape === other);
+      if (!there) return;
+      const toA = objectFrame(here).invert().multiply(objectFrame(there));
+      replaceModel(s, [mergeInto(s.object, other.object, Float64Array.from(toA.elements))], "Merge", [there]);
+    },
+    [selected, parts, replaceModel],
+  );
 
   /** Cut every copy of the selected part's model; the halves take their place. */
   const doCut = useCallback(() => {
@@ -1441,6 +1492,8 @@ export default function ModelViewer({
         onSelect={selectShape}
         onSelectVolume={setVolumeId}
         onEdit={editShape}
+        onSplit={splitModel}
+        onMerge={mergeModels}
       />
 
       <Canvas camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 1, far: 5000 }}>
