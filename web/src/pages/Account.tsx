@@ -10,6 +10,9 @@ import { browserSupportsWebAuthn, defaultKeyName, registerPasskey } from "../pas
 import PageHeader from "../components/PageHeader";
 import Icon from "../components/Icon";
 import { useTheme } from "../theme";
+import { modelContext } from "../webmcp";
+
+const webMcpAvailable = () => modelContext() !== undefined;
 
 interface PasskeyInfo {
   id: string;
@@ -373,6 +376,10 @@ export default function AccountPage() {
           <pre className="hint">
             <code>{`claude mcp add --transport http farmslicer ${window.location.origin}/api/mcp --header "Authorization: Bearer fsk_…"`}</code>
           </pre>
+          <p className="hint">
+            An agent built into your browser needs no key: while you're signed in, this page offers it the same
+            tools through WebMCP, acting as you. {webMcpAvailable() ? "This browser supports it." : "This browser doesn't support WebMCP yet (Chrome has it as a trial)."}
+          </p>
         </>
       )}
     </div>

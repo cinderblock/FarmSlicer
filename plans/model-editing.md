@@ -124,13 +124,39 @@ Bring the Slice page's plate up to what desktop slicers offer
    `config_policy`.
 4. [x] Nozzle plan (`src/nozzles.rs`): no change needed. Filaments that
    aren't support filaments already count as part filaments.
-5. [ ] (current) Tests: e2e `tests/model-3mf-e2e.mjs` (policy, scaled and
+5. [x] Tests: e2e `tests/model-3mf-e2e.mjs` (policy, scaled and
    mirrored copies) with fixtures from `tests/fixtures/models/make.ts`; a
    real slice of `painted.3mf` on buildhost (image `farmslicer:model-edit`,
    `~/farmslicer-model-edit-docker`, libslic3r stage from
    `farmslicer:openssl-test-libslic3r`). Still to do: a 3MF the TS writer made (painted, two volumes on two
    filaments) sliced by both engines, with the tool changes checked in the
    G-code.
+
+### Editor design (Phases 3-9)
+
+- `viewer/part.ts` `PartShape` is built from a `ModelObject` (not a
+  file): a mesh per volume in its filament's colour (modifiers and
+  negative volumes see-through, enforcers green, blockers red), centred
+  and dropped on the bed by its **model parts only** (libslic3r's
+  `instance_bounding_box` counts model parts only), hull from model parts.
+  `Part` (a copy) has `root.quaternion` (rotation) and `root.scale` (scale,
+  negative = mirror) in the model's own axes: placement matrix = R × S,
+  which three.js composes the same way.
+- Loading: `web/src/model/load.ts` turns a file into editor objects (STL:
+  one object; 3MF: one object per build object, with its items' relative
+  layout kept, core colours as filaments). The original File is kept and
+  sent while the object is unedited **and** came from an STL.
+- What the page uploads: per model, the original STL or `write3mf([object])`
+  (zip mtime fixed so the bytes, and so the slice cache's digest, repeat).
+- Undo/redo: a command stack (`viewer/history.ts`): each edit records how
+  to undo and redo itself. Plate edits snapshot the parts (shape, matrix,
+  centre, plate); paint strokes keep the touched layers' before and after
+  (`PaintLayer.clone`). Shapes no state refers to are disposed.
+- Filament slots (page): slot 1 is today's filament; more slots added by
+  the user or when a loaded model uses more (its palette for colours).
+  Supports pick a slot or add one. The job's filament list = the slots, then
+  support-only filaments not already a slot. Colours go as the job's
+  `colours` field (server writes `filament_colour`).
 
 ### Phase 3: filament slots on the Slice page
 - Filaments become a list of slots (profile and colour each), like the
@@ -193,6 +219,11 @@ Bring the Slice page's plate up to what desktop slicers offer
   2 = blocker.
 - The 3MF reader flips a volume whose signed volume is negative. Triangle
   order is kept, so paint still lines up.
+- Building the server stage on buildhost against
+  `farmslicer:openssl-test-libslic3r` needs `--build-arg UBUNTU_VERSION=24.04`
+  (that stage is GCC 13; 26.04's GCC 15 fails linking: "bytecode stream
+  ... generated with LTO version 13.1 instead of the expected 15.1").
+  Context: `~/farmslicer-model-edit-docker` with `Dockerfile.local`.
 - Guide page (`web/src/pages/Guide.tsx:94`) says Slice takes OBJ and STEP,
   but the picker takes STL and 3MF only.
 
@@ -201,7 +232,20 @@ Bring the Slice page's plate up to what desktop slicers offer
 - [x] Plan written (2026-11-14).
 - [x] Phase 1 committed (`6547b0e`): model library, 18 unit tests.
 - [x] Phase 2 code: LoadModel fix, filament check, scale and mirror per
-  copy, model_check. `cargo test` 189 passed on buildhost.
+  copy, model_check. `cargo test` 189 passed on buildhost, full e2e
+  passed (exit 0). Real slice (image `farmslicer:model-edit`, Ubuntu 24.04
+  to match the cached libslic3r stage's GCC 13): painted.3mf on 3
+  filaments → T1 ×20, T2 ×1, filament 2 1.36 m; on 1 filament → "prints
+  with filament 3 but the job has one filament"; plain 3MF cube slices.
+  The code is in `4dabb29` (another thread's commit swept up my staged
+  files; its message is about its own plan) and the plan in `9c025c1`.
+- [ ] Changelog entry: when the editor ships (3MF uploads slicing again is
+  one of its fixes).
+- [ ] (current) Phase 3 server part: the job's `colours` field (working
+  tree, src/server.rs, not committed: the other thread edits server.rs; my
+  edit is `colours_patch.py` in the session scratchpad, re-creatable from
+  this plan: JobInputs.colours, multipart `colours` JSON, check_colours,
+  job_config sets filament_colour, NozzlePlanQuery.colours).
 
 ## Open questions for the user
 

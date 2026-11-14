@@ -30,6 +30,7 @@ import ReportsPage from "./pages/Reports";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
+import { setWebMcpSignedIn } from "./webmcp";
 import { installUpdateWatch } from "./appUpdate";
 import { registerServiceWorker } from "./serviceWorker";
 import { installAppPrompt } from "./installApp";
@@ -92,11 +93,12 @@ function Gate() {
   );
 }
 
-/** Error reports wait in the browser until someone is signed in. */
+/** Error reports wait in the browser until someone is signed in; agent tools (WebMCP) too. */
 function useReportingAuth() {
   const { status } = useAuth();
   useEffect(() => {
     if (status) setSignedIn(status.authenticated);
+    if (status) void setWebMcpSignedIn(status.authenticated);
   }, [status]);
 }
 
