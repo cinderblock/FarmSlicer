@@ -153,6 +153,17 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
   const [travel, setTravel] = useState(false);
   const [retractions, setRetractions] = useState(false);
   const [dim, setDim] = useState(true);
+  // What's still to print, faintly: this viewer's choice, else on while following a print.
+  const [ghostChoice, setGhostChoice] = useState<boolean | null>(readGhostChoice);
+  const ghost = ghostChoice ?? !!live;
+  const chooseGhost = (v: boolean) => {
+    setGhostChoice(v);
+    try {
+      localStorage.setItem(GHOST_KEY, v ? "1" : "0");
+    } catch {
+      // Private window or blocked storage: the choice lasts this page.
+    }
+  };
   const [forceLines, setForceLines] = useState(false);
 
   // Following a print: where it is, re-estimated every second inside a layer.
@@ -199,8 +210,8 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
   const scrub = upTo === null ? topEnd : Math.max(topStart, Math.min(upTo, topEnd));
   const { bottom, top } = range;
   const view: ViewRange = useMemo(
-    () => ({ bottom, top, upTo: scrub, hidden, travel, retractions, dim }),
-    [bottom, top, scrub, hidden, travel, retractions, dim],
+    () => ({ bottom, top, upTo: scrub, hidden, travel, retractions, dim, ghost }),
+    [bottom, top, scrub, hidden, travel, retractions, dim, ghost],
   );
 
   const setLayers = (b0: number, t0: number) => {
@@ -322,6 +333,10 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
           </label>
           <label>
             <input type="checkbox" checked={dim} onChange={(e) => setDim(e.target.checked)} /> Dim layers below the top one
+          </label>
+          <label title="Faint lines for the moves after the ones shown: the rest of the layer and the layers above">
+            <input type="checkbox" checked={ghost} onChange={(e) => chooseGhost(e.target.checked)} />{" "}
+            {live ? "Show what's still to print" : "Show the layers above, faintly"}
           </label>
           <label title={tooBig ? "This file is too big for the 3D view" : "Faster on slow graphics"}>
             <input
@@ -603,6 +618,18 @@ function FilamentRow({ color, label, type, mm, g }: { color: string; label: stri
       </dd>
     </>
   );
+}
+
+const GHOST_KEY = "farmslicer.preview.ghost";
+
+/** This browser's choice for the faint rest of the print (null = none made). */
+function readGhostChoice(): boolean | null {
+  try {
+    const v = localStorage.getItem(GHOST_KEY);
+    return v === "1" ? true : v === "0" ? false : null;
+  } catch {
+    return null;
+  }
 }
 
 /** What a live position is based on, for its badge's tooltip. */

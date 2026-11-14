@@ -384,9 +384,14 @@ export default function JobsPage() {
                           <img className="job-thumb" src={`/api/jobs/${job.id}/thumbnail`} alt="" loading="lazy" />
                         </Link>
                       )}
-                      <Link to={`/jobs/${job.id}`} title="Preview, details and warnings">
+                      <Link to={`/jobs/${job.id}`} title={job.package_json ? "Preview, details and warnings" : "Details"}>
                         {job.model_name}
                       </Link>
+                      {finished(job) && !job.package_json && (
+                        <span className="unsliced-chip" title="There's no G-code for this job: nothing to preview or print">
+                          Not sliced
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td data-label="By">{job.username ?? "—"}</td>
@@ -460,11 +465,11 @@ export default function JobsPage() {
                     )}
                     {canReslice(job) && finished(job) && (
                       <button
-                        className="btn-sm btn-ghost"
+                        className={`btn-sm ${job.package_json ? "btn-ghost" : "btn-accent"}`}
                         title="Open this job's models and settings on the Slice page, change what you like, and slice it as a new job"
                         onClick={() => navigate(`/slice?from=${job.id}`)}
                       >
-                        <Icon name="slice" /> Re-slice
+                        <Icon name="slice" /> {job.package_json ? "Re-slice" : "Slice"}
                       </button>
                     )}
                     {(job.status === "queued" || job.status === "slicing") && (

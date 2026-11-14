@@ -34,6 +34,9 @@ able to get to sliced versions from jobs... and prints".
   Slice page's unsliced plate) are not sliced views. Revisit if the user
   meant something else.
 - Deep links: `/jobs/:id?plate=N&layer=K` (1-based, as the UI shows them).
+- Unsliced models: no preview; "Not sliced" plus a Slice button
+  (`/slice?from=<job>`), per the user.
+- The faint "still to print" drawing is a viewer option, not a fixed look.
 - A running print gets its own page, `/prints/:id`: the preview following
   the printer, with the printer's status, camera and controls beside it.
   The job page links to it while the job prints.
@@ -106,13 +109,21 @@ able to get to sliced versions from jobs... and prints".
   update. Job page links to its prints under way.
 - [x] 4. README, CLAUDE.md, What's new (`2026-11-13c`); phone width checked
   (360 px, no sideways scroll)
-- [ ] 5. Optional: ghost the layers still to print on the print page
+- [x] 5. What's still to print, faintly (`ViewRange.ghost`, a see-through
+  line strip on the line buffers; alpha 0.14, colours 70% grey): an
+  option in every preview, remembered per browser, on by default while
+  following a print. Verified on the Moonraker fake.
+- [x] 6. Unsliced models say "Not sliced" with a Slice button
+  (`components/SlicedName.tsx`): Jobs rows, project items (a part on no
+  sliced plate whose recipe job exists), a group's library, and the job
+  page (a box in place of the preview, "Slice it"). Verified with a job
+  the stub server fails to slice and a project item using it.
 
 ## Open questions for the user
 
-1. Is "any model" the sliced plates listed above, or did you also mean the
-   Slice page / model files (e.g. slicing a library model on demand to
-   preview it)? Recommendation: sliced plates only, for now.
+None. Answered 2026-11-13: unsliced models get no preview, but must say
+they aren't sliced and offer an easy Slice; the faint rest of the print
+should be a runtime setting.
 
 ## Things not to do
 

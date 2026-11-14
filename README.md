@@ -75,8 +75,12 @@ can run in the user's browser.
   is in the file (Klipper, OctoPrint), else its layer (Bambu, Elegoo) with
   the move estimated from the time since the layer began, else its
   percentage over the slicer's time estimate. Moving the layers stops
-  following; "Follow the printer" goes back. Status, camera and controls
-  are on the same page.
+  following; "Follow the printer" goes back. What's still to print is
+  drawn as faint lines over what's printed (an option, remembered per
+  browser). Status, camera and controls are on the same page. Models with
+  no G-code yet say "Not sliced" where they're listed (Jobs, projects, a
+  group's library, the job page) and offer Slice (the Slice page with the
+  job's models and settings).
 - **Recent slices, compared:** the browser remembers the last slices
   (10 and 1 GB of G-code by default, adjustable; IndexedDB), each with what
   it was made from and its G-code. When the settings, models and plates

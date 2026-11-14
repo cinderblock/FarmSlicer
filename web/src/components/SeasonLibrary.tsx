@@ -1,5 +1,6 @@
 import { formatDuration, localDate } from "../api";
 import type { GroupLibrary, LibraryJob } from "../groups";
+import SlicedName from "./SlicedName";
 
 function JobRows({ jobs, showGroup }: { jobs: LibraryJob[]; showGroup: boolean }) {
   return (
@@ -19,7 +20,15 @@ function JobRows({ jobs, showGroup }: { jobs: LibraryJob[]; showGroup: boolean }
       <tbody>
         {jobs.map((j) => (
           <tr key={j.id}>
-            <td>{j.model_name}</td>
+            <td>
+              {j.status === "queued" || j.status === "slicing" ? (
+                j.model_name
+              ) : (
+                <SlicedName jobId={j.id} sliced={j.status === "done"} canSlice={j.has_model}>
+                  {j.model_name}
+                </SlicedName>
+              )}
+            </td>
             <td>{j.username ?? "—"}</td>
             {showGroup && <td>{j.group_name ?? "—"}</td>}
             <td>{localDate(j.created_at)}</td>

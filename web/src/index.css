@@ -5844,3 +5844,43 @@ select.select-sm {
   padding: 0;
   border: none;
 }
+
+/* A model with no G-code yet: says so, and offers to slice it (components/SlicedName.tsx). */
+.unsliced {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.unsliced-chip {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.unsliced .unsliced-chip {
+  margin-left: 0;
+}
+
+.job-unsliced {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 1.5rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-card) 45%, transparent);
+}
+
+.job-unsliced p {
+  margin: 0;
+}

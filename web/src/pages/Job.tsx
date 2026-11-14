@@ -170,7 +170,7 @@ export default function JobPage() {
               title="Open this job's models and settings on the Slice page, change what you like, and slice it as a new job"
               onClick={reslice}
             >
-              Re-slice
+              {done && job.package_json ? "Re-slice" : "Slice"}
             </button>
           )}
           {done && (
@@ -325,6 +325,25 @@ export default function JobPage() {
           </div>
           {plate?.check && <GcodeCheckDetails check={plate.check} open={plate.check.findings.length > 0} />}
         </>
+      )}
+
+      {!active && !(done && job.package_json) && (
+        <div className="job-unsliced">
+          <strong>Not sliced</strong>
+          <p className="hint">
+            {job.status === "failed"
+              ? "Slicing failed, so there's no G-code to preview or print."
+              : job.status === "cancelled"
+                ? "Slicing was cancelled, so there's no G-code to preview or print."
+                : "There's no G-code for this job to preview or print."}
+            {!canReslice && job.model_count === 0 && " Its models aren't kept on the server, so it can't be sliced from here."}
+          </p>
+          {canReslice && (
+            <button className="btn-primary btn-inline" onClick={reslice}>
+              Slice it
+            </button>
+          )}
+        </div>
       )}
 
       {done && <JobProjects jobId={job.id} />}

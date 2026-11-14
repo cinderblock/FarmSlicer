@@ -33,8 +33,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: "2026-11-13",
     title: "Watch prints layer by layer",
     highlights: [
-      "Open a print (from Prints, or a printer card's picture or name) to see its sliced plate follow the printer: everything printed so far and the layer it's on. Klipper and OctoPrint printers show the very move they're on; Bambu and Elegoo printers their layer, with the move in it estimated; PrusaLink printers an estimate from their progress.",
+      "Open a print (from Prints, or a printer card's picture or name) to see its sliced plate follow the printer: everything printed so far and the layer it's on. Klipper and OctoPrint printers show the very move they're on; Bambu and Elegoo printers their layer, with the move in it estimated; PrusaLink printers an estimate from their progress. What's still to print is drawn faintly above it (turn that off under the preview's options).",
       "Every sliced plate's picture or name opens its preview: on Jobs, the queue, projects and the library. A preview's address keeps the plate and layer, so a link opens the same view.",
+      "Models that haven't been sliced say \"Not sliced\" wherever they're listed, with a Slice button that opens them on the Slice page with their settings.",
     ],
   },
   {

@@ -17,6 +17,10 @@
 // frustum-culled. Above BEAD_BUDGET segments (or on request) the extrusions
 // are drawn as 1-pixel lines from the same arrays instead, and above
 // MOVING_LINES they stand in for the beads while the camera moves.
+//
+// What comes after the range (the rest of the top layer, the layers above)
+// can be drawn as faint see-through lines ("ghost"), from the same buffers:
+// what's still to print over what's printed.
 
 import * as THREE from "three";
 import { fillColors, type ColorMode, type Gradient } from "./colors";
@@ -53,6 +57,8 @@ export interface ViewRange {
   retractions: boolean;
   /** Darken the layers below the top one. */
   dim: boolean;
+  /** Draw what comes after the range faintly (what's still to print). */
+  ghost?: boolean;
 }
 
 const HIDDEN_GLSL = /* glsl */ `
@@ -147,6 +153,30 @@ void main() {
 }
 `;
 
+// The ghost: the same line strip, faint and see-through, no dimming.
+const GHOST_VERTEX = /* glsl */ `
+in vec4 aColor;
+${HIDDEN_GLSL}
+flat out vec4 vColor;
+
+void main() {
+  int segment = gl_VertexID - 1;
+  bool hidden = featureHidden(uint(aColor.a * 255.0 + 0.5));
+  vColor = vec4(mix(aColor.rgb, vec3(0.8), 0.7), hidden ? 0.0 : 1.0);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const GHOST_FRAGMENT = /* glsl */ `
+flat in vec4 vColor;
+uniform float uGhostAlpha;
+out highp vec4 outColor;
+void main() {
+  if (vColor.a < 0.5) discard;
+  outColor = vec4(vColor.rgb, uGhostAlpha);
+}
+`;
+
 const LINE_FRAGMENT = /* glsl */ `
 flat in vec4 vColor;
 out highp vec4 outColor;
@@ -232,6 +262,9 @@ export class Toolpaths {
   private moving = false;
   private chunks: Chunk[] = [];
   private line: THREE.Line<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
+  private ghost: THREE.Line<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
+  /** The chain's points and colours as line attributes, shared by the line and the ghost. */
+  private lineAttrs: { position: THREE.BufferAttribute; color: THREE.BufferAttribute } | null = null;
   private travel: THREE.LineSegments | null = null;
   private retract: THREE.Points | null = null;
   private head: THREE.Mesh;
@@ -271,7 +304,7 @@ export class Toolpaths {
   recolor(mode: ColorMode, filamentColors: string[], range?: Gradient): void {
     fillColors(this.colors, this.p, mode, filamentColors, range);
     for (const c of this.chunks) c.mesh.geometry.attributes.iColor.needsUpdate = true;
-    if (this.line) this.line.geometry.attributes.aColor.needsUpdate = true;
+    if (this.lineAttrs) this.lineAttrs.color.needsUpdate = true;
   }
 
   setView(v: ViewRange): void {
@@ -313,6 +346,13 @@ export class Toolpaths {
       this.line.geometry.setDrawRange(lo, hi > lo ? hi - lo + 1 : 0);
       this.line.visible = hi > lo && (this.mode === "lines" || standIn);
     }
+
+    // What's still to come, faintly: from the end of the range to the end of the file.
+    if (v.ghost && hi < extrusions.count) {
+      const g = this.ghostLine();
+      g.geometry.setDrawRange(hi, extrusions.count - hi + 1);
+      g.visible = true;
+    } else if (this.ghost) this.ghost.visible = false;
 
     // Travels and retractions in range: up to the scrubbed point in the top layer.
     if (v.travel) {
@@ -400,7 +440,7 @@ export class Toolpaths {
       c.mesh.material.dispose();
     }
     this.beads.dispose();
-    for (const o of [this.line, this.travel, this.retract, this.head]) {
+    for (const o of [this.line, this.ghost, this.travel, this.retract, this.head]) {
       if (!o) continue;
       o.geometry.dispose();
       (o.material as THREE.Material).dispose();
@@ -413,10 +453,7 @@ export class Toolpaths {
     const e = this.p.extrusions;
     if (e.count === 0) return;
     if (this.mode === "lines" || e.count > MOVING_LINES) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(e.points, 3));
-      g.setAttribute("aColor", new THREE.BufferAttribute(this.colors, 4, true));
-      g.boundingSphere = chainSphere(e.points, 0, e.count);
+      const g = this.lineGeometry();
       const m = new THREE.ShaderMaterial({
         glslVersion: THREE.GLSL3,
         vertexShader: LINE_VERTEX,
@@ -469,6 +506,37 @@ export class Toolpaths {
       this.line.material.dispose();
       this.line = null;
     }
+  }
+
+  /** A geometry over the chain as a line strip (its attributes shared, uploaded once). */
+  private lineGeometry(): THREE.BufferGeometry {
+    const e = this.p.extrusions;
+    this.lineAttrs ??= {
+      position: new THREE.BufferAttribute(e.points, 3),
+      color: new THREE.BufferAttribute(this.colors, 4, true),
+    };
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", this.lineAttrs.position);
+    g.setAttribute("aColor", this.lineAttrs.color);
+    g.boundingSphere = chainSphere(e.points, 0, e.count);
+    return g;
+  }
+
+  private ghostLine(): THREE.Line<THREE.BufferGeometry, THREE.ShaderMaterial> {
+    if (this.ghost) return this.ghost;
+    const m = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader: GHOST_VERTEX,
+      fragmentShader: GHOST_FRAGMENT,
+      uniforms: { uHidden0: this.shared.uHidden0, uHidden1: this.shared.uHidden1, uGhostAlpha: { value: 0.14 } },
+      transparent: true,
+      depthWrite: false,
+    });
+    this.ghost = new THREE.Line(this.lineGeometry(), m);
+    // After the opaque toolpaths, so it never hides them.
+    this.ghost.renderOrder = 1;
+    this.group.add(this.ghost);
+    return this.ghost;
   }
 
   private travelLines(): THREE.LineSegments {

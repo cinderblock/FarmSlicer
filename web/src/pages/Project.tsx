@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { previewPath } from "../links";
+import SlicedName from "../components/SlicedName";
 import { apiJson } from "../auth";
 import { errorText, localDate, localDateTime, useJson } from "../api";
 import ProgressBar from "../components/ProgressBar";
@@ -271,10 +272,26 @@ function ItemRow({ project, item, onChange, onError }: { project: ProjectDetail;
       onError(errorText(e));
     }
   };
+  // A sliced plate carrying this item (the first), else whether its recipe can be sliced.
+  const carrier = project.jobs
+    .filter((j) => j.visible && j.sendable)
+    .flatMap((j) => j.parts.filter((x) => x.item_id === item.id).map((x) => ({ job: j.job_id, plate: x.plate })))[0];
+  const recipe = project.jobs.find((j) => j.job_id === item.job_id);
+  const recipeBusy = recipe?.status === "queued" || recipe?.status === "slicing";
   return (
     <tr className={item.done ? "item-done" : ""}>
       <td className="cell-title">
-        {item.name}
+        {carrier ? (
+          <SlicedName jobId={carrier.job} plate={carrier.plate} sliced canSlice={false}>
+            {item.name}
+          </SlicedName>
+        ) : item.job_id && !recipeBusy ? (
+          <SlicedName jobId={item.job_id} sliced={false} canSlice={project.can_edit}>
+            {item.name}
+          </SlicedName>
+        ) : (
+          item.name
+        )}
         {item.job_id && <div className="hint">from <Link to={`/jobs/${item.job_id}`}>its job</Link></div>}
         {item.notes && <div className="hint">{item.notes}</div>}
       </td>

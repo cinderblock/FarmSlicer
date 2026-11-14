@@ -470,7 +470,12 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   against the parser's byte offset per segment (`Extrusions.offset`;
   printers get the plate's bytes as the preview serves them), else the
   layer plus an estimate in it from the time since it changed, else the
-  percentage over the layers' times. Plan: `plans/sliced-view-everywhere.md`
+  percentage over the layers' times. `ViewRange.ghost` (scene.ts) draws
+  the rest of the file as a faint see-through line strip on the same
+  buffers (option in the preview, `localStorage` `farmslicer.preview.ghost`,
+  default on while following a print). `components/SlicedName.tsx`: a
+  model's name that opens its preview, or says "Not sliced" with a Slice
+  button (`/slice?from=`). Plan: `plans/sliced-view-everywhere.md`
 - `cxx/thumbnail.{hpp,cpp}` — software rasteriser for plate thumbnails (no
   GL anywhere) and the label/logo overlay (stb_truetype from libslic3r's
   Emboss.cpp; logo arrives as RGBA). slice_core passes it to
