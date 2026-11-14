@@ -174,6 +174,13 @@ with no export and manual upload. Then let AI agents do the same, and more.
   Renovate's window: ops `b4419e7e` pins it, Server Deploys run 43585814884
   passed, `/version.json` on sentinel says `72d2df0`, and `/api/mcp`,
   `/api/mcp/tools` and the OctoPrint host answer 401 without credentials.
+- 2026-11-14: live MCP check on production, from the owner's signed-in
+  Chrome on the LAN: a temporary personal key made and revoked there (it
+  never left the page). No key = 401; initialize (2025-06-18), initialized
+  = 202, tools/list = all 13; whoami (owner), list_printers (4),
+  list_jobs, list_queue, list_projects all fine; `/api/mcp/tools` = 200
+  with the session. That Chrome has no `document.modelContext`, so WebMCP
+  itself is still untried.
 - [ ] Try WebMCP in a browser that has it (manual).
 - [ ] Try the adapter from a real OrcaSlicer against the dev instance (manual).
 - [ ] Try the MCP server from a real Claude Code against the dev instance
