@@ -161,7 +161,10 @@ function npmPackages() {
     }
   };
   visit(web, root.dependencies, false);
-  return [...found].map(([dir, pj]) => {
+  // The same name and version installed in two places is one package.
+  const unique = new Map();
+  for (const [dir, pj] of found) if (!unique.has(`${pj.name}@${pj.version}`)) unique.set(`${pj.name}@${pj.version}`, [dir, pj]);
+  return [...unique.values()].map(([dir, pj]) => {
     let license = pj.license ?? pj.licenses ?? "NOASSERTION";
     if (typeof license === "object") license = [license].flat().map((l) => l.type ?? l).join(" OR ");
     const author = typeof pj.author === "string" ? pj.author : pj.author?.name;
