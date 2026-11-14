@@ -70,8 +70,16 @@ Bring the Slice page's plate up to what desktop slicers offer
   an instance (a part with a placement). The job's plates
   (`src/placement.rs`) don't change: one file still places as one rigid
   group. Splitting into objects makes new models.
-- **An unedited model is uploaded as it is** (smaller than a re-encoded
-  3MF). A derived 3MF is uploaded only once something changes the model.
+- **An unedited STL is uploaded as it is** (smaller than a re-encoded 3MF).
+  Every 3MF, and every edited model, goes as a 3MF the browser wrote, so
+  the slicer sees exactly what the editor showed: a Prusa project's
+  triangle-range volumes, core 3MF colours, components across files all
+  arrive in one dialect.
+- **Scale and mirror are per copy**, in the placement's matrix
+  (`src/placement.rs`: any linear transform with every axis scaled
+  between 0.001 and 1000 and not flat), as instances are in the desktop
+  app. A volume's matrix (inside its object) holds where the volume sits.
+  slice_core already applied the matrix as a general linear map.
 - **The painting data format is TriangleSelector's own**, so painting
   matches the desktop app triangle for triangle: a split tree per original
   triangle, the same split rule, and the same bitstream as hex nibbles.
@@ -87,33 +95,40 @@ Bring the Slice page's plate up to what desktop slicers offer
 ## Plan / steps
 
 ### Phase 1: model library (`web/src/model/`, pure TS, unit-tested)
-1. [ ] `mesh.ts`: indexed triangle sets, bounds, transforms (4x4,
+1. [x] `mesh.ts`: indexed triangle sets, bounds, transforms (4x4,
    row-major like libslic3r's when serialized), connected components, welding.
-2. [ ] `xml.ts` + `zip` (fflate): read and write.
-3. [ ] `stl.ts`: binary and ASCII STL reader.
-4. [ ] `threemf.ts`: read the core spec, the production extension
+2. [x] `xml.ts` + `zip` (fflate): read and write.
+3. [x] `stl.ts`: binary and ASCII STL reader.
+4. [x] `threemf.ts`: read the core spec, the production extension
    (components in other model files), and Bambu/Orca metadata; write the
    Orca dialect.
-5. [ ] `paint.ts`: TriangleSelector port: deserialize and serialize
+5. [x] `paint.ts`: TriangleSelector port: deserialize and serialize
    (compatible), splitting, brushes (circle and sphere), smart fill, bucket
    fill, height range, the leaf triangles for display.
-6. [ ] `document.ts`: ModelObject → volumes (mesh, type, extruder,
-   transform, paint per kind), object settings, edit operations, undo stack.
+6. [x] `document.ts`: ModelObject → volumes (mesh, type, extruder,
+   transform, paint per kind), object settings. (Edit operations and the
+   undo stack belong to Phase 4.)
 
 ### Phase 2: slicer side
-1. [ ] **Verify `read_from_file` loads 3MF objects at all.** slice_core calls
+1. [x] **Verify `read_from_file` loads 3MF objects at all.** Confirmed
+   broken, fixed (`LoadModel | AddDefaultInstances`). slice_core calls
    it with the default `LoadStrategy::AddDefaultInstances`, which lacks
    `LoadModel`. `_BBS_3MF_Importer` skips every object without it
    (`bbs_3mf.cpp` `_handle_end_object`). If confirmed, pass
    `LoadModel | AddDefaultInstances` and add a 3MF slice to the tests.
-2. [ ] slice_core: refuse a model whose volume or paint names filament N
+2. [x] slice_core: refuse a model whose volume or paint names filament N
    beyond the job's filament count, with a clear message. Don't let
    libslic3r crash or silently skip it.
-3. [ ] Server: check uploaded model 3MFs: zipcheck; keys in
-   `model_settings.config` against `config_policy`; size caps.
-4. [ ] Nozzle plan (`src/nozzles.rs`): filaments the models paint or assign,
-   not only part plus supports.
-5. [ ] Tests: a 3MF the TS writer made (painted, two volumes on two
+3. [x] Server: check uploaded model 3MFs (`src/model_check.rs`): zipcheck;
+   keys in `model_settings.config` / `Slic3r_PE_model.config` against
+   `config_policy`.
+4. [x] Nozzle plan (`src/nozzles.rs`): no change needed. Filaments that
+   aren't support filaments already count as part filaments.
+5. [ ] (current) Tests: e2e `tests/model-3mf-e2e.mjs` (policy, scaled and
+   mirrored copies) with fixtures from `tests/fixtures/models/make.ts`; a
+   real slice of `painted.3mf` on buildhost (image `farmslicer:model-edit`,
+   `~/farmslicer-model-edit-docker`, libslic3r stage from
+   `farmslicer:openssl-test-libslic3r`). Still to do: a 3MF the TS writer made (painted, two volumes on two
    filaments) sliced by both engines, with the tool changes checked in the
    G-code.
 
@@ -149,10 +164,24 @@ Bring the Slice page's plate up to what desktop slicers offer
 
 ## Findings / gotchas
 
-- `read_from_file(path)` uses `LoadStrategy::AddDefaultInstances` only; the
+- `read_from_file(path)` used `LoadStrategy::AddDefaultInstances` only; the
   BBS 3MF importer creates no objects without `LoadStrategy::LoadModel`.
-  Unverified at run time, but from the source the server can't slice a 3MF
-  upload today. The viewer accepts them. (Phase 2.1.)
+  Proved on 2026-11-14 with the production image: an STL cube sliced, the
+  same cube as a 3MF failed with "The supplied file couldn't be read
+  because it's empty". Fixed in Phase 2.
+- The 3MF reader sends every unrecognised object or part metadata key to
+  `config.set_deserialize`: model settings are config. Hence
+  `src/model_check.rs`.
+- Without a project config loaded, the reader doesn't clamp filament
+  numbers (`max_filament_id` = INT_MAX), so slice_core checks them.
+- The reader needs `Application` = `OrcaSlicer-…`/`BambuStudio-…` to treat
+  a file as its own (`m_is_bbl_3mf`). FarmSlicer writes
+  `FarmSlicer-<version>` instead. The difference for one object with one
+  build item is the object's name (set from metadata anyway). Verify that
+  volumes, paint and filaments load in the real slice (Phase 2.5).
+- quick-xml 0.42 compares names and keys as `&str` (`e.name().as_ref() ==
+  "metadata"`); `unescape_value` is deprecated, use
+  `quick_xml::escape::unescape(&a.value)`.
 - TriangleSelector serialization: per painted original triangle, a nibble
   stream, written as hex with the **last nibble first** (`get_triangle_as_string`
   inserts each digit at the front). Nibble = `xxyy`: `yy` = split sides
@@ -170,6 +199,9 @@ Bring the Slice page's plate up to what desktop slicers offer
 ## Progress log
 
 - [x] Plan written (2026-11-14).
+- [x] Phase 1 committed (`6547b0e`): model library, 18 unit tests.
+- [x] Phase 2 code: LoadModel fix, filament check, scale and mirror per
+  copy, model_check. `cargo test` 189 passed on buildhost.
 
 ## Open questions for the user
 
