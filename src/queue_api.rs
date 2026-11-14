@@ -234,17 +234,44 @@ async fn add_entries(
     let pool = body.pool_id.as_deref().filter(|p| !p.is_empty());
     check_pin(&state, pin, pool)?;
     let note = note_of(body.note.as_deref());
+    let place = Placement { priority, printer_id: pin, pool_id: pool, note: note.as_deref() };
+    let added: Vec<Value> = enqueue(&state, &user, &job, &plates, count, &place)
+        .iter()
+        .map(|e| entry_json(&state, &tree, &viewer, e, None))
+        .collect();
+    Ok((StatusCode::CREATED, Json(json!(added))))
+}
+
+/// Where and how new queue entries wait.
+#[derive(Default)]
+pub(crate) struct Placement<'a> {
+    pub priority: i64,
+    pub printer_id: Option<&'a str>,
+    pub pool_id: Option<&'a str>,
+    pub note: Option<&'a str>,
+}
+
+/// Queue `count` copies of each of `plates` (checked by the caller) of
+/// `job` for `user`, then let projects and the send modes know.
+pub(crate) fn enqueue(state: &AppState, user: &User, job: &Job, plates: &[i64], count: i64, place: &Placement) -> Vec<QueueEntry> {
     let mut added = Vec::new();
-    for plate in &plates {
+    for plate in plates {
         for _ in 0..count {
-            let e = state.db.add_queue_entry(&job.id, *plate, priority, pin, pool, note.as_deref(), Some(&user.id));
-            added.push(entry_json(&state, &tree, &viewer, &e, None));
+            added.push(state.db.add_queue_entry(
+                &job.id,
+                *plate,
+                place.priority,
+                place.printer_id,
+                place.pool_id,
+                place.note,
+                Some(&user.id),
+            ));
         }
     }
     println!("Queue: {} queues {} entr{} of {}", user.username, added.len(), if added.len() == 1 { "y" } else { "ies" }, job.model_name);
-    crate::projects::refresh_for_job(&state, Some(&job.id));
-    crate::dispatch::poke(&state);
-    Ok((StatusCode::CREATED, Json(json!(added))))
+    crate::projects::refresh_for_job(state, Some(&job.id));
+    crate::dispatch::poke(state);
+    added
 }
 
 fn managed_entry(state: &AppState, user: &User, id: &str) -> Result<(QueueEntry, Tree, Viewer), ApiError> {

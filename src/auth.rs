@@ -8,7 +8,7 @@
 //! - Sessions: random 256-bit token in the `fs_session` cookie; the database
 //!   keeps only its SHA-256.
 //! - API keys: `fsk_` + 256 random bits, shown once, stored as SHA-256, sent
-//!   as `Authorization: Bearer fsk_...`.
+//!   as `Authorization: Bearer fsk_...` (or `X-Api-Key: fsk_...`).
 //! - Roles: `owner` (first account), `admin`, `user`. Admins cannot modify
 //!   the owner.
 //! - Kinds: `full` accounts sign in with passkeys; `guest` accounts (created
@@ -371,10 +371,18 @@ pub fn session_token_from_request(req: &Request) -> Option<String> {
     })
 }
 
+/// The API key a request carries: `Authorization: Bearer fsk_...`, or
+/// `X-Api-Key: fsk_...` (what desktop slicers send to an OctoPrint print
+/// host, src/print_host.rs).
 fn bearer_from_request(req: &Request) -> Option<String> {
-    let value = req.headers().get(header::AUTHORIZATION)?.to_str().ok()?;
-    value
-        .strip_prefix("Bearer ")
+    let headers = req.headers();
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let api_key = || headers.get("x-api-key").and_then(|v| v.to_str().ok());
+    bearer
+        .or_else(api_key)
         .map(str::trim)
         .filter(|v| v.starts_with(API_KEY_PREFIX))
         .map(str::to_string)

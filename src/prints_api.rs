@@ -82,8 +82,25 @@ async fn upload_package(
     let Some((name, data)) = file else {
         return Err(api_err(StatusCode::BAD_REQUEST, "no file"));
     };
+    let job = store_upload(&state, &user, scope.as_ref(), &name, data, group_id).await?;
+    Ok((StatusCode::CREATED, Json(json!(job))))
+}
+
+/// A sliced file (`.gcode.3mf` or G-code) becomes a finished job, charged
+/// to `group_id` (an integration key's own group when it has one): the
+/// upload policy, quotas, the package's inspection and the G-code check
+/// all apply. `POST /api/uploads` and the slicers' print-host upload
+/// (src/print_host.rs) both come here.
+pub(crate) async fn store_upload(
+    state: &Arc<AppState>,
+    user: &User,
+    scope: Option<&crate::integration::Scope>,
+    name: &str,
+    data: axum::body::Bytes,
+    mut group_id: Option<String>,
+) -> Result<Job, ApiError> {
     // An integration key's uploads are its group's.
-    if let Some(g) = scope.as_ref().and_then(|s| s.group_id.clone()) {
+    if let Some(g) = scope.and_then(|s| s.group_id.clone()) {
         match &group_id {
             Some(given) if *given != g => {
                 return Err(api_err(StatusCode::FORBIDDEN, "this key uploads for its own group only"));
@@ -92,9 +109,9 @@ async fn upload_package(
         }
     }
 
-    let (tree, viewer) = groups_api::context(&state, &user);
+    let (tree, viewer) = groups_api::context(state, user);
     if let Some(g) = &group_id {
-        let keys_own = scope.as_ref().is_some_and(|s| s.group_id.as_deref() == Some(g.as_str()))
+        let keys_own = scope.is_some_and(|s| s.group_id.as_deref() == Some(g.as_str()))
             && (viewer.admin || viewer.can_manage(&tree, g));
         if tree.get(g).is_none() || (!viewer.can_charge(g) && !keys_own) {
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
@@ -107,7 +124,7 @@ async fn upload_package(
             "sliced files can't be uploaded here: slice the model in FarmSlicer instead",
         ));
     }
-    quota::check(&state.db, &tree, &user, group_id.as_deref())
+    quota::check(&state.db, &tree, user, group_id.as_deref())
         .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e))?;
 
     let dir = state.data_dir.join("packages");
@@ -128,7 +145,7 @@ async fn upload_package(
 
     let job = state
         .db
-        .create_job(&name, "", None, "auto", None, None, "upload", Some(&user.id), group_id.as_deref(), 0, None);
+        .create_job(name, "", None, "auto", None, None, "upload", Some(&user.id), group_id.as_deref(), 0, None);
     let path = dir.join(format!("{}{}", job.id, pkg.format.extension()));
     std::fs::rename(&staging, &path).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = path.to_string_lossy().to_string();
@@ -136,7 +153,7 @@ async fn upload_package(
         .db
         .set_job_package(&job.id, &path, &serde_json::to_string(&pkg).expect("packages serialize"));
     finish_job(
-        &state,
+        state,
         &job.id,
         &path,
         pkg.total_time_sec(),
@@ -155,7 +172,7 @@ async fn upload_package(
         data.len(),
         pkg.plates.len()
     );
-    Ok((StatusCode::CREATED, Json(json!(state.db.get_job(&job.id)))))
+    Ok(state.db.get_job(&job.id).unwrap_or(job))
 }
 
 #[derive(Deserialize)]

@@ -1812,6 +1812,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())
         .merge(prints_api::routes())
+        .merge(crate::print_host::routes())
         .merge(crate::projects_api::routes())
         .merge(crate::queue_api::routes())
         .merge(crate::pools::routes())

@@ -31,6 +31,7 @@ mod printer;
 mod printer_thumbs;
 mod printers_api;
 mod printing;
+mod print_host;
 mod preview_api;
 mod reports_api;
 mod prusalink;

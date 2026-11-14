@@ -92,6 +92,12 @@ can run in the user's browser.
   (WebAssembly, Web Worker, multithreaded when the page is cross-origin
   isolated). A browser slice uploads its models with the job (or keeps
   them on the device), then its G-code.
+- **Send from a desktop slicer:** FarmSlicer answers as an OctoPrint print
+  host at `https://<farm>/api/octoprint`, with an API key. OrcaSlicer,
+  PrusaSlicer and SuperSlicer can send a sliced plate straight to it.
+  "Upload" makes a job, and "Upload and print" also queues the plate. For
+  Bambu printers in OrcaSlicer, turn on "Use 3rd-party print host" and "Use
+  3MF instead of G-code" in the printer's settings.
 - **Printers:** five kinds, each on the LAN (see [Printers](#printers)):
   Bambu Lab, Klipper (Moonraker), OctoPrint, Prusa (PrusaLink) and Elegoo
   Centauri Carbon (SDCP). Discovery, live status (state, progress,
@@ -259,7 +265,7 @@ Passkeys need a secure context: HTTPS, or `localhost` for development. The
 relying-party ID is the host of the first `FARMSLICER_ORIGINS` entry.
 
 Scripts and other machines authenticate with an **API key** created on the
-Account page (shown once), sent as `Authorization: Bearer fsk_…`. A key has the
+Account page (shown once), sent as `Authorization: Bearer fsk_…` (or `X-Api-Key: fsk_…`). A key has the
 permissions of the account that created it; revoke it there.
 `tests/passkey-e2e.mjs` drives all of the above against a running server with
 a software authenticator.
@@ -518,6 +524,7 @@ summary prints the `pin.json` to paste there.
 | `POST /api/printers/{id}/control` | `{action: pause\|resume\|stop\|speed, level \| percent}` on whatever the printer runs (admins) |
 | `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay`, `GET /api/groups/{id}/overlay/logo` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` or `.gcode` becomes a finished, sendable job (what it needs is read from the slicer's comments); its G-code is checked at once (each plate's `check` in `package_json`). 400 for ambiguous archives or G-code changed after slicing; 403 where uploads are denied |
+| `GET /api/octoprint/api/version`, `POST /api/octoprint/api/files/local` (multipart `file`, `print`, `plateindex`) | OctoPrint's upload API for desktop slicers (key in `X-Api-Key`): the file becomes a job as with `/api/uploads`; `print=true` also queues the plate `plateindex` names (else every plate). Errors are plain text |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability, its capabilities and (Bambu) a suggested AMS mapping, plus the plate's `gcode_check`, `blocked` and `needs_review` findings |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems, acknowledge_review}`: upload and start. 409 when the plate's G-code is blocked; findings that need review make a member's print wait for an admin, and an admin's send needs `acknowledge_review` |
 | `GET /api/prints?printer=&active=1&pending=1&unchecked=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status (each print's `lines`: what it holds, one per kind of part, and `outcome`); pause/resume/stop/speed as the printer allows (sender, group managers, admins) |

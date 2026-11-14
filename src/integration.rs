@@ -74,6 +74,9 @@ pub fn allows(scope: &Scope, method: &Method, path: &str) -> Result<(), String> 
         (["api", "projects", ..], false) => Some("projects:write"),
         (["api", "jobs"], false) if method == Method::POST => Some("projects:write"),
         (["api", "uploads"], false) if method == Method::POST => Some("projects:write"),
+        // A desktop slicer's print-host upload (src/print_host.rs).
+        (["api", "octoprint", "api", "version"], true) => None,
+        (["api", "octoprint", "api", "files", "local"], false) if method == Method::POST => Some("projects:write"),
         (["api", "jobs", _], true) | (["api", "jobs", _, "parts" | "thumbnail"], true) => Some("projects:read"),
         (["api", "usage", "prints"], true) => Some("usage:read"),
         _ => return Err("this integration key doesn't reach that (it works with projects and usage)".into()),
@@ -490,6 +493,9 @@ mod tests {
         assert!(allows(&write, &Method::GET, "/api/projects").is_ok(), "write implies read");
         assert!(allows(&write, &Method::POST, "/api/jobs").is_ok());
         assert!(allows(&write, &Method::POST, "/api/uploads").is_ok());
+        assert!(allows(&read, &Method::GET, "/api/octoprint/api/version").is_ok(), "a slicer's connection test");
+        assert!(allows(&read, &Method::POST, "/api/octoprint/api/files/local").unwrap_err().contains("projects:write"));
+        assert!(allows(&write, &Method::POST, "/api/octoprint/api/files/local").is_ok());
         assert!(allows(&write, &Method::DELETE, "/api/jobs/x").is_err());
         assert!(allows(&write, &Method::POST, "/api/queue").is_err());
         assert!(allows(&write, &Method::POST, "/api/integrations/keys").is_err());

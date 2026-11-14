@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-13d",
+    date: "2026-11-13",
+    title: "Send from your slicer",
+    highlights: [
+      "OrcaSlicer, PrusaSlicer and SuperSlicer can send sliced plates straight to FarmSlicer: set it up as an OctoPrint print host with one of your API keys (your Account page shows how). \"Upload\" makes a job; \"Upload and print\" also puts the plate in the print queue.",
+    ],
+  },
+  {
     id: "2026-11-13c",
     date: "2026-11-13",
     title: "Watch prints layer by layer",

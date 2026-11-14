@@ -345,6 +345,24 @@ export default function AccountPage() {
             </button>
             {apiKeyError && <p className="login-error">{apiKeyError}</p>}
           </form>
+
+          <h3>Send from your slicer</h3>
+          <p className="hint">
+            OrcaSlicer, PrusaSlicer and SuperSlicer can send a sliced plate straight here. FarmSlicer acts as an
+            OctoPrint print host: "Upload" makes a job, and "Upload and print" also puts the plate in the print
+            queue. API keys work on the local network only.
+          </p>
+          <ol className="hint">
+            <li>Create an API key above for the slicer.</li>
+            <li>
+              In the slicer's printer connection, choose <strong>OctoPrint</strong>. For the host, enter{" "}
+              <code>{`${window.location.origin}/api/octoprint`}</code>. Paste the key as the API key, then press Test.
+            </li>
+            <li>
+              For a Bambu printer in OrcaSlicer, open the printer's settings, then Basic information, then Advanced.
+              Turn on <strong>Use 3rd-party print host</strong> and <strong>Use 3MF instead of G-code</strong>.
+            </li>
+          </ol>
         </>
       )}
     </div>
