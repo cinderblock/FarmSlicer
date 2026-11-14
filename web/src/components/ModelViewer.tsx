@@ -13,6 +13,10 @@ import { applyPaint, History, restore, sameSnapshot, snapshot, type Change, type
 import { loadModel, mergeObjects, modelFile } from "../model/load";
 import { usedFilaments, type ModelObject } from "../model/document";
 import ObjectPanel from "./viewer/ObjectPanel";
+import { PaintControls, PaintSurface } from "./viewer/PaintTool";
+import { DEFAULT_PAINT, PAINT_TOOLS, type PaintSettings } from "./viewer/paintSettings";
+import { ENFORCER, type PaintKind } from "../model/paint";
+import type { PaintChange } from "./viewer/history";
 
 export type { Fit } from "./viewer/part";
 export type { SupportCheck } from "./viewer/overhangs";
@@ -171,8 +175,10 @@ function Guides({ guides, bed }: { guides: Guide[]; bed: SceneBed }) {
   );
 }
 
-function PartView(props: GizmoProps & { tool: Tool; selected: boolean; onSelect: (part: Part) => void }) {
-  const { part, tool, selected, onSelect } = props;
+function PartView(
+  props: GizmoProps & { tool: Tool; selected: boolean; painting: boolean; onSelect: (part: Part) => void },
+) {
+  const { part, tool, selected, painting, onSelect } = props;
   const bodyDown = useBodyDrag(props);
   return (
     <>
@@ -184,6 +190,8 @@ function PartView(props: GizmoProps & { tool: Tool; selected: boolean; onSelect:
             // The nearest part takes the click, not the ones behind it.
             if (e.intersections[0]?.object !== e.object) return;
             onSelect(part);
+            // Painting: a click picks the part to paint, nothing moves.
+            if (painting) return;
             // On a touch screen the parts cover most of the view: a finger
             // landing on one orbits the camera and selects it; only a part
             // already selected is dragged.
@@ -192,10 +200,10 @@ function PartView(props: GizmoProps & { tool: Tool; selected: boolean; onSelect:
             bodyDown(e);
           }}
         />
-        {selected && tool === "flat" && <FaceTool {...props} />}
+        {selected && !painting && tool === "flat" && <FaceTool {...props} />}
       </primitive>
-      {selected && tool === "move" && <MoveGizmo {...props} />}
-      {selected && tool === "rotate" && <RotateGizmo {...props} />}
+      {selected && !painting && tool === "move" && <MoveGizmo {...props} />}
+      {selected && !painting && tool === "rotate" && <RotateGizmo {...props} />}
     </>
   );
 }
@@ -205,17 +213,24 @@ function Scene({
   selected,
   bed,
   tool,
+  paint,
+  paintNow,
   onSelect,
   onChange,
   onCommit,
+  onStroke,
 }: {
   parts: Part[];
   selected: Part | null;
   bed: SceneBed;
   tool: Tool;
+  /** Painting with these settings (null: not painting). */
+  paint: PaintSettings | null;
+  paintNow: { readonly current: PaintSettings };
   onSelect: (part: Part) => void;
   onChange: () => void;
   onCommit: () => void;
+  onStroke: (change: PaintChange) => void;
 }) {
   const [guides, setGuides] = useState<Guide[]>([]);
   return (
@@ -232,6 +247,7 @@ function Scene({
           bed={bed}
           tool={tool}
           selected={part === selected}
+          painting={paint !== null}
           onSelect={onSelect}
           onChange={onChange}
           onCommit={onCommit}
@@ -239,6 +255,9 @@ function Scene({
         />
       ))}
       <Guides guides={guides} bed={bed} />
+      {paint && selected && (
+        <PaintSurface key={selected.id} part={selected} settings={paint} current={paintNow} onStroke={onStroke} />
+      )}
       {/* Direct control, CAD style: no damping (it made the view drift on
           and lag behind the pointer). Left orbits, middle/right pan, the
           wheel zooms towards the pointer. */}
@@ -363,6 +382,14 @@ export default function ModelViewer({
   const [tool, setTool] = useState<Tool>("move");
   const [showOverhangs, setShowOverhangs] = useState(true);
   const [uniformScale, setUniformScale] = useState(true);
+  // Painting: which kind and how (null: not painting).
+  const [painting, setPainting] = useState<PaintKind | null>(null);
+  const [paintSettings, setPaintSettings] = useState<PaintSettings>(DEFAULT_PAINT);
+  // The same, for the paint tool's pointer handlers (see PaintSurface).
+  const paintNow = useRef<PaintSettings>(DEFAULT_PAINT);
+  useEffect(() => {
+    paintNow.current = painting ? { ...paintSettings, kind: painting } : paintSettings;
+  });
   // Bumped when a manipulation ends: overhangs are found again then (not
   // on every frame of a drag).
   const [settled, setSettled] = useState(0);
@@ -558,6 +585,54 @@ export default function ModelViewer({
     if (e) applyChange(e.change, "after");
     syncHistory();
   }, [applyChange, syncHistory]);
+
+  // While painting, every copy shows that kind of paint; else the colours.
+  useEffect(() => {
+    for (const p of parts) p.setPaintView(painting ?? "color");
+  }, [parts, painting]);
+
+  /** Start (or stop) painting `kind`, with a sensible thing to paint. */
+  const togglePaint = useCallback((kind: PaintKind) => {
+    setPainting((cur) => (cur === kind ? null : kind));
+    setPaintSettings((s) =>
+      s.kind === kind
+        ? s
+        : {
+            ...s,
+            kind,
+            state: kind === "color" ? 1 : ENFORCER,
+            brush: kind !== "color" && s.brush === "height" ? "circle" : s.brush,
+          },
+    );
+  }, []);
+
+  /** A paint stroke ended: one undo step; the model's upload is made again. */
+  const recordPaint = useCallback(
+    (change: PaintChange, label = "Paint") => {
+      if (change.layers.length === 0) return;
+      change.shape.version++;
+      history.current.push({ label, change: { kind: "paint", ...change } });
+      syncHistory();
+      setSettled((n) => n + 1);
+      report.current?.(plateState(parts, shape, plateCount));
+    },
+    [syncHistory, parts, shape, plateCount],
+  );
+
+  /** Take this kind of paint off the selected model. */
+  const clearPaint = useCallback(() => {
+    if (!selected || !painting) return;
+    const s = selected.shape;
+    const layers = s.object.volumes
+      .filter((v) => v.paint[painting] && !v.paint[painting]!.empty)
+      .map((v) => {
+        const before = v.paint[painting]!.clone();
+        delete v.paint[painting];
+        s.refreshPaint(v.id, painting);
+        return { volumeId: v.id, kind: painting, before, after: undefined };
+      });
+    recordPaint({ shape: s, layers }, "Clear paint");
+  }, [selected, painting, recordPaint]);
 
   /**
    * Show plate `index`, selecting its first part. Leaving an empty plate
@@ -879,7 +954,15 @@ export default function ModelViewer({
         return;
       }
       if (parts.length === 0 || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (key === "escape") setTool("none");
+      if (key === "escape") {
+        setTool("none");
+        setPainting(null);
+      }
+      const paintTool = PAINT_TOOLS.find((x) => x.key.toLowerCase() === key);
+      if (paintTool) {
+        togglePaint(paintTool.kind);
+        return;
+      }
       if (key === "delete" || key === "backspace") {
         e.preventDefault();
         remove();
@@ -890,11 +973,14 @@ export default function ModelViewer({
         return;
       }
       const t = TOOLS.find((x) => x.key.toLowerCase() === key);
-      if (t) setTool((cur) => (cur === t.tool ? "none" : t.tool));
+      if (t) {
+        setPainting(null);
+        setTool((cur) => (cur === t.tool ? "none" : t.tool));
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [parts, remove, arrangeAll, undo, redo]);
+  }, [parts, remove, arrangeAll, undo, redo, togglePaint]);
 
   const select = useCallback((part: Part) => setSelectedId(part.id), []);
 
@@ -996,9 +1082,12 @@ export default function ModelViewer({
             {TOOLS.map((t) => (
               <button
                 key={t.tool}
-                className={tool === t.tool ? "active" : ""}
+                className={tool === t.tool && !painting ? "active" : ""}
                 disabled={!selected}
-                onClick={() => setTool(tool === t.tool ? "none" : t.tool)}
+                onClick={() => {
+                  setPainting(null);
+                  setTool(tool === t.tool && !painting ? "none" : t.tool);
+                }}
               >
                 {t.label} <kbd>{t.key}</kbd>
               </button>
@@ -1010,6 +1099,18 @@ export default function ModelViewer({
             <button onClick={resetOrientation} disabled={!selected}>
               Reset rotation
             </button>
+            <span className="toolbar-sep" />
+            {PAINT_TOOLS.map((t) => (
+              <button
+                key={t.kind}
+                className={painting === t.kind ? "active" : ""}
+                disabled={!selected}
+                onClick={() => togglePaint(t.kind)}
+                title={`Paint ${t.label.toLowerCase()} on the selected model`}
+              >
+                {t.label} <kbd>{t.key}</kbd>
+              </button>
+            ))}
           </div>
           <div className="viewer-toolbar">
             <button onClick={() => inputRef.current?.click()} title="Load more model files onto this plate">
@@ -1110,7 +1211,17 @@ export default function ModelViewer({
 
       {notice && <div className={`viewer-notice ${notice.bad ? "bad" : ""}`}>{notice.text}</div>}
 
-      {selected && box && sizeMm && euler && (
+      {selected && painting && (
+        <PaintControls
+          settings={paintSettings}
+          onChange={setPaintSettings}
+          colors={colors}
+          filamentCount={filamentCount}
+          onClear={clearPaint}
+        />
+      )}
+
+      {selected && !painting && box && sizeMm && euler && (
         <div className="placement-panel">
           {(shown.length > 1 || copiesOfSelected > 1) && (
             <div className="placement-size">
@@ -1189,7 +1300,10 @@ export default function ModelViewer({
           selected={selected}
           bed={shape}
           tool={tool}
+          paint={painting ? paintSettings : null}
+          paintNow={paintNow}
           onSelect={select}
+          onStroke={recordPaint}
           onChange={refresh}
           onCommit={() => commit(tool === "rotate" ? "Rotate" : tool === "flat" ? "Lay on face" : "Move")}
         />

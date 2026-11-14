@@ -85,6 +85,8 @@ const VOLUME_LOOK: Record<Exclude<Volume["type"], "part">, { color: string; opac
   blocker: { color: "#f85149", opacity: 0.35 },
 };
 
+export const PAINT_KINDS: PaintKind[] = ["color", "supports", "seam", "fuzzy"];
+
 /** Paint colours for the kinds that aren't filaments. */
 const PAINT_LOOK: Record<Exclude<PaintKind, "color">, Record<number, string>> = {
   supports: { [ENFORCER]: "#3fb950", [BLOCKER]: "#f85149" },
@@ -288,7 +290,10 @@ export class PartShape {
       this.volumeMeshes.set(v.id, mesh);
     }
     this.applyColors();
-    for (const v of object.volumes) for (const kind of Object.keys(v.paint) as PaintKind[]) this.refreshPaint(v.id, kind);
+    // Every kind of paint has its overlay on every model part from the
+    // start (empty until painted): copies clone the template once, so an
+    // overlay added later would never reach them.
+    for (const v of object.volumes) if (v.type === "part") for (const kind of PAINT_KINDS) this.refreshPaint(v.id, kind);
 
     // Centre on the model parts' bounding box.
     content.updateMatrixWorld(true);
@@ -350,7 +355,7 @@ export class PartShape {
     let mesh = this.paintMeshes.get(key);
     const leaves = layer?.leaves();
     if (!mesh) {
-      if (!leaves || leaves.states.length === 0) return;
+      if (volume.type !== "part" && (!leaves || leaves.states.length === 0)) return;
       const geo = new THREE.BufferGeometry();
       mesh = new THREE.Mesh(
         geo,
@@ -388,7 +393,7 @@ export class PartShape {
   /** Draw every paint layer again (after an undo put other layers in place). */
   refreshAllPaint() {
     for (const v of this.object.volumes)
-      for (const kind of ["color", "supports", "seam", "fuzzy"] as PaintKind[])
+      for (const kind of PAINT_KINDS)
         if (v.paint[kind] || this.paintMeshes.has(`${v.id}:${kind}`)) this.refreshPaint(v.id, kind);
   }
 

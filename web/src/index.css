@@ -1264,14 +1264,49 @@ a.card:hover {
   margin: 0;
 }
 
-/* Object panel (top right of the viewer): the models, their parts and settings. */
+/* Paint panel (in the placement panel's place while painting). Leaves
+   room for the object panel on its right. */
+.paint-panel {
+  max-width: min(36rem, calc(100% - 19rem));
+}
+
+.paint-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.paint-states .btn-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.paint-states .btn-sm.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.paint-panel input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 6rem;
+  margin: 0;
+}
+
+.paint-hint {
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+
+/* Object panel (bottom right of the viewer, clear of the toolbars): the
+   models, their parts and settings. */
 .object-panel {
   position: absolute;
-  top: 0.5rem;
+  bottom: 0.5rem;
   right: 0.5rem;
   z-index: 2;
   width: 17rem;
-  max-height: calc(100% - 1rem);
+  max-height: calc(100% - 10rem);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1392,6 +1427,11 @@ a.card:hover {
   display: flex;
   gap: 0.3rem;
   align-items: center;
+}
+
+.object-add select {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .object-settings {
