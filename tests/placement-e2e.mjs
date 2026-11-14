@@ -47,10 +47,18 @@ const listed = r.json?.find((j) => j.id === serverJob);
 check(placed(listed)?.rotation?.[5] === -1, "server job keeps its placement", JSON.stringify(listed));
 check(!!placed(r.json?.find((j) => j.id === browserJob)), "listed jobs carry it");
 
-for (const [label, bad] of [
+// A copy may be scaled and mirrored (and a scale after a rotation shears).
+for (const [label, good] of [
   ["a scaled matrix", { rotation: [2, 0, 0, 0, 1, 0, 0, 0, 1], offset: [0, 0] }],
   ["a mirror", { rotation: [-1, 0, 0, 0, 1, 0, 0, 0, 1], offset: [0, 0] }],
   ["a sheared matrix", { rotation: [1, 0.3, 0, 0, 1, 0, 0, 0, 1], offset: [0, 0] }],
+]) {
+  r = await owner.form("/api/jobs", { source: "browser", model_name: "x.stl", placement: JSON.stringify(good) });
+  check(r.status === 201, `accepts ${label}`, json(r));
+}
+for (const [label, bad] of [
+  ["a flattening matrix", { rotation: [1, 0, 0, 1, 0, 0, 0, 0, 1], offset: [0, 0] }],
+  ["an absurd scale", { rotation: [5000, 0, 0, 0, 1, 0, 0, 0, 1], offset: [0, 0] }],
   ["too few numbers", { rotation: [1, 0, 0, 0, 1, 0], offset: [0, 0] }],
   ["an absurd offset", { rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], offset: [0, 1e9] }],
   ["unknown fields", { rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], offset: [0, 0], scale: 2 }],

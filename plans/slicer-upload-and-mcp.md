@@ -129,6 +129,8 @@ with no export and manual upload. Then let AI agents do the same, and more.
   `tests/mcp-e2e.mjs` (passes on buildhost with print-host, integration,
   queue and projects suites, `cargo test` 185), Account page "Connect an
   AI agent", README, CLAUDE.md, changelog.
+- 2026-11-14 1:10 AM PST (09:10Z): pushed (`1e4e654`), CI image built;
+  Renovate deploys it in its next app window (7-8 AM PST).
 - [ ] Try the adapter from a real OrcaSlicer against the dev instance (manual).
 - [ ] Try the MCP server from a real Claude Code against the dev instance
   (manual).

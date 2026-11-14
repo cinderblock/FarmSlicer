@@ -398,7 +398,11 @@ Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::
     plates.clear();
     for (size_t model_index = 0; model_index < inputs.size(); ++model_index) {
         const ModelInput& in = inputs[model_index];
-        Model src = Model::read_from_file(in.path);
+        // LoadModel: without it libslic3r's 3MF reader skips every object
+        // ("The supplied file couldn't be read because it's empty"). Not
+        // LoadConfig: a project's own settings never override the job's.
+        Model src = Model::read_from_file(in.path, nullptr, nullptr,
+                                          LoadStrategy::LoadModel | LoadStrategy::AddDefaultInstances);
         const std::string what = in.name.empty() ? std::string("a model file") : "\"" + in.name + "\"";
         if (src.objects.empty()) throw std::runtime_error(what + " contains no objects");
         if (!in.name.empty() && src.objects.size() == 1) src.objects.front()->name = in.name;
@@ -448,6 +452,28 @@ Slic3r::Model build_plates(const std::vector<ModelInput>& inputs, const Slic3r::
         for (ModelObject* o : objects) o->invalidate_bounding_box();
     }
     return plate;
+}
+
+// Every filament a model names (an object's or a part's own, a painted
+// colour) must be one of the job's: libslic3r would read past the
+// filament lists otherwise.
+void check_filaments(const Slic3r::Model& model, int filament_count)
+{
+    for (const Slic3r::ModelObject* o : model.objects) {
+        int highest = 0;
+        for (const Slic3r::ModelVolume* v : o->volumes) {
+            if (v->is_model_part() || v->is_modifier()) highest = std::max(highest, v->extruder_id());
+            const auto& used = v->mmu_segmentation_facets.get_data().used_states;
+            for (size_t s = 1; s < used.size(); ++s)
+                if (used[s]) highest = std::max(highest, int(s));
+        }
+        if (highest > filament_count)
+            throw std::runtime_error("\"" + o->name + "\" prints with filament " + std::to_string(highest) +
+                                     " but the job has " +
+                                     (filament_count == 1 ? std::string("one filament")
+                                                          : std::to_string(filament_count) + " filaments") +
+                                     ": add filaments or change its colours");
+    }
 }
 
 // Only the parts on `parts` print (Print::apply and the thumbnails skip
@@ -583,6 +609,7 @@ Outcome slice_models(const std::vector<ModelInput>& models,
             throw std::runtime_error("several plates need a package to go into");
 
         const int filament_count = int(std::max<size_t>(1, vector_size(base_config, "filament_diameter")));
+        check_filaments(model, filament_count);
         const bool bambu = base_config.opt_string("printer_model", true).rfind("Bambu Lab", 0) == 0;
 
         // Thumbnails: the G-code exporter asks for the sizes the printer

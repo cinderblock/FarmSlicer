@@ -2,10 +2,13 @@
 //! position, sent with a job (`placement` field) and applied by both engines
 //! (`Placement` in cxx/slice_core.hpp).
 //!
-//! JSON: `{"rotation": [9 numbers], "offset": [dx, dy]}`. The rotation is a
-//! row-major 3x3 matrix applied to the model as loaded; `offset` is where the
-//! rotated model's bounding-box centre goes relative to the bed centre (mm).
-//! The model always rests on the bed. No placement = centred, as loaded.
+//! JSON: `{"rotation": [9 numbers], "offset": [dx, dy]}`. The "rotation" is
+//! the copy's linear transform, a row-major 3x3 matrix applied to the model
+//! as loaded: a rotation, possibly times a scale and a mirror (each copy
+//! may be scaled or mirrored on its own, as instances are in the desktop
+//! app); `offset` is where the transformed model's bounding-box centre goes
+//! relative to the bed centre (mm). The model always rests on the bed. No
+//! placement = centred, as loaded.
 //!
 //! A plate (`PlateLayout`) holds one or more parts:
 //! `{"objects": [{"model": 0, "placement": {...}}, ...]}`. `model` indexes
@@ -25,11 +28,11 @@ pub struct Placement {
     pub offset: [f64; 2],
 }
 
-/// How far a client's matrix may stray from a rotation (float rounding from
-/// quaternion maths in the browser is ~1e-7).
-const TOLERANCE: f64 = 1e-4;
 /// Offsets beyond this are nonsense on any printer (mm).
 const MAX_OFFSET: f64 = 10_000.0;
+/// How far one copy may be scaled along any direction, down or up.
+const MIN_SCALE: f64 = 1e-3;
+const MAX_SCALE: f64 = 1e3;
 
 impl Placement {
     /// Parse and check a placement from a job request.
@@ -47,23 +50,23 @@ impl Placement {
         if self.offset.iter().any(|v| v.abs() > MAX_OFFSET) {
             return Err("placement: offset is beyond any bed".into());
         }
-        // A rotation: orthonormal rows, determinant +1 (no mirroring or
-        // scaling: the viewer does neither).
+        // A linear transform that keeps every direction a sane length: the
+        // lengths of its columns are the scale along each model axis, and
+        // the determinant (their volume) rules out flattening (shear stays
+        // possible: a scale applied after a rotation).
         let m = &self.rotation;
-        let row = |i: usize| [m[i * 3], m[i * 3 + 1], m[i * 3 + 2]];
-        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        for i in 0..3 {
-            for j in 0..3 {
-                let expected = if i == j { 1.0 } else { 0.0 };
-                if (dot(row(i), row(j)) - expected).abs() > TOLERANCE {
-                    return Err("placement: rotation is not a rotation matrix".into());
-                }
+        let column = |j: usize| (m[j] * m[j] + m[3 + j] * m[3 + j] + m[6 + j] * m[6 + j]).sqrt();
+        for j in 0..3 {
+            let len = column(j);
+            if !(MIN_SCALE..=MAX_SCALE).contains(&len) {
+                return Err(format!("placement: scale must be between {MIN_SCALE} and {MAX_SCALE}"));
             }
         }
         let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
             + m[2] * (m[3] * m[7] - m[4] * m[6]);
-        if (det - 1.0).abs() > TOLERANCE {
-            return Err("placement: rotation must not mirror".into());
+        let volume = column(0) * column(1) * column(2);
+        if det.abs() < volume * 1e-6 {
+            return Err("placement: the transform flattens the model".into());
         }
         Ok(())
     }
@@ -221,11 +224,24 @@ mod tests {
     }
 
     #[test]
-    fn refuses_non_rotations() {
-        for bad in [
+    fn accepts_scale_and_mirror() {
+        // Twice as wide, mirrored in Y, a scale after a rotation (shear).
+        for good in [
             r#"{"rotation":[2,0,0,0,1,0,0,0,1],"offset":[0,0]}"#,
-            r#"{"rotation":[-1,0,0,0,1,0,0,0,1],"offset":[0,0]}"#,
+            r#"{"rotation":[1,0,0,0,-1,0,0,0,1],"offset":[0,0]}"#,
             r#"{"rotation":[1,0.5,0,0,1,0,0,0,1],"offset":[0,0]}"#,
+        ] {
+            assert!(Placement::parse(good).is_ok(), "{good}");
+        }
+    }
+
+    #[test]
+    fn refuses_bad_transforms() {
+        for bad in [
+            // Flat, too small, too big.
+            r#"{"rotation":[1,0,0,1,0,0,0,0,1],"offset":[0,0]}"#,
+            r#"{"rotation":[0.0001,0,0,0,1,0,0,0,1],"offset":[0,0]}"#,
+            r#"{"rotation":[5000,0,0,0,1,0,0,0,1],"offset":[0,0]}"#,
             r#"{"rotation":[1,0,0,0,1,0,0,0,1],"offset":[1e9,0]}"#,
             r#"{"rotation":[1,0,0,0,1,0,0,0],"offset":[0,0]}"#,
             r#"{"rotation":[1,0,0,0,1,0,0,0,1],"offset":[0,0],"scale":2}"#,
@@ -256,7 +272,7 @@ mod tests {
             // Several parts, one without a placement.
             (format!(r#"{{"objects":[{{"model":0}},{{"model":0,"placement":{ID}}}]}}"#), 1),
             // A bad placement inside.
-            (r#"{"objects":[{"model":0,"placement":{"rotation":[2,0,0,0,1,0,0,0,1],"offset":[0,0]}}]}"#.to_string(), 1),
+            (r#"{"objects":[{"model":0,"placement":{"rotation":[0,0,0,0,1,0,0,0,1],"offset":[0,0]}}]}"#.to_string(), 1),
             (r#"{"objects":[{"model":0,"scale":2}]}"#.to_string(), 1),
         ] {
             assert!(JobPlates::parse(&bad, models).is_err(), "{bad}");

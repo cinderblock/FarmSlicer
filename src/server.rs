@@ -899,6 +899,11 @@ async fn create_job(
     let overrides = config_policy::parse(&overrides_str)
         .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
         .map_err(|e| bad(&e))?;
+    // Settings inside uploaded 3MF models (per object, per part): the same.
+    for m in &models {
+        crate::model_check::check(std::path::Path::new(&m.path), &m.name, auth::is_admin(&user))
+            .map_err(|e| bad(&e))?;
+    }
     let plate = if !plate_str.is_empty() {
         JobPlates::parse(&plate_str, models.len()).map_err(|e| bad(&e))?
     } else if models.len() > 1 {
