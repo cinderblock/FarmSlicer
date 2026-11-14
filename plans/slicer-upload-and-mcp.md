@@ -170,6 +170,10 @@ with no export and manual upload. Then let AI agents do the same, and more.
   `tests/print-host-e2e.mjs`), Account page, README, changelog. A group's
   creator who isn't a member can't charge it, so its name as the folder
   is refused for them, as the Slice page's group picker would.
+- 2026-11-14 2:34 AM PST (10:34Z): deployed `72d2df0` on request, ahead of
+  Renovate's window: ops `b4419e7e` pins it, Server Deploys run 43585814884
+  passed, `/version.json` on sentinel says `72d2df0`, and `/api/mcp`,
+  `/api/mcp/tools` and the OctoPrint host answer 401 without credentials.
 - [ ] Try WebMCP in a browser that has it (manual).
 - [ ] Try the adapter from a real OrcaSlicer against the dev instance (manual).
 - [ ] Try the MCP server from a real Claude Code against the dev instance
