@@ -188,6 +188,16 @@ Bring the Slice page's plate up to what desktop slicers offer
 
 ### Phase 8: layer-height colour change and pause
 
+### Phase 9: the rest of the editor
+- Multi-select: Shift/Ctrl-click toggles, Ctrl+A, box select; delete, drag,
+  arrange, copy/paste, duplicate, mirror and merge act on the selection.
+- Measure (M): point to point with vertex snap, dx/dy/dz; face to face
+  (distance for parallel faces, else the angle).
+- Connectors: dovetail (a trapezoid key across the cut section, slides in)
+  and snap (a split peg with a bulb, the hole with its socket).
+- Cut plane dragged in 3D: an arrow along the normal, rings for tilt.
+- Changes by height per plate: each change has a plate (or every plate).
+
 ## Findings / gotchas
 
 - Shared tree, again: another thread's commit 6fca8fe swept an early copy
@@ -303,14 +313,19 @@ Bring the Slice page's plate up to what desktop slicers offer
   Studio desktop (no desktop app here; libslic3r reads them, which is the
   same reader). The browser (wasm) engine isn't rebuilt with
   `height_changes`; CI builds it on push.
-- [ ] Not pushed: every commit of this plan is local on master.
+- [x] Pushed 2026-11-14 (user's go-ahead): my commits cherry-picked onto
+  origin/master (other threads' local commits stay theirs to push) as
+  `7a415db`, with a fix: the multi-colour changelog entry shared the id
+  "2026-11-14" with Roles (now "2026-11-14f"; same fix on local master).
+- [ ] Phase 9 (current): multi-select, measure, dovetail and snap
+  connectors, dragging the cut plane in 3D, changes by height per plate.
+  The user called all of these critical (2026-11-14).
+- [ ] Deploy: ops pin of the image CI builds from `7a415db` (user OK'd
+  deploying, 2026-11-14).
 
 ## Open questions for the user
 
-1. Push these commits (CI builds the image and the wasm engine; ops then
-   pins the digest)? Recommendation: yes, once you've had a look.
-2. Keep going here on the "Not done" list (multi-select, measure, dovetail
-   and snap connectors, dragging the cut plane), or split it out?
+(none open: push and deploy approved; the rest is built here.)
 
 ## Things not to do
 
