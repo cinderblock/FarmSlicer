@@ -113,6 +113,8 @@ export function CutPlane({
   /** Tilt about `axis` (the X ring or the Y ring). */
   const startTilt = (which: "x" | "y") => (e: ThreeEvent<PointerEvent>) => {
     if (e.button !== 0) return;
+    // Seen edge-on (the X ring from the front), a ring lies over the arrow: the arrow wins.
+    if (e.intersections.some((i) => i.object.userData.arrow)) return;
     const s0 = settings;
     const A = which === "x" ? axes.x : axes.y;
     const centre = pivot.clone();
@@ -167,6 +169,8 @@ export function CutPlane({
   const hoverProps = (name: string) => ({
     userData: { handle: true },
     onPointerOver: (e: ThreeEvent<PointerEvent>) => {
+      // Over both, the arrow is what a press takes: let it have the hover too.
+      if (name !== "move" && e.intersections.some((i) => i.object.userData.arrow)) return;
       e.stopPropagation();
       setHover(name);
     },
@@ -200,7 +204,7 @@ export function CutPlane({
                 <meshBasicMaterial {...handle(hover === "move" ? HOVER_COLOR : PLANE_COLOR)} />
               </mesh>
             ))}
-            <mesh rotation={[Math.PI / 2, 0, 0]} onPointerDown={startMove} {...hoverProps("move")}>
+            <mesh rotation={[Math.PI / 2, 0, 0]} onPointerDown={startMove} {...hoverProps("move")} userData={{ handle: true, arrow: true }}>
               <cylinderGeometry args={[10, 10, 2 * ARROW_PX + 30, 8]} />
               <meshBasicMaterial transparent opacity={0} depthTest={false} depthWrite={false} />
             </mesh>
