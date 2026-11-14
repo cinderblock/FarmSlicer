@@ -442,6 +442,16 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   audit log (`audit::record`), `GET /api/audit`. Web: `web/src/roles.ts`,
   `pages/Roles.tsx`, `pages/Audit.tsx`; `useAuth().can(cap)`, nav items
   carry `cap`. Plan: `plans/organization-and-access.md`
+- `src/access.rs` — printer access: rules (`printer_access`: target
+  printer|pool|model (= `machine_profile`)|site, principal, allow|approve|
+  deny, approvers), first match from the printer down (`decide`);
+  certifications (`certifications`, `user_certifications`); storage
+  `src/db/access.rs`, API `src/access_api.rs`, page `pages/Access.tsx`.
+  Enforced in `prints_api::send_plate_now` (requester = sender, or the
+  queue entry's `created_by`; a sender who `can_approve` lifts an approve
+  hold) and `queue::fit` (`refused` / `needs_approval`; dispatch skips
+  both). A held print's `print_access_holds` row says what held it;
+  `prints_api::can_approve_print` needs every reason liftable
 - `src/groups.rs` — group tree, inherited settings, `Viewer` (permissions
   per request, see src/permissions.rs), job visibility, seasons; `src/groups_api.rs`
   (groups, members, links, library, usage, site settings);

@@ -116,7 +116,11 @@ async fn tick(state: &Arc<AppState>) {
             .into_iter()
             .filter(|e| !e.held)
             .filter(|e| !skipped().lock().unwrap().contains_key(&(printer.id.clone(), e.id.clone())))
-            .filter(|e| crate::queue::fit(state, e, &printer).refused.is_none())
+            // Plates that need someone's approval on this printer wait for a person.
+            .filter(|e| {
+                let f = crate::queue::fit(state, e, &printer);
+                f.refused.is_none() && f.needs_approval.is_none()
+            })
             .collect();
         for e in candidates {
             let body = crate::queue_api::SendBody::default();

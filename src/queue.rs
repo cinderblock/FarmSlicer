@@ -24,6 +24,9 @@ pub struct Fit {
     pub refused: Option<String>,
     /// Why not right now (busy, offline), if it can go there at all.
     pub busy: Option<String>,
+    /// Who queued it may only ask for approval on this printer (an access
+    /// rule, src/access.rs): a person sends it, never the dispatcher.
+    pub needs_approval: Option<String>,
     /// Filament the printer would need changed first.
     pub problems: Vec<String>,
 }
@@ -35,7 +38,13 @@ pub fn requeue_failed(state: &AppState) -> bool {
 
 /// How `entry` fits `printer`.
 pub fn fit(state: &AppState, entry: &QueueEntry, printer: &Printer) -> Fit {
-    let refuse = |why: String| Fit { printer_id: printer.id.clone(), refused: Some(why), busy: None, problems: Vec::new() };
+    let refuse = |why: String| Fit {
+        printer_id: printer.id.clone(),
+        refused: Some(why),
+        busy: None,
+        needs_approval: None,
+        problems: Vec::new(),
+    };
     if let Some(pin) = &entry.printer_id {
         if pin != &printer.id {
             return refuse("pinned to another printer".into());
@@ -63,11 +72,25 @@ pub fn fit(state: &AppState, entry: &QueueEntry, printer: &Printer) -> Fit {
             return refuse(format!("its G-code can't be sent: {}", blocked.join("; ")));
         }
     }
+    // Printer access: whoever queued it is who asks (src/access.rs).
+    let tree = crate::groups::Tree::load(&state.db);
+    let requester = entry
+        .created_by
+        .as_deref()
+        .and_then(|u| state.db.get_user(u))
+        .map(|u| crate::groups::Viewer::load(&state.db, &u));
+    let access = crate::access::decide(&state.db, &tree, requester.as_ref(), printer);
+    let needs_approval = match access.effect {
+        crate::access::Effect::Deny => return refuse(access.why.unwrap_or_default()),
+        crate::access::Effect::Approve => access.why,
+        crate::access::Effect::Allow => None,
+    };
     let status = state.printers.status(&printer.id);
     let mapping = crate::printing::mapping_for(printer, plate, None, status.as_ref());
     Fit {
         printer_id: printer.id.clone(),
         refused: None,
+        needs_approval,
         busy: crate::prints_api::busy_reason(state, printer),
         problems: crate::printing::send_problems(plate, printer, &mapping, status.as_ref()),
     }

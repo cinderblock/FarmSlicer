@@ -200,8 +200,9 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 2. ~~Scope questions~~ (answered 2026-11-14).
 3. ~~Design review~~ (approved 2026-11-14).
 4. ~~Slice 1~~ (2026-11-14).
-5. **← current** Slice 2: printer access rules, certifications, approval
-   routing. Then slices 3–6.
+5. ~~Slice 2~~ (2026-11-14).
+6. **← current** Slice 3: labels on jobs, projects, printers, groups.
+   Then slices 4–6.
 
 ## Findings / gotchas
 
@@ -219,6 +220,19 @@ Replace the single admin bit with **capabilities** granted by **roles**.
   needs it set off explicitly (the e2e test does).
 - `tests/printers-e2e.mjs` fails on master already (ISSUES.md, group-logo
   EPIPE); every other suite passes with slice 1.
+- Slice 2 as built (2026-11-14), refining the design above: rules are
+  ordered (first match wins, printer → pools → model → site), not
+  "deny > approve > allow" within a target, so "certified: allow" above
+  "everyone: approve" works. A model is `printers.machine_profile` (the
+  model name). Certifications are named sign-offs (no model list);
+  `valid_days` sets the grant's expiry. The requester is the sender, or
+  for a queue entry its `created_by`; `printers.operate` is exempt. An
+  approve hold is lifted by `prints.approve` (site), the printer's pool
+  operators, or the rule's approvers (who also get to see the held print),
+  and a sender who could approve it isn't held. Dispatch never sends a
+  plate whose fit says `needs_approval`. Held prints record what held
+  them (`print_access_holds`); `can_approve_print` needs every reason
+  liftable by the viewer. Rules on a deleted printer or pool go with it.
 - Shared working tree: other threads stage whole files (`git add file`),
   which can sweep this thread's hunks into their commits; check
   `git diff --cached` before they commit, and build from HEAD + this
@@ -244,7 +258,9 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 - [x] Slice 1: permissions core, suspend, audit log (unit + e2e pass;
       `tests/permissions-e2e.mjs`; web Roles, Audit log, Users, group
       Members)
-- [ ] Slice 2: printer access, certifications, approvals
+- [x] Slice 2: printer access, certifications, approvals
+      (`tests/printer-access-e2e.mjs`; web Printer access page, Send
+      dialog, queue, Account)
 - [ ] Slice 3: labels
 - [ ] Slice 4: folders
 - [ ] Slice 5: sharing and public links

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
-import { useJson } from "../api";
+import { localDate, useJson } from "../api";
 import NotificationSettings from "../components/NotificationSettings";
 import RecoveryCode from "../components/RecoveryCode";
 import { UsageLines } from "../components/Quota";
@@ -184,6 +184,8 @@ export default function AccountPage() {
           ))}
         </ul>
       )}
+
+      <PrinterAccess />
 
       <h3>Limits</h3>
       {usage ? (
@@ -389,5 +391,50 @@ export default function AccountPage() {
         </>
       )}
     </div>
+  );
+}
+
+interface MyAccess {
+  printers: { printer_id: string; name: string; effect: "allow" | "approve" | "deny"; why: string | null }[];
+  certifications: { cert_id: string; name: string | null; expires_at: string | null; valid: boolean }[];
+}
+
+/** Your certifications, and the printers that are closed to you or ask for approval (src/access.rs). */
+function PrinterAccess() {
+  const data = useJson<MyAccess>("/api/printer-access/mine").data;
+  if (!data) return null;
+  const limited = data.printers.filter((p) => p.effect !== "allow");
+  if (limited.length === 0 && data.certifications.length === 0) return null;
+  return (
+    <>
+      <h3>Printers</h3>
+      {data.certifications.length > 0 && (
+        <p>
+          Certifications:{" "}
+          {data.certifications.map((c, i) => (
+            <span key={c.cert_id}>
+              {i > 0 && ", "}
+              <strong>{c.name}</strong>
+              <span className="hint">
+                {!c.valid ? " (expired)" : c.expires_at ? ` (until ${localDate(c.expires_at)})` : ""}
+              </span>
+            </span>
+          ))}
+        </p>
+      )}
+      {limited.length === 0 ? (
+        <p className="hint">Every printer is open to you.</p>
+      ) : (
+        <ul className="join-list">
+          {limited.map((p) => (
+            <li key={p.printer_id}>
+              <strong>{p.name}</strong>{" "}
+              <span className="hint">{p.effect === "deny" ? "not open to you" : "needs approval"}</span>
+              {p.why && <div className="hint">{p.why}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

@@ -411,8 +411,15 @@ function EntryRow({
                 No printer fits
               </span>
             ) : (
-              <span title={fits.map((f) => `${printerName(f.printer_id)}: ${f.busy ?? "free"}${f.problems.length ? ` (${f.problems.join("; ")})` : ""}`).join("\n")}>
-                {fits.map((f) => printerName(f.printer_id)).join(", ")}
+              <span
+                title={fits
+                  .map(
+                    (f) =>
+                      `${printerName(f.printer_id)}: ${f.busy ?? "free"}${f.needs_approval ? `; ${f.needs_approval}` : ""}${f.problems.length ? ` (${f.problems.join("; ")})` : ""}`,
+                  )
+                  .join("\n")}
+              >
+                {fits.map((f) => `${printerName(f.printer_id)}${f.needs_approval ? " (with approval)" : ""}`).join(", ")}
               </span>
             )}
             {e.held && <div className="hint">Waiting: its project is on hold</div>}

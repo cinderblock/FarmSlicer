@@ -70,9 +70,11 @@ capabilities!(Cap {
     LibraryEditAll = "library.edit_all", "Edit every job",
         "Move, rename and delete any job or project.";
     PrintersManage = "printers.manage", "Manage printers",
-        "Add, change and remove printers and pools; see connection details; resolve equipment reports.";
+        "Add, change and remove printers and pools, who may print on them and the certifications that asks for; see connection details; resolve equipment reports.";
     PrintersOperate = "printers.operate", "Operate every printer",
-        "Control any printer and print, run the whole queue, set send modes and plate projects.";
+        "Control any printer and print, run the whole queue, set send modes and plate projects; not held to printer access rules.";
+    CertificationsGrant = "certifications.grant", "Sign people off",
+        "Give and take back certifications (training sign-offs that printer access rules can ask for).";
     PrintsApprove = "prints.approve", "Approve prints",
         "Approve or turn down any print waiting for approval (not G-code safety reviews).";
     PrintsApproveSafety = "prints.approve_safety", "Review G-code",

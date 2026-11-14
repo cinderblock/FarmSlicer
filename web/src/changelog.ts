@@ -48,6 +48,16 @@ export const CHANGELOG: ChangelogEntry[] = [
     fixes: "3MF files slice on the server again (they failed with \"the file is empty\").",
   },
   {
+    id: "2026-11-14c",
+    date: "2026-11-14",
+    title: "Who may use which printer",
+    highlights: [
+      "Admins can now say who may print on a printer, a pool or a printer model: everyone, certain people, a group, a role, or those signed off on it. Each rule lets them print, has their prints wait for approval, or keeps them off it.",
+      "Certifications record who has been trained on what (\"H2D trained\", say), optionally for a set time; trainers sign people off, and rules can ask for them.",
+      "The Send dialog says when a printer isn't open to you or needs approval, the queue shows plates that wait for approval on a printer, and your Account page lists your certifications and the printers you can't use freely.",
+    ],
+  },
+  {
     id: "2026-11-14b",
     date: "2026-11-14",
     title: "Agents in your browser, groups from your slicer",

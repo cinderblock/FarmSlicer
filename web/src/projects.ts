@@ -140,6 +140,9 @@ export interface Fit {
   refused: string | null;
   /** Why not right now (busy, offline). */
   busy: string | null;
+  /** Who queued it may only ask for approval there (a printer access rule):
+   *  a person sends it, never the printer's send mode. */
+  needs_approval?: string | null;
   /** Filament the printer would need changed first. */
   problems: string[];
 }

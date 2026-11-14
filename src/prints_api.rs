@@ -328,6 +328,7 @@ async fn job_targets(
         .map(|p| {
             let status = state.printers.status(&p.id);
             let mapping = printing::mapping_for(p, plate, None, status.as_ref());
+            let access = target_access(&state, &tree, &viewer, p);
             json!({
                 "printer_id": p.id,
                 "name": p.name,
@@ -336,6 +337,9 @@ async fn job_targets(
                 "capabilities": crate::printer::protocol_of(p).map(|proto| proto.capabilities()),
                 "incompatible": printing::incompatibility(&state.profile_store, p, pkg.format, plate),
                 "busy": busy_reason(&state, p),
+                // Printer access for the caller (src/access.rs): `effect`
+                // allow | approve | deny, and why.
+                "access": access,
                 "ams_mapping": mapping,
                 "problems": printing::send_problems(plate, p, &mapping, status.as_ref()),
                 "status": status,
@@ -357,6 +361,18 @@ async fn job_targets(
         "estimated_cost": prices.plate(plate),
         "currency": prices.currency,
     })))
+}
+
+/// Where the viewer stands with a printer, as the Send dialog shows it:
+/// an approval they could give themselves counts as allowed.
+fn target_access(state: &AppState, tree: &Tree, viewer: &Viewer, p: &Printer) -> Value {
+    use crate::access::Effect;
+    let d = crate::access::decide(&state.db, tree, Some(viewer), p);
+    let effect = match d.effect {
+        Effect::Approve if crate::access::can_approve(state, tree, viewer, Some(&p.id), &d.approvers) => Effect::Allow,
+        e => e,
+    };
+    json!({"effect": effect, "why": if effect == Effect::Allow { None } else { d.why }})
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -458,6 +474,22 @@ async fn send_plate_now(
             })),
         ));
     }
+    // Printer access (src/access.rs): the person asking is the sender, or
+    // whoever queued the plate.
+    let requester = entry
+        .and_then(|e| state.db.get_queue_entry(e))
+        .and_then(|e| e.created_by)
+        .filter(|u| *u != user.id)
+        .and_then(|u| state.db.get_user(&u))
+        .map(|u| Viewer::load(&state.db, &u));
+    let access = crate::access::decide(&state.db, tree, Some(requester.as_ref().unwrap_or(viewer)), &printer);
+    if access.effect == crate::access::Effect::Deny {
+        return Err(api_err(StatusCode::FORBIDDEN, format!("can't print here: {}", access.why.unwrap_or_default())));
+    }
+    // A sender who could approve it sends it.
+    let access_hold = access.effect == crate::access::Effect::Approve
+        && !crate::access::can_approve(state, tree, viewer, Some(&printer.id), &access.approvers);
+
     let violations = rules_for(&tree, &viewer, &job)
         .map(|r| printing::rule_violations(&r, &plate))
         .unwrap_or_default();
@@ -465,9 +497,15 @@ async fn send_plate_now(
     if !review.is_empty() {
         reasons.push(format!("G-code review: {}", review.join("; ")));
     }
+    let rules_hold = !violations.is_empty();
     reasons.extend(violations);
-    if let Some(why) = upload_hold(&tree, &viewer, &job)? {
+    let upload = upload_hold(&tree, &viewer, &job)?;
+    let rules_hold = rules_hold || upload.is_some();
+    if let Some(why) = upload {
         reasons.push(why);
+    }
+    if access_hold {
+        reasons.push(access.why.clone().unwrap_or_default());
     }
     let safety_review = !review.is_empty();
     // An admin who acknowledged the review sends it now, on the record.
@@ -523,6 +561,15 @@ async fn send_plate_now(
         state.db.set_queue_entry_print(e, &print.id);
     }
     if waits {
+        state.db.set_print_hold(
+            &print.id,
+            &crate::db::PrintHold {
+                rule_id: access.rule_id.clone().filter(|_| access_hold),
+                access: access_hold,
+                approvers: if access_hold { access.approvers.clone() } else { Vec::new() },
+                rules_hold,
+            },
+        );
         println!(
             "Print {}: {} asks to print {} on {}; needs approval: {}",
             print.id,
@@ -557,15 +604,28 @@ fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRe
             .and_then(|j| state.db.get_job(j))
             .is_some_and(|job| viewer.can_see_job(tree, &job))
         || crate::pools::operates(state, viewer, print.printer_id.as_deref())
+        // Whoever may approve a held print sees it (an access rule's
+        // approvers may not otherwise).
+        || (print.status == "pending_approval" && can_approve_print(state, tree, viewer, print))
 }
 
-/// Admins and the managers of the print's group approve requests; only
-/// admins approve G-code that needs review (it's the farm's hardware).
-pub(crate) fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
-    if print.safety_review {
-        return viewer.can(Cap::PrintsApproveSafety);
-    }
-    viewer.can(Cap::PrintsApprove) || print.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::PrintsApprove))
+/// Who may decide a held print: every reason it waits must be one the
+/// viewer can lift. G-code that needs review: "review G-code" (it's the
+/// farm's hardware). Print rules and the upload policy: "approve prints",
+/// site-wide or in the print's group. A printer access rule
+/// (src/access.rs): "approve prints" site-wide, the printer's operators,
+/// or the rule's approvers.
+pub(crate) fn can_approve_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
+    // Held before access rules existed: print rules or the upload policy.
+    let hold = state.db.print_hold(&print.id).unwrap_or(crate::db::PrintHold { rules_hold: true, ..Default::default() });
+    let safety = !print.safety_review || viewer.can(Cap::PrintsApproveSafety);
+    let rules = !hold.rules_hold
+        || viewer.can(Cap::PrintsApprove)
+        || print.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::PrintsApprove));
+    let access = !hold.access || crate::access::can_approve(state, tree, viewer, print.printer_id.as_deref(), &hold.approvers);
+    // A G-code review alone (nothing else held it) is the reviewer's call.
+    let only_review = print.safety_review && !hold.access && !hold.rules_hold;
+    safety && (only_review || (rules && access))
 }
 
 /// Whoever sent it, the group's managers, admins, and the operators of its
@@ -623,7 +683,7 @@ async fn list_prints(
                     .and_then(|job| printing::package_of(&job))
                     .and_then(|pkg| pkg.plate(p.plate as u32).map(|pl| prices.plate(pl))));
                 v["can_control"] = json!(can_control_print(&state, &tree, &viewer, &p));
-                v["can_approve"] = json!(p.status == "pending_approval" && can_approve_print(&tree, &viewer, &p));
+                v["can_approve"] = json!(p.status == "pending_approval" && can_approve_print(&state, &tree, &viewer, &p));
                 add_outcome(&state, &tree, &viewer, &p, &mut v);
                 v
             } else {
@@ -651,7 +711,7 @@ async fn get_print(
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
     let mut v = json!(print);
     v["can_control"] = json!(can_control_print(&state, &tree, &viewer, &print));
-    v["can_approve"] = json!(print.status == "pending_approval" && can_approve_print(&tree, &viewer, &print));
+    v["can_approve"] = json!(print.status == "pending_approval" && can_approve_print(&state, &tree, &viewer, &print));
     add_outcome(&state, &tree, &viewer, &print, &mut v);
     Ok(Json(v))
 }
@@ -769,13 +829,13 @@ async fn approve_print(
     if print.status != "pending_approval" {
         return Err(api_err(StatusCode::CONFLICT, format!("the print is {}", print.status)));
     }
-    if !can_approve_print(&tree, &viewer, &print) {
+    if !can_approve_print(&state, &tree, &viewer, &print) {
         return Err(api_err(
             StatusCode::FORBIDDEN,
             if print.safety_review {
-                "only an admin can approve a print whose G-code needs review"
+                "a print whose G-code needs review is approved by those who review G-code"
             } else {
-                "only admins and the group's managers approve prints"
+                "you can't approve this print (it needs the group's approvers, the printer's, or an admin)"
             },
         ));
     }
@@ -855,11 +915,11 @@ async fn reject_print(
         .filter(|p| can_see_print(&state, &tree, &viewer, p))
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "print not found"))?;
     let own = print.user_id.as_deref() == Some(user.id.as_str());
-    if !own && !can_approve_print(&tree, &viewer, &print) {
-        return Err(api_err(StatusCode::FORBIDDEN, "only admins and the group's managers decide prints"));
+    if !own && !can_approve_print(&state, &tree, &viewer, &print) {
+        return Err(api_err(StatusCode::FORBIDDEN, "only whoever may approve it, or who asked, decides it"));
     }
     let note = body.and_then(|b| b.0.note).map(|n| n.trim().chars().take(500).collect::<String>());
-    let note = match (own && !can_approve_print(&tree, &viewer, &print), note.filter(|n| !n.is_empty())) {
+    let note = match (own && !can_approve_print(&state, &tree, &viewer, &print), note.filter(|n| !n.is_empty())) {
         (true, _) => format!("withdrawn by {}", user.username),
         (false, Some(n)) => format!("rejected by {}: {n}", user.username),
         (false, None) => format!("rejected by {}", user.username),

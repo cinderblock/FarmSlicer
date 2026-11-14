@@ -13,6 +13,8 @@ mod dispatch;
 mod notifications;
 mod roles;
 mod audit;
+mod access;
+pub use access::{AccessRule, Certification, PrintHold, Principal};
 pub use audit::{AuditFilter, NewAudit};
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
 pub use projects::{Item, JobItem, NewProject, Progress, Project, ProjectFilter};
@@ -600,6 +602,7 @@ impl Db {
         notifications::migrate(&conn);
         roles::migrate(&conn);
         audit::migrate(&conn);
+        access::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (

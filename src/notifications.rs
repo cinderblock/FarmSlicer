@@ -208,7 +208,7 @@ fn recipients(state: &AppState, event: &str, print: &PrintRecord) -> Vec<String>
         .filter(|u| {
             let Some(user) = state.db.get_user(u) else { return false };
             let viewer = Viewer::load(&state.db, &user);
-            if event == "print.approval_requested" && !crate::prints_api::can_approve_print(&tree, &viewer, print) {
+            if event == "print.approval_requested" && !crate::prints_api::can_approve_print(state, &tree, &viewer, print) {
                 return false;
             }
             wants(&prefs_of(&state.db, u), event, &relations(&state.db, &tree, &viewer, print, job_owner.as_deref()))

@@ -45,6 +45,13 @@ export const NAV_SECTIONS: NavSection[] = [
         keywords: "permissions capabilities access",
         cap: ["roles.manage", "users.manage"],
       },
+      {
+        to: "/access",
+        label: "Printer access",
+        icon: "key",
+        keywords: "permissions certifications training sign-off approval rules",
+        cap: ["printers.manage", "certifications.grant"],
+      },
       { to: "/audit", label: "Audit log", icon: "history", keywords: "changes who history", cap: ["audit.view"] },
       { to: "/feedback", label: "Feedback", icon: "feedback", keywords: "reports errors bugs", cap: ["feedback.triage"] },
       { to: "/reports", label: "Reports", icon: "reports", keywords: "defaults statistics", cap: ["reports.view"] },

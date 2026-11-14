@@ -368,6 +368,8 @@ export function packageVerdict(packageJson: string | null): {
   }
 }
 
+export type AccessEffect = "allow" | "approve" | "deny";
+
 export interface Target {
   printer_id: string;
   name: string;
@@ -379,6 +381,9 @@ export interface Target {
   incompatible: string | null;
   /** Why the printer can't take it now; null = free. */
   busy: string | null;
+  /** Printer access for the caller (src/access.rs): deny = not theirs to use,
+   *  approve = sending asks for approval. */
+  access?: { effect: AccessEffect; why: string | null };
   ams_mapping: number[];
   problems: string[];
   status: PrinterStatus | null;

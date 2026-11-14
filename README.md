@@ -309,8 +309,19 @@ There are no passwords and no secrets to configure.
   or changes an account that has one they lack.
 - **Suspending** an account (Users page) ends its sessions and stops its
   API keys until it's reinstated; its history stays.
-- **Audit log** (`/audit`): who changed accounts, roles, groups and site
-  settings, and what changed.
+- **Audit log** (`/audit`): who changed accounts, roles, groups, site
+  settings and printer access, and what changed.
+- **Printer access** (`/access`): rules for a printer, a pool, a printer
+  model or every printer say whether someone (everyone, a person, a
+  group's members, a site role, or holders of a **certification**) may
+  print, must ask for approval, or may not. Read from the printer down to
+  the site, top to bottom; the first match decides; no match = open. The
+  person asking counts (for a queued plate, whoever queued it); "operate
+  every printer" is exempt. Approvals come from anyone who approves
+  prints, the printer's pool operators, or the rule's own approvers; send
+  modes never send such a plate by themselves. Certifications (training
+  sign-offs, optionally expiring) are given by holders of
+  `certifications.grant`.
 - **Signing in**: "Sign in with a passkey" (any passkey for this site), or by
   username to narrow it to that account's passkeys. Sessions are 30-day
   cookies.
@@ -574,6 +585,8 @@ summary prints the `pin.json` to paste there.
 | `GET /api/me`, `GET/POST /api/me/passkeys…`, `GET/POST/DELETE /api/me/api-keys…`, `POST /api/me/recovery-code` | own account |
 | `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/invite` | accounts (`users.view`; changes `users.manage`, only for accounts with no permission you lack): `{role, quotas, remote_access, suspended, suspend_reason}` |
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}` | roles and the permission lists (`{roles, capabilities: {site, group}}`, anyone signed in); custom roles `{name, scope: site\|group, description, caps}` (`roles.manage`; group roles need `groups.manage_all`); a role someone holds can't be deleted |
+| `GET /api/printer-access`, `GET /api/printer-access/mine`, `POST /api/printer-access/rules`, `PUT/DELETE /api/printer-access/rules/{id}`, `PUT /api/printer-access/order` | printer access rules (`printers.manage`; reading also `certifications.grant`): `{target_kind: printer\|pool\|model\|site, target_id, who: {kind: everyone\|user\|group\|role\|certified, id}, effect: allow\|approve\|deny, approvers, note}` (a user by id or username); `mine`: where the caller stands per printer, and their certifications. Job targets carry `access` per printer, queue fits `needs_approval` |
+| `POST /api/certifications`, `PUT/DELETE /api/certifications/{id}`, `POST /api/certifications/{id}/holders`, `DELETE /api/certifications/{id}/holders/{user_id}` | certifications `{name, description, valid_days}` (`printers.manage`; one a rule names can't be deleted); sign someone off `{username, valid_days, note}` or take it back (`certifications.grant`) |
 | `GET /api/audit?actor=&action=<prefix>&target_kind=&target=&before=&limit=` | the audit log, newest first, `next_before` for the next page (`audit.view`) |
 | `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue; a machine's filaments say what each is (`material`, `support`, `soluble`, `tray_material` as printers name it, `price_per_kg`) |
 | `GET /api/profiles/resolve?machine=&process=&filament=` | merged config JSON (what the engines slice with) |

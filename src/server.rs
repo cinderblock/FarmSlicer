@@ -1964,6 +1964,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::feedback_api::routes())
         .merge(crate::reports_api::routes())
         .merge(crate::roles_api::routes())
+        .merge(crate::access_api::routes())
         .merge(crate::audit::routes())
         .route(
             "/api/custom-profiles",

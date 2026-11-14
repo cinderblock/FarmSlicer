@@ -120,10 +120,13 @@ export default function SendDialog({
   // waits for one.
   const adminReview = review.length > 0 && !reviewsGcode;
   // A request that needs approval can name a busy printer: it's sent when approved.
-  const waits = (data?.needs_approval.length ?? 0) > 0 || adminReview;
-  const usable = targets.filter((t) => !t.incompatible && (waits || !t.busy));
+  const platWaits = (data?.needs_approval.length ?? 0) > 0 || adminReview;
+  const waitsOn = (t: Target) => platWaits || t.access?.effect === "approve";
+  const closed = (t: Target) => t.access?.effect === "deny";
+  const usable = targets.filter((t) => !t.incompatible && !closed(t) && (waitsOn(t) || !t.busy));
   // Default: the first free, fitting printer.
   const selected = targets.find((t) => t.printer_id === printerId) ?? usable[0];
+  const waits = !!selected && waitsOn(selected);
   const mapping = selected ? (mappings[selected.printer_id] ?? selected.ams_mapping) : [];
   const trays = loadedTrays(selected?.status);
   // Bambu printers map the plate's filaments to AMS trays; elsewhere the
@@ -246,7 +249,7 @@ export default function SendDialog({
             <div className="target-list">
               {targets.length === 0 && <p className="hint">No printers configured.</p>}
               {targets.map((t) => {
-                const disabled = !!(t.incompatible || (t.busy && !waits));
+                const disabled = !!(t.incompatible || closed(t) || (t.busy && !waitsOn(t)));
                 const { label, tone } = describeState(t.status ?? undefined);
                 return (
                   <label key={t.printer_id} className={`target${disabled ? " target-disabled" : ""}`}>
@@ -263,6 +266,12 @@ export default function SendDialog({
                         {t.machine_profile} · {t.nozzle_diameter} mm
                       </span>
                       {(t.incompatible || t.busy) && <span className="hint">{t.incompatible ?? t.busy}</span>}
+                      {t.access && t.access.effect !== "allow" && (
+                        <span className={t.access.effect === "deny" ? "hint printer-error" : "hint"}>
+                          {t.access.effect === "deny" ? "Not open to you" : "Needs approval"}
+                          {t.access.why ? `: ${t.access.why}` : ""}
+                        </span>
+                      )}
                     </span>
                     <span className={`printer-state tone-${tone}`}>
                       <span className={`status-dot status-${tone}`} />
@@ -273,7 +282,7 @@ export default function SendDialog({
               })}
             </div>
 
-            {selected && !selected.incompatible && (waits || !selected.busy) && (
+            {selected && !selected.incompatible && !closed(selected) && (waits || !selected.busy) && (
               <>
                 <h4>Filaments</h4>
                 {!mapsFilaments && (
@@ -402,10 +411,11 @@ export default function SendDialog({
                 )}
               </div>
             )}
-            {data.needs_approval.length > 0 && (
+            {(data.needs_approval.length > 0 || selected?.access?.effect === "approve") && (
               <div className="send-approval">
-                <strong>Needs approval:</strong> {data.needs_approval.join("; ")}. Sending asks an admin or a
-                manager of the job's group; it prints once they approve.
+                <strong>Needs approval:</strong>{" "}
+                {[...data.needs_approval, ...(selected?.access?.effect === "approve" && selected.access.why ? [selected.access.why] : [])].join("; ")}
+                . Sending asks someone who can approve it; it prints once they do.
               </div>
             )}
             {error && <p className="printer-error">{error}</p>}
@@ -423,6 +433,7 @@ export default function SendDialog({
                 disabled={
                   !selected ||
                   !!selected.incompatible ||
+                  closed(selected) ||
                   blocked ||
                   (review.length > 0 && reviewsGcode && !acknowledged) ||
                   (!!selected.busy && !waits) ||

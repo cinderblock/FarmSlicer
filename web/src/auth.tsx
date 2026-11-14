@@ -15,6 +15,7 @@ export type SiteCap =
   | "library.edit_all"
   | "printers.manage"
   | "printers.operate"
+  | "certifications.grant"
   | "prints.approve"
   | "prints.approve_safety"
   | "prints.unrestricted"

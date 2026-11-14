@@ -189,6 +189,7 @@ async fn delete_printer(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     auth::require(&user, Cap::PrintersManage)?;
+    state.db.delete_access_rules_for("printer", &id);
     if !state.db.delete_printer(&id) {
         return Err(not_found());
     }

@@ -192,6 +192,7 @@ async fn delete_pool(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     auth::require(&user, Cap::PrintersManage)?;
+    state.db.delete_access_rules_for("pool", &id);
     if !state.db.delete_pool(&id) {
         return Err(api_err(StatusCode::NOT_FOUND, "no such pool"));
     }
