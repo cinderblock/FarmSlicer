@@ -475,3 +475,21 @@ describe("cut to fit", () => {
     expect(total).toBeCloseTo(1e6, -1);
   });
 });
+
+describe("auto-orient", () => {
+  test("a cone stands on its base, an L lies on its long side", async () => {
+    const { bestOrientation } = await import("../src/model/orient");
+    const { cone, box } = await import("../src/model/primitives");
+    // Upside down: the point at the bottom.
+    const flip = scaling(1, -1, -1);
+    const upside = makeObject("Cone", [makeVolume(cone(10, 20, 32), { matrix: flip })]);
+    const o = bestOrientation(upside)!;
+    // In the model's frame the base faces +Z (it was turned over): that goes down.
+    expect(o.down[2]).toBeGreaterThan(0.99);
+    expect(o.overhang).toBeLessThan(1);
+    // A plate 60 x 10 x 2 standing on its end lies down flat.
+    const plate = makeObject("Plate", [makeVolume(box(2, 10, 60))]);
+    const p = bestOrientation(plate)!;
+    expect(Math.abs(p.down[0])).toBeGreaterThan(0.99);
+  });
+});

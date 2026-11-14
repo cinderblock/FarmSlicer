@@ -30,6 +30,7 @@ import {
   type Plane,
 } from "../model/cut";
 import { mergeInto, splitToObjects } from "../model/ops";
+import { bestOrientation } from "../model/orient";
 import { DEFAULT_PAINT, PAINT_TOOLS, type PaintSettings } from "./viewer/paintSettings";
 import { ENFORCER, type PaintKind } from "../model/paint";
 import type { PaintChange } from "./viewer/history";
@@ -1067,6 +1068,47 @@ export default function ModelViewer({
     commit("Reset rotation");
   }, [selected, commit]);
 
+  /** Turn the selected part the way it prints best (least overhang, most on the plate). */
+  const autoOrient = useCallback(() => {
+    if (!selected) return;
+    const best = bestOrientation(selected.shape.object, supportThreshold);
+    if (!best) return;
+    // A face's direction under the copy's scale: divided by it.
+    const down = new THREE.Vector3(...best.down).divide(selected.scale).normalize();
+    selected.setRotation(new THREE.Quaternion().setFromUnitVectors(down, new THREE.Vector3(0, 0, -1)));
+    commit("Auto orient");
+    setNotice({
+      text: best.overhang > 1 ? `Turned: ${Math.round(best.overhang)} mm² still overhangs` : "Turned so nothing overhangs",
+    });
+  }, [selected, supportThreshold, commit]);
+
+  // Copy and paste (Ctrl+C, Ctrl+V): another copy of a part, onto the plate shown.
+  const clipboard = useRef<{ shape: PartShape; quaternion: THREE.Quaternion; scale: THREE.Vector3 } | null>(null);
+  const copySelected = useCallback(() => {
+    if (!selected) return;
+    clipboard.current = { shape: selected.shape, quaternion: selected.quaternion.clone(), scale: selected.scale.clone() };
+    setNotice({ text: `Copied ${selected.name}: Ctrl+V puts another copy on the plate shown` });
+  }, [selected]);
+  const paste = useCallback(() => {
+    const c = clipboard.current;
+    if (!c) return;
+    const part = new Part(c.shape);
+    part.setScale(c.scale.clone());
+    part.setRotation(c.quaternion.clone());
+    part.setPlate(active);
+    if (shown.length > 0) {
+      const spot = findFreeSpot(part, shown, shape);
+      if (!spot) {
+        part.dispose();
+        setNotice({ text: "No free room on this plate: add a plate, or Arrange", bad: true });
+        return;
+      }
+      part.setCenter(spot.x, spot.y);
+    }
+    setPlate([...parts, part], "Paste");
+    setSelectedId(part.id);
+  }, [active, shown, shape, parts, setPlate]);
+
   /** Mirror the selected part along a scene axis (it stays where it is). */
   const mirror = useCallback(
     (axis: 0 | 1 | 2) => {
@@ -1240,6 +1282,14 @@ export default function ModelViewer({
         else undo();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (key === "c" || key === "v")) {
+        // Leave the page's own copy alone when text is selected.
+        if (window.getSelection()?.toString()) return;
+        e.preventDefault();
+        if (key === "c") copySelected();
+        else paste();
+        return;
+      }
       if (parts.length === 0 || e.ctrlKey || e.metaKey || e.altKey) return;
       if (key === "escape") {
         setTool("none");
@@ -1259,6 +1309,10 @@ export default function ModelViewer({
         arrangeAll();
         return;
       }
+      if (key === "o") {
+        autoOrient();
+        return;
+      }
       const t = TOOLS.find((x) => x.key.toLowerCase() === key);
       if (t) {
         setPainting(null);
@@ -1268,7 +1322,7 @@ export default function ModelViewer({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [parts, remove, arrangeAll, undo, redo, togglePaint, startCut]);
+  }, [parts, remove, arrangeAll, undo, redo, togglePaint, startCut, copySelected, paste, autoOrient]);
 
   const select = useCallback((part: Part) => setSelectedId(part.id), []);
 
@@ -1387,6 +1441,9 @@ export default function ModelViewer({
             </button>
             <button onClick={resetOrientation} disabled={!selected}>
               Reset rotation
+            </button>
+            <button onClick={autoOrient} disabled={!selected} title="Turn it the way it prints best: least overhang, most on the plate">
+              Auto orient <kbd>O</kbd>
             </button>
             <span className="toolbar-sep" />
             {PAINT_TOOLS.map((t) => (
