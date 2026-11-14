@@ -189,14 +189,17 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 - Everything in scope (all options chosen, 2026-11-14); permissions and
   organization first.
 - Nothing deployment-specific in code (league/team names stay runtime).
+- Design approved as written, 2026-11-14 ("yes to all"):
+  custom roles built from a fixed capability list; printers and groups
+  get labels, not folders; public links are view only (facts, preview,
+  plate pictures, no downloads); printers with no rules stay open.
 
 ## Plan / steps
 
 1. ~~Survey what exists~~ (2026-11-14).
 2. ~~Scope questions~~ (answered 2026-11-14).
-3. **← current** Design review by the user (this document, section
-   "Open questions").
-4. Slices 1–6 above.
+3. ~~Design review~~ (approved 2026-11-14).
+4. **← current** Slice 1, then slices 2–6.
 
 ## Findings / gotchas
 
@@ -214,7 +217,7 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 
 - [x] Surveyed what exists (2026-11-14)
 - [x] Scope agreed (2026-11-14)
-- [ ] Design reviewed
+- [x] Design reviewed (approved 2026-11-14)
 - [ ] Slice 1: permissions core, suspend, audit log
 - [ ] Slice 2: printer access, certifications, approvals
 - [ ] Slice 3: labels
@@ -224,14 +227,7 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 
 ## Open questions for the user
 
-1. **Custom roles, or a fixed set?** Recommendation: custom roles built
-   from the fixed capability list (built-ins can't be deleted).
-2. **Printers and groups get labels, not folders** (pools and the group
-   tree already place them). Recommendation: yes.
-3. **Public links show what?** Recommendation: view only (facts, preview,
-   plate pictures); no model download, no G-code download.
-4. **Default for a printer model with no rules**: allow, as today.
-   Recommendation: yes, so nothing changes until an admin adds rules.
+None open.
 
 ## Things not to do
 
