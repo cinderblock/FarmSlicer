@@ -347,9 +347,11 @@ Bring the Slice page's plate up to what desktop slicers offer
   move gizmo's Y arrow; the 3D view takes props a frame after the panel.
 - [x] Deploy 1: ops `1def164e` pins `7a415db` (digest
   `sha256:e4e9b0f0…`); production serves `7a415db`, health 200.
-- [ ] Deploy 2 (current): phase 9 cherry-picked onto origin/master as
-  `bca71f2` (it also restores `.height-change-z`, a phase 8 CSS rule the
-  first cherry-pick lost); waiting for CI, then the ops pin.
+- [x] Deploy 2: phase 9 cherry-picked onto origin/master as `bca71f2`
+  (it also restores `.height-change-z`, a phase 8 CSS rule the first
+  cherry-pick lost); ops `d62da128` pins it (digest `sha256:cbb9b123…`);
+  production serves `bca71f2`, health 200 (2026-11-14 ~10:05 AM PST).
+  Buildhost: test containers and `farmslicer:model-edit6` removed.
 
 ## Open questions for the user
 
