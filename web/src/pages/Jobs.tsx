@@ -380,7 +380,9 @@ export default function JobsPage() {
                   <td className="cell-title">
                     <div className="job-name">
                       {hasThumbnail(job) && (
-                        <img className="job-thumb" src={`/api/jobs/${job.id}/thumbnail`} alt="" loading="lazy" />
+                        <Link to={`/jobs/${job.id}`} tabIndex={-1} aria-hidden title="Preview">
+                          <img className="job-thumb" src={`/api/jobs/${job.id}/thumbnail`} alt="" loading="lazy" />
+                        </Link>
                       )}
                       <Link to={`/jobs/${job.id}`} title="Preview, details and warnings">
                         {job.model_name}

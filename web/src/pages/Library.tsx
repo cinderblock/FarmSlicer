@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import { previewPath } from "../links";
 import { formatDuration, formatSize, localDate, useJson } from "../api";
 import PageHeader, { EmptyState } from "../components/PageHeader";
 import Icon from "../components/Icon";
@@ -82,7 +83,11 @@ export default function LibraryPage() {
           <tbody>
             {slices.map((s) => (
               <tr key={s.id}>
-                <td className="cell-title">{s.model_name}</td>
+                <td className="cell-title">
+                  <Link to={previewPath(s.job_id)} title="Preview">
+                    {s.model_name}
+                  </Link>
+                </td>
                 <td data-label="By">{s.username ?? "—"}</td>
                 <td data-label="Group">{s.group_id ? <Link to={`/groups/${s.group_id}`}>{s.group_name}</Link> : "Personal"}</td>
                 <td data-label="Date">{localDate(s.created_at)}</td>

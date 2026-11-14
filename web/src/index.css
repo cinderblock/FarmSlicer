@@ -4098,6 +4098,58 @@ a.btn-sm {
   font-variant-numeric: tabular-nums;
 }
 
+/* Following a print: a badge (or "Follow the printer") over the view. */
+.gp-live {
+  position: absolute;
+  bottom: 3.4rem;
+  left: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: calc(100% - 7rem);
+}
+
+.gp-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(13, 17, 23, 0.8);
+  color: var(--success);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.gp-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--success);
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+
+.gp-live-still {
+  color: var(--text-dim);
+}
+
+.gp-live-still .gp-live-dot {
+  background: var(--text-dim);
+  animation: none;
+}
+
+.print-camera {
+  max-width: 720px;
+  margin-bottom: 1rem;
+}
+
+.gp-live .hint {
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+}
+
 /* Layer range slider: right edge of the viewport. */
 .gp-layer-slider {
   position: absolute;

@@ -21,6 +21,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-13c",
+    date: "2026-11-13",
+    title: "Watch prints layer by layer",
+    highlights: [
+      "Open a print (from Prints, or a printer card's picture or name) to see its sliced plate follow the printer: everything printed so far, the layer it's on, and about where in the layer. Bambu, Klipper and Elegoo printers report their layer; for others it's estimated from their progress.",
+      "Every sliced plate's picture or name opens its preview: on Jobs, the queue, projects and the library. A preview's address keeps the plate and layer, so a link opens the same view.",
+    ],
+  },
+  {
     id: "2026-11-13b",
     date: "2026-11-13",
     title: "How much filament is left",

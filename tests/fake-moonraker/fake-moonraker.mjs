@@ -83,7 +83,7 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
 
   const startJob = (file) => {
     job = { elapsed: 0, file };
-    set("print_stats", { state: "printing", filename: file, print_duration: 0, total_duration: 0, message: "" });
+    set("print_stats", { state: "printing", filename: file, print_duration: 0, total_duration: 0, message: "", info: { current_layer: null, total_layer: null } });
     set("pause_resume", { is_paused: false });
     set("display_status", { progress: 0 });
     set("virtual_sdcard", { progress: 0, is_active: true });
@@ -109,7 +109,11 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
       job.elapsed += TICK / 1000;
       const printing = Math.max(0, job.elapsed - 1) * objects.gcode_move.speed_factor;
       const progress = Math.min(1, printing / printSeconds);
-      set("print_stats", { print_duration: printing, total_duration: job.elapsed });
+      // Layers as Klipper reports them when the slicer emits
+      // SET_PRINT_STATS_INFO (OrcaSlicer does for Klipper printers).
+      const count = metadata.get(job.file)?.layer_count;
+      const info = count ? { total_layer: count, current_layer: Math.max(1, Math.ceil(progress * count)) } : objects.print_stats.info;
+      set("print_stats", { print_duration: printing, total_duration: job.elapsed, info });
       set("display_status", { progress });
       set("virtual_sdcard", { progress });
       if (progress >= 1) endJob("complete");

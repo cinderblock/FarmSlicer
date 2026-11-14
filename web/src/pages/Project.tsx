@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { previewPath } from "../links";
 import { apiJson } from "../auth";
 import { errorText, localDate, localDateTime, useJson } from "../api";
 import ProgressBar from "../components/ProgressBar";
@@ -213,10 +214,12 @@ export default function ProjectPage() {
               return (
                 <li key={n}>
                   {j.sendable && (
-                    <img className="job-thumb" src={`/api/jobs/${j.job_id}/thumbnail?plate=${n}`} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
+                    <Link to={previewPath(j.job_id, n)} tabIndex={-1} aria-hidden title="Preview">
+                      <img className="job-thumb" src={`/api/jobs/${j.job_id}/thumbnail?plate=${n}`} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
+                    </Link>
                   )}
                   <div className="project-plate-text">
-                    <strong>Plate {n}</strong>:{" "}
+                    <strong>{j.visible && j.sendable ? <Link to={previewPath(j.job_id, n)} title="Preview this plate">Plate {n}</Link> : `Plate ${n}`}</strong>:{" "}
                     {parts.map((x) => `${x.copies}× ${p.items.find((i) => i.id === x.item_id)?.name ?? x.name}`).join(", ")}
                     <div className="hint">
                       {prints.length === 0

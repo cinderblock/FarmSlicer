@@ -24,11 +24,13 @@ import { BEAD_BUDGET, Toolpaths, type RenderMode, type ViewRange } from "./scene
 import { COLOR_MODES, RANGE_COLORS, gradientRange, toolColors, type ColorMode } from "./colors";
 import { featureColors, featureOrder } from "./features";
 import { formatMegabytes as mb, formatSeconds } from "./format";
+import { livePosition, type PrintProgress } from "./live";
 import { GAP, type GcodeInfo, type ParsedGcode } from "./types";
 
 export type { GcodeSource } from "./load";
 export type { GcodeInfo } from "./types";
 export type { GcodeLoad } from "./useGcode";
+export type { PrintProgress } from "./live";
 
 export interface GcodePreviewProps {
   /**
@@ -54,9 +56,18 @@ export interface GcodePreviewProps {
   /** Show the frame rate (renders continuously while shown). */
   showStats?: boolean;
   className?: string;
+  /** The top layer to open at (0-based; clamped), instead of the whole print. */
+  initialLayer?: number | null;
+  /** Called when the top layer changes (0-based), e.g. to keep it in the URL. */
+  onLayer?: (layer: number) => void;
+  /**
+   * A print of this file in progress: the view follows it (what's printed so
+   * far, up to the move) until the viewer moves the layers themselves.
+   */
+  live?: PrintProgress | null;
 }
 
-export default function GcodePreview({ source, cacheKey, onBytes, bed, filamentColors, onLoaded, showStats, className }: GcodePreviewProps) {
+export default function GcodePreview({ source, cacheKey, onBytes, bed, filamentColors, onLoaded, showStats, className, initialLayer, onLayer, live }: GcodePreviewProps) {
   const load = useGcode(source, { cacheKey, onBytes });
   const parsed = load.status === "ready" ? load.parsed : null;
   useEffect(() => {
@@ -73,6 +84,9 @@ export default function GcodePreview({ source, cacheKey, onBytes, bed, filamentC
         filamentColors={filamentColors}
         showStats={showStats}
         className={className}
+        initialLayer={initialLayer}
+        onLayer={onLayer}
+        live={live}
       />
     );
   }
@@ -120,20 +134,57 @@ interface ViewProps {
   filamentColors?: string[];
   showStats?: boolean;
   className?: string;
+  initialLayer?: number | null;
+  onLayer?: (layer: number) => void;
+  live?: PrintProgress | null;
 }
 
-function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, className }: ViewProps) {
+function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, className, initialLayer, onLayer, live }: ViewProps) {
   const { info, layers, extrusions } = parsed;
   const last = Math.max(0, layers.count - 1);
-  const [range, setRange] = useState({ bottom: 0, top: last });
+  const [ownRange, setRange] = useState(() => ({
+    bottom: 0,
+    top: initialLayer == null || !Number.isFinite(initialLayer) ? last : Math.max(0, Math.min(last, Math.round(initialLayer))),
+  }));
   /** Scrubbed position in the top layer (segment index, exclusive); null = all of it. */
-  const [upTo, setUpTo] = useState<number | null>(null);
+  const [ownUpTo, setUpTo] = useState<number | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>("feature");
   const [hidden, setHidden] = useState<ReadonlySet<number>>(() => new Set());
   const [travel, setTravel] = useState(false);
   const [retractions, setRetractions] = useState(false);
   const [dim, setDim] = useState(true);
   const [forceLines, setForceLines] = useState(false);
+
+  // Following a print: where it is, re-estimated every second inside a layer.
+  // While following, the layers and the move shown are the print's; moving
+  // either hands them back to the viewer, from where the print was.
+  const [following, setFollowing] = useState(true);
+  const [layerSeen, setLayerSeen] = useState<{ layer: number | null; at: number | null }>({ layer: null, at: null });
+  const [now, setNow] = useState(() => performance.now());
+  const liveLayer = live?.layer ?? null;
+  if (live && liveLayer !== layerSeen.layer) {
+    // The first report says nothing about when its layer began; a change does.
+    setLayerSeen({ layer: liveLayer, at: layerSeen.layer === null ? null : now });
+  }
+  const ticking = !!live && !live.done && !live.paused && !live.ended && liveLayer != null && following;
+  useEffect(() => {
+    if (!ticking) return;
+    const t = setInterval(() => setNow(performance.now()), 1000);
+    return () => clearInterval(t);
+  }, [ticking]);
+  const elapsed = layerSeen.at === null ? null : Math.max(0, (now - layerSeen.at) / 1000);
+  const livePos = useMemo(() => (live ? livePosition(parsed, live, elapsed) : null), [parsed, live, elapsed]);
+  const followingNow = following && !!livePos;
+  const range = followingNow ? { bottom: Math.min(ownRange.bottom, livePos.layer), top: livePos.layer } : ownRange;
+  const upTo = followingNow ? livePos.upTo : ownUpTo;
+
+  // Tell the page about the top layer (not on the first render: that's where it opened).
+  const reported = useRef(range.top);
+  useEffect(() => {
+    if (reported.current === range.top) return;
+    reported.current = range.top;
+    onLayer?.(range.top);
+  }, [range.top, onLayer]);
 
   const toolpaths = useMemo(() => new Toolpaths(parsed), [parsed]);
   useEffect(() => () => toolpaths.dispose(), [toolpaths]);
@@ -146,19 +197,25 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
   const topStart = layers.extrusionStart[range.top] ?? 0;
   const topEnd = layers.extrusionStart[range.top + 1] ?? 0;
   const scrub = upTo === null ? topEnd : Math.max(topStart, Math.min(upTo, topEnd));
+  const { bottom, top } = range;
   const view: ViewRange = useMemo(
-    () => ({ bottom: range.bottom, top: range.top, upTo: scrub, hidden, travel, retractions, dim }),
-    [range, scrub, hidden, travel, retractions, dim],
+    () => ({ bottom, top, upTo: scrub, hidden, travel, retractions, dim }),
+    [bottom, top, scrub, hidden, travel, retractions, dim],
   );
 
-  const setLayers = (bottom: number, top: number) => {
-    const b = Math.max(0, Math.min(last, bottom));
-    const t = Math.max(b, Math.min(last, top));
+  const setLayers = (b0: number, t0: number) => {
+    const b = Math.max(0, Math.min(last, b0));
+    const t = Math.max(b, Math.min(last, t0));
     if (b === range.bottom && t === range.top) return;
+    setFollowing(false);
     setRange({ bottom: b, top: t });
-    if (t !== range.top) setUpTo(null);
+    setUpTo(t !== range.top ? null : upTo);
   };
-  const setScrub = (v: number) => setUpTo(v >= topEnd ? null : Math.max(topStart, v));
+  const setScrub = (v: number) => {
+    setFollowing(false);
+    setRange(range);
+    setUpTo(v >= topEnd ? null : Math.max(topStart, v));
+  };
 
   const key = (e: KeyboardEvent) => {
     const step = e.shiftKey ? 10 : 1;
@@ -181,6 +238,25 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
           {showStats && <Stats />}
         </Canvas>
 
+        {livePos && (
+          <div className="gp-live">
+            {followingNow ? (
+              <span className={`gp-live-badge${live?.ended || live?.paused || livePos.source === "done" ? " gp-live-still" : ""}`} title={liveTitle(livePos.source, live)}>
+                <span className="gp-live-dot" aria-hidden />{" "}
+                {livePos.source === "done" ? "Printed" : live?.ended ? "About where it stopped" : live?.paused ? "Paused here" : "Live"}
+              </span>
+            ) : (
+              <button className="btn-sm btn-accent" onClick={() => setFollowing(true)}>
+                Follow the printer
+              </button>
+            )}
+            {livePos.layerMismatch && live?.totalLayers && (
+              <span className="hint" title="The layer shown is the printer's layer number in this file.">
+                Printer counts {live.totalLayers} layers, the file {layers.count}
+              </span>
+            )}
+          </div>
+        )}
         <div className="gp-readout">
           <strong>
             Layer {range.top + 1} / {layers.count}
@@ -527,4 +603,17 @@ function FilamentRow({ color, label, type, mm, g }: { color: string; label: stri
       </dd>
     </>
   );
+}
+
+/** What a live position is based on, for its badge's tooltip. */
+function liveTitle(source: "layer" | "percent" | "done", live: PrintProgress | null | undefined): string {
+  if (live?.ended) return "Estimated from the last percentage the printer reported before the print stopped.";
+  switch (source) {
+    case "layer":
+      return "The printer reports its layer; the move inside the layer is estimated from the time since the layer began.";
+    case "percent":
+      return "The printer reports only a percentage: the position is estimated from the slicer's time estimate.";
+    case "done":
+      return "The print has ended.";
+  }
 }

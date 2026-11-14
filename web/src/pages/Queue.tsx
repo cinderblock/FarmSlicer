@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { previewPath } from "../links";
 import { apiJson } from "../auth";
 import { errorText, formatDuration, localDateTime, useJson } from "../api";
 import OutcomeDialog from "../components/OutcomeDialog";
@@ -143,12 +144,22 @@ export default function QueuePage() {
                 <div className="queue-printer-next">
                   {next ? (
                     <>
-                      {next.visible && next.has_thumbnail && (
-                        <img className="job-thumb" src={`/api/jobs/${next.job_id}/thumbnail?plate=${next.plate}`} alt="" loading="lazy" />
+                      {next.visible && next.job_id && next.has_thumbnail && (
+                        <Link to={previewPath(next.job_id, next.plate)} tabIndex={-1} aria-hidden title="Preview">
+                          <img className="job-thumb" src={`/api/jobs/${next.job_id}/thumbnail?plate=${next.plate}`} alt="" loading="lazy" />
+                        </Link>
                       )}
                       <span>
                         <span className="queue-next-label">Next</span>
-                        {next.visible ? `${next.name} · plate ${next.plate}` : "a plate you can't see"}
+                        {next.visible && next.job_id ? (
+                          <Link to={previewPath(next.job_id, next.plate)} title="Preview this plate">
+                            {next.name} · plate {next.plate}
+                          </Link>
+                        ) : next.visible ? (
+                          `${next.name} · plate ${next.plate}`
+                        ) : (
+                          "a plate you can't see"
+                        )}
                       </span>
                     </>
                   ) : (
@@ -336,10 +347,20 @@ function EntryRow({
     <tr className={e.held ? "row-disabled" : ""}>
       <td className="cell-title">
         <div className="job-name">
-          {e.has_thumbnail && <img className="job-thumb" src={`/api/jobs/${e.job_id}/thumbnail?plate=${e.plate}`} alt="" loading="lazy" />}
+          {e.has_thumbnail && e.job_id && (
+            <Link to={previewPath(e.job_id, e.plate)} tabIndex={-1} aria-hidden title="Preview">
+              <img className="job-thumb" src={`/api/jobs/${e.job_id}/thumbnail?plate=${e.plate}`} alt="" loading="lazy" />
+            </Link>
+          )}
           <div>
             {show === "queued" && <span className="hint">#{position} </span>}
-            <Link to={`/jobs/${e.job_id}`}>{e.name}</Link>
+            {e.job_id ? (
+              <Link to={previewPath(e.job_id, e.plate)} title="Preview this plate">
+                {e.name}
+              </Link>
+            ) : (
+              e.name
+            )}
             <span className="hint"> · plate {e.plate}</span>
             <div className="hint">
               {linesText(e.lines)}

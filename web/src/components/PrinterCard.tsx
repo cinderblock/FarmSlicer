@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
+import { printPath } from "../links";
 import { apiJson } from "../auth";
 import { errorText } from "../api";
 import CameraView from "./CameraView";
@@ -192,19 +194,30 @@ export default function PrinterCard({
               <TempChip icon="box" label="Chamber" t={{ current: status.chamber, target: 0 }} />
             )}
           </div>
-          {picture && (
-            <img
-              className="printer-picture"
-              src={picture}
-              alt=""
-              title={status.job_name ?? undefined}
-              onError={() => setMissingPicture(job)}
-            />
-          )}
+          {picture &&
+            (print?.name ? (
+              <Link to={printPath(print.id)} title="Watch it print, layer by layer">
+                <img className="printer-picture" src={picture} alt="" onError={() => setMissingPicture(job)} />
+              </Link>
+            ) : (
+              <img
+                className="printer-picture"
+                src={picture}
+                alt=""
+                title={status.job_name ?? undefined}
+                onError={() => setMissingPicture(job)}
+              />
+            ))}
           {busy && (
             <div className="printer-job">
               <div className="printer-job-name" title={status.job_file ?? undefined}>
-                {print?.name ?? status.job_name ?? "Untitled"}
+                {print?.name ? (
+                  <Link to={printPath(print.id)} title="Watch it print, layer by layer">
+                    {print.name}
+                  </Link>
+                ) : (
+                  (status.job_name ?? "Untitled")
+                )}
                 {print?.username && <span className="hint"> · {print.username}</span>}
               </div>
               <div className="printer-progress">

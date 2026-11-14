@@ -1,8 +1,9 @@
 // One job: what was sliced and how, what the slicer warned about, the
 // G-code preview of each plate, its G-code check, and "Print…".
+// `?plate=N&layer=K` (1-based) open a plate at a layer; both follow the view.
 
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { formatDuration, localDateTime, useJson } from "../api";
 import SendDialog from "../components/SendDialog";
 import GcodeCheckDetails, { GcodeChip } from "../components/GcodeCheck";
@@ -10,9 +11,10 @@ import GcodePreview from "../components/preview/GcodePreview";
 import NozzlePlanView from "../components/NozzlePlanView";
 import JobProjects from "../components/JobProjects";
 import QueueButton from "../components/QueueButton";
-import type { BedShape } from "../components/ModelViewer";
 import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
+import { positiveParam } from "../links";
+import { bedFromConfig, packagePlates, parseObject, plateColors } from "../jobConfig";
 
 interface Job {
   id: string;
@@ -49,27 +51,6 @@ const SOURCES: Record<Job["source"], string> = {
 };
 
 
-function parseObject(raw: string | null): Record<string, unknown> | null {
-  try {
-    const v = JSON.parse(raw ?? "null");
-    return v && typeof v === "object" && !Array.isArray(v) ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The bed from the job's config: `printable_area` ("0x0", ...) and `printable_height`. */
-function bedFromConfig(config: Record<string, unknown> | null): BedShape | null {
-  if (!config) return null;
-  const raw = config.printable_area;
-  const points = (Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [])
-    .map((p) => String(p).split("x").map(Number))
-    .filter((p): p is [number, number] => p.length === 2 && p.every(Number.isFinite));
-  if (points.length < 3) return null;
-  const height = Number(Array.isArray(config.printable_height) ? config.printable_height[0] : config.printable_height);
-  return { area: points, height: Number.isFinite(height) && height > 0 ? height : 0 };
-}
-
 const first = (v: unknown): string | null => {
   const s = Array.isArray(v) ? v[0] : v;
   return typeof s === "string" && s ? s : null;
@@ -80,7 +61,42 @@ export default function JobPage() {
   const navigate = useNavigate();
   const [rev, setRev] = useState(0);
   const [sending, setSending] = useState(false);
-  const [plateChoice, setPlateChoice] = useState<number | null>(null);
+  const [params, setParams] = useSearchParams();
+  const plateChoice = positiveParam(params.get("plate"));
+  // Read once per plate: the preview opens there, then reports where it is.
+  const initialLayer = useMemo(() => positiveParam(params.get("layer")), [plateChoice]); // eslint-disable-line react-hooks/exhaustive-deps
+  const layerTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => clearTimeout(layerTimer.current), []);
+  const onLayer = useCallback(
+    (layer: number) => {
+      clearTimeout(layerTimer.current);
+      layerTimer.current = window.setTimeout(
+        () =>
+          setParams(
+            (p) => {
+              const next = new URLSearchParams(p);
+              next.set("layer", String(layer + 1));
+              return next;
+            },
+            { replace: true },
+          ),
+        300,
+      );
+    },
+    [setParams],
+  );
+  const choosePlate = (index: number) => {
+    clearTimeout(layerTimer.current);
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        next.set("plate", String(index));
+        next.delete("layer");
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const { data: job, error, status } = useJson<Job>(`/api/jobs/${id}`, rev);
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
 
@@ -92,15 +108,11 @@ export default function JobPage() {
     return () => clearInterval(t);
   }, [active]);
 
-  const plates: Plate[] = useMemo(() => parseObject(job?.package_json ?? null)?.plates as Plate[] ?? [], [job?.package_json]);
+  const plates: Plate[] = useMemo(() => packagePlates(job?.package_json), [job?.package_json]);
   const config = useMemo(() => parseObject(job?.config_json ?? null), [job?.config_json]);
   const bed = useMemo(() => bedFromConfig(config), [config]);
   const plate = plates.find((p) => p.index === plateChoice) ?? plates[0] ?? null;
-  const filamentColors = useMemo(() => {
-    const colors: string[] = [];
-    for (const f of plate?.filaments ?? []) if (f.id > 0) colors[f.id - 1] = f.color;
-    return colors;
-  }, [plate]);
+  const filamentColors = useMemo(() => plateColors(plate), [plate]);
   const source = useMemo(() => ({ url: `/api/jobs/${id}/gcode${plate ? `?plate=${plate.index}` : ""}` }), [id, plate]);
 
   if (!job) {
@@ -279,7 +291,7 @@ export default function JobPage() {
                   role="tab"
                   aria-selected={p.index === plate?.index}
                   className={p.index === plate?.index ? "active" : ""}
-                  onClick={() => setPlateChoice(p.index)}
+                  onClick={() => choosePlate(p.index)}
                 >
                   Plate {p.index}
                 </button>
@@ -289,6 +301,8 @@ export default function JobPage() {
           <div className="job-preview">
             <GcodePreview
               source={source}
+              initialLayer={initialLayer == null ? null : initialLayer - 1}
+              onLayer={onLayer}
               bed={bed}
               filamentColors={filamentColors}
               showStats={new URLSearchParams(window.location.search).has("stats")}

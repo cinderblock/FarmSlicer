@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { printPath } from "../links";
 import { apiJson } from "../auth";
 import { errorText, localDateTime, useJson } from "../api";
 import OutcomeDialog from "../components/OutcomeDialog";
@@ -102,15 +104,23 @@ export default function PrintsPage() {
                 <td className="cell-title">
                   <div className="job-name">
                     {p.job_id && p.name && (
-                      <img
-                        className="job-thumb"
-                        src={`/api/jobs/${p.job_id}/thumbnail?plate=${p.plate}`}
-                        alt=""
-                        loading="lazy"
-                        onError={(e) => (e.currentTarget.style.visibility = "hidden")}
-                      />
+                      <Link to={printPath(p.id)} tabIndex={-1} aria-hidden title="Preview">
+                        <img
+                          className="job-thumb"
+                          src={`/api/jobs/${p.job_id}/thumbnail?plate=${p.plate}`}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+                        />
+                      </Link>
                     )}
-                    {p.name ?? <span className="hint">(not visible to you)</span>}
+                    {p.name ? (
+                      <Link to={printPath(p.id)} title={ACTIVE_PRINT.includes(p.status) ? "Watch it print, layer by layer" : "Preview, details and outcome"}>
+                        {p.name}
+                      </Link>
+                    ) : (
+                      <span className="hint">(not visible to you)</span>
+                    )}
                     {p.name && p.plate > 1 && <span className="hint"> · plate {p.plate}</span>}
                   </div>
                 </td>
