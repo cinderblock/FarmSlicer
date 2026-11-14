@@ -166,7 +166,7 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
     // The first report says nothing about when its layer began; a change does.
     setLayerSeen({ layer: liveLayer, at: layerSeen.layer === null ? null : now });
   }
-  const ticking = !!live && !live.done && !live.paused && !live.ended && liveLayer != null && following;
+  const ticking = !!live && !live.done && !live.paused && !live.ended && liveLayer != null && live.filePosition == null && following;
   useEffect(() => {
     if (!ticking) return;
     const t = setInterval(() => setNow(performance.now()), 1000);
@@ -606,9 +606,11 @@ function FilamentRow({ color, label, type, mm, g }: { color: string; label: stri
 }
 
 /** What a live position is based on, for its badge's tooltip. */
-function liveTitle(source: "layer" | "percent" | "done", live: PrintProgress | null | undefined): string {
+function liveTitle(source: "file" | "layer" | "percent" | "done", live: PrintProgress | null | undefined): string {
   if (live?.ended) return "Estimated from the last percentage the printer reported before the print stopped.";
   switch (source) {
+    case "file":
+      return "The printer reports where it is in the file: this is the move it's on (it reads a second or so ahead).";
     case "layer":
       return "The printer reports its layer; the move inside the layer is estimated from the time since the layer began.";
     case "percent":

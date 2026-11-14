@@ -67,7 +67,16 @@ can run in the user's browser.
   feature and filament per tool. The file is streamed and parsed in a Web
   Worker, so 300 MB of G-code doesn't freeze the page. The page also shows
   the slicer's warnings (a part printing in mid-air first), the G-code
-  check and "Print…".
+  check and "Print…". `?plate=N&layer=K` open a plate at a layer (the
+  address follows the view), and every sliced plate's picture or name
+  (Jobs, Prints, printer cards, the queue, projects, the library) opens it.
+- **Watching a print:** a print's page (`/prints/{id}`) shows its plate
+  following the printer: the move it's on where the printer says where it
+  is in the file (Klipper, OctoPrint), else its layer (Bambu, Elegoo) with
+  the move estimated from the time since the layer began, else its
+  percentage over the slicer's time estimate. Moving the layers stops
+  following; "Follow the printer" goes back. Status, camera and controls
+  are on the same page.
 - **Recent slices, compared:** the browser remembers the last slices
   (10 and 1 GB of G-code by default, adjustable; IndexedDB), each with what
   it was made from and its G-code. When the settings, models and plates

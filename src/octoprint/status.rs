@@ -106,6 +106,7 @@ pub(super) fn summarize(snap: &Snapshot) -> PrinterStatus {
         },
         layer: None,
         total_layers: None,
+        file_position: if active { current["progress"]["filepos"].as_i64() } else { None },
         job_name: name.map(stem),
         job_key: path.map(stem),
         job_file: path.map(String::from),
@@ -158,7 +159,7 @@ mod tests {
     fn job(text: &str, f: Value, completion: Option<f64>) -> Value {
         json!({"state": {"text": text, "flags": f, "error": ""},
                "job": {"file": {"path": "farmslicer/Clip-1a2b3c4d.gcode", "display": "Clip-1a2b3c4d.gcode"}},
-               "progress": {"completion": completion, "printTimeLeft": 600}})
+               "progress": {"completion": completion, "printTimeLeft": 600, "filepos": 12345}})
     }
 
     fn summary(s: &State) -> PrinterStatus {
@@ -172,6 +173,8 @@ mod tests {
         assert_eq!((s.job_key.as_deref(), s.job_file.as_deref()), (Some("Clip-1a2b3c4d"), Some("farmslicer/Clip-1a2b3c4d.gcode")));
         assert_eq!(s.nozzles, vec![Temperature { current: 210.3, target: 210.0 }]);
         assert_eq!(s.chamber, None);
+        assert_eq!(s.file_position, Some(12345));
+        assert_eq!(summary(&state(job("Operational", flags(&[]), Some(100.0)), None)).file_position, None);
         assert_eq!(summary(&state(job("Paused", flags(&["paused"]), Some(50.0)), None)).state.as_deref(), Some("PAUSE"));
     }
 

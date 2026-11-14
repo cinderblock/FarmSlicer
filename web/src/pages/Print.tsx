@@ -67,8 +67,9 @@ export default function PrintPage() {
     if (!print) return null;
     if (print.status === "finished") return { done: true };
     if (printing && status?.online) {
-      if (status.layer == null && status.percent == null) return null;
+      if (status.layer == null && status.percent == null && status.file_position == null) return null;
       return {
+        filePosition: status.file_position,
         layer: status.layer,
         totalLayers: status.total_layers,
         percent: status.percent,

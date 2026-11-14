@@ -209,6 +209,11 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
         },
         layer: stats["info"]["current_layer"].as_i64(),
         total_layers: stats["info"]["total_layer"].as_i64().or_else(|| file.and_then(|f| f.layer_count)),
+        file_position: if active {
+            o.get("virtual_sdcard").and_then(|v| v["file_position"].as_i64())
+        } else {
+            None
+        },
         job_name: filename.map(stem),
         job_key: filename.map(stem),
         job_file: filename.map(String::from),
@@ -281,12 +286,14 @@ mod tests {
             "webhooks": {"state": "ready", "state_message": "Printer is ready"},
             "print_stats": {"state": "printing", "filename": "farmslicer/Clip-1a2b3c4d.gcode", "print_duration": 0.0, "info": {"current_layer": null, "total_layer": null}},
             "display_status": {"progress": 0.0},
+            "virtual_sdcard": {"progress": 0.0, "is_active": true, "file_position": 4096},
             "extruder": {"temperature": 150.2, "target": 215.0},
             "heater_bed": {"temperature": 58.0, "target": 60.0},
             "gcode_move": {"speed_factor": 1.0}
         }));
         let file = FileInfo { filename: "farmslicer/Clip-1a2b3c4d.gcode".into(), estimated_time: Some(3600.0), layer_count: Some(50) };
         let s = snap(&o, Some(&file));
+        assert_eq!(s.file_position, Some(4096));
         assert_eq!(s.state.as_deref(), Some("PREPARE"));
         assert_eq!(s.job_key.as_deref(), Some("Clip-1a2b3c4d"));
         assert_eq!(s.total_layers, Some(50));
@@ -302,6 +309,7 @@ mod tests {
 
         merge(&mut o, &objects(json!({"print_stats": {"state": "cancelled"}})));
         assert_eq!(snap(&o, None).state.as_deref(), Some("CANCELLED"));
+        assert_eq!(snap(&o, None).file_position, None);
         merge(&mut o, &objects(json!({"print_stats": {"state": "error", "message": "Move out of range: 300 0 0"}})));
         let s = snap(&o, None);
         assert_eq!((s.state.as_deref(), s.message.as_deref()), (Some("FAILED"), Some("Move out of range: 300 0 0")));

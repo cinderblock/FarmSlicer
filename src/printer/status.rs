@@ -95,6 +95,10 @@ pub struct PrinterStatus {
     pub remaining_minutes: Option<i64>,
     pub layer: Option<i64>,
     pub total_layers: Option<i64>,
+    /// Bytes of the job's file the printer has read (Klipper's
+    /// `virtual_sdcard.file_position`, OctoPrint's `progress.filepos`),
+    /// while it prints: the G-code preview's place to the move.
+    pub file_position: Option<i64>,
     /// The current (or last) job, for people.
     pub job_name: Option<String>,
     /// What the printer calls the current job, as reported: matches the

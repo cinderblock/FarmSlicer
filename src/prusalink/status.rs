@@ -83,6 +83,7 @@ pub fn summarize(s: &Snapshot) -> PrinterStatus {
         remaining_minutes: if active { job["time_remaining"].as_f64().map(|t| (t / 60.0).round() as i64) } else { None },
         layer: None,
         total_layers: None,
+        file_position: None,
         job_name: file.map(stem),
         job_key: file.map(stem),
         job_file: file.map(String::from),

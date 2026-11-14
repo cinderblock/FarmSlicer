@@ -11,9 +11,9 @@ import GcodePreview from "../components/preview/GcodePreview";
 import NozzlePlanView from "../components/NozzlePlanView";
 import JobProjects from "../components/JobProjects";
 import QueueButton from "../components/QueueButton";
-import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices } from "../printers";
+import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices, type PrintRecord } from "../printers";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
-import { positiveParam } from "../links";
+import { positiveParam, printPath } from "../links";
 import { bedFromConfig, packagePlates, parseObject, plateColors } from "../jobConfig";
 
 interface Job {
@@ -99,6 +99,8 @@ export default function JobPage() {
   };
   const { data: job, error, status } = useJson<Job>(`/api/jobs/${id}`, rev);
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
+  // Prints of this job under way: watch them on their own page.
+  const printing = (useJson<PrintRecord[]>("/api/prints?active=1").data ?? []).filter((p) => p.job_id === id && p.name);
 
   // Follow a job that is still slicing.
   const active = job?.status === "queued" || job?.status === "slicing";
@@ -228,6 +230,19 @@ export default function JobPage() {
           </div>
         )}
       </dl>
+
+      {printing.length > 0 && (
+        <div className="job-alert job-alert-live" role="status">
+          {printing.map((p) => (
+            <div key={p.id}>
+              {p.status === "printing" || p.status === "paused" ? "Printing" : "Starting"} on <strong>{p.printer_name}</strong>
+              {plates.length > 1 && ` (plate ${p.plate})`}
+              {" · "}
+              <Link to={printPath(p.id)}>Watch it layer by layer</Link>
+            </div>
+          ))}
+        </div>
+      )}
 
       {job.nozzle_plan && job.inputs && (
         <NozzlePlanView plan={job.nozzle_plan} filaments={job.inputs.filaments} title="Nozzles (when sliced)" />

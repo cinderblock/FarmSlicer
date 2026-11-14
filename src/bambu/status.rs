@@ -166,6 +166,7 @@ pub fn summarize(
         remaining_minutes: int(&r["mc_remaining_time"]),
         layer: int(&r["layer_num"]),
         total_layers: int(&r["total_layer_num"]),
+        file_position: None,
         job_name,
         job_key,
         job_file: text(&r["gcode_file"]),

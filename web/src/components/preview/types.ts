@@ -30,6 +30,12 @@ export interface Extrusions {
   tool: Uint8Array;
   /** Feedrate, 0.1 mm/s. */
   speed: Uint16Array;
+  /**
+   * Byte offset in the file of the line that made the segment (for a gap,
+   * the extrusion after it): where a printer reading the file is
+   * (`live.ts`). Files past 4 GiB wrap.
+   */
+  offset: Uint32Array;
 }
 
 export const TRAVEL = 0;

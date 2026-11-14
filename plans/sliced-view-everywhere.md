@@ -49,17 +49,17 @@ able to get to sliced versions from jobs... and prints".
    - `/prints/:id` page; print record + its printer's status over SSE.
    - `GcodePreview` `live` prop: shows layers up to the printer's, the
      current one partly; dragging the slider leaves live mode, "Back to
-     live" returns. Layers above dimmed/ghosted as "still to print".
+     live" returns. (Not done: ghosting the layers still to print; the
+     view shows only what's printed. A renderer change in `scene.ts`.)
    - Map printer layers to parsed layers (check `total_layers` against the
      file's count; say so when they differ).
    - Percent-only printers (OctoPrint, PrusaLink): position from the
      percentage (OctoPrint's is by file bytes → phase 3 makes it exact).
-3. **Finer than a layer** (current step)
+3. **Finer than a layer** (done; e2e run pending at time of writing)
    - `PrinterStatus.file_position` (bytes): Moonraker
      `virtual_sdcard.file_position`, OctoPrint `progress.filepos`.
-   - Parser: byte offset per layer start and a line/byte per extrusion
-     segment (or per-layer line index) to turn a byte position into a
-     segment index.
+   - Parser: a byte offset per extrusion segment (`Extrusions.offset`,
+     +4 bytes per segment, ~20% more than the other columns).
    - Bambu and SDCP (layer only): estimate inside the layer from the time
      since the layer changed and the layer's move times; shown as an
      estimate.
@@ -80,6 +80,12 @@ able to get to sliced versions from jobs... and prints".
   effect: the view derives `range`/`upTo` from the live position while
   following, and copies them into its own state when the viewer takes over.
 
+- Klipper's `file_position` and OctoPrint's `filepos` are where the host
+  has read to, ahead of the nozzle by the motion queue (Klipper ~2 s of
+  moves, OctoPrint the printer's planner buffer). Shown as is.
+- The Moonraker fake works out its layer (progress × layer count) and file
+  position (progress × size) separately, so in the fake they disagree a
+  little; a real Klipper's agree.
 - Parsed layers put the start sequence into layer 1, like the desktop
   slicers; Bambu's `layer_num` is 0 during the start sequence.
 
@@ -93,8 +99,14 @@ able to get to sliced versions from jobs... and prints".
   Moonraker fake reports `current_layer`/`total_layer`. Verified against the
   fake with a real Voron file: follows layer and move, leaves follow mode on
   slider/keys, "Follow the printer" returns
-- [ ] 3. Finer than a layer
-- [ ] 4. Docs, changelog, tests
+- [x] 3. Finer than a layer: `PrinterStatus.file_position` (Moonraker,
+  OctoPrint; unit tests in both drivers), both fakes report it, parser
+  offsets (tests: offsets per line, any chunking, position → move). Verified
+  against the Moonraker fake: badge says exact, the move advances every
+  update. Job page links to its prints under way.
+- [x] 4. README, CLAUDE.md, What's new (`2026-11-13c`); phone width checked
+  (360 px, no sideways scroll)
+- [ ] 5. Optional: ghost the layers still to print on the print page
 
 ## Open questions for the user
 

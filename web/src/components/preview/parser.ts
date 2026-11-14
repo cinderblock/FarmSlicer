@@ -111,6 +111,7 @@ class ExtrusionColumns {
   feature = new Uint8Array(this.cap);
   tool = new Uint8Array(this.cap);
   speed = new Uint16Array(this.cap);
+  offset = new Uint32Array(this.cap);
   /** 1 = width estimated from E (fixed up once the filament diameter is known). */
   estimated = new Uint8Array(this.cap);
   /** The chain's last point (full precision), once it has one. */
@@ -126,6 +127,7 @@ class ExtrusionColumns {
     this.feature = grow(this.feature, cap);
     this.tool = grow(this.tool, cap);
     this.speed = grow(this.speed, cap);
+    this.offset = grow(this.offset, cap);
     this.estimated = grow(this.estimated, cap);
     this.cap = cap;
   }
@@ -170,6 +172,7 @@ class ExtrusionColumns {
       feature: this.feature.slice(0, n),
       tool: this.tool.slice(0, n),
       speed: this.speed.slice(0, n),
+      offset: this.offset.slice(0, n),
     };
   }
 }
@@ -370,6 +373,9 @@ export class GcodeParser {
   // ---- bookkeeping
   private lineNo = 0;
   private bytes = 0;
+  /** Byte offset of the line being read, and of the partial line carried over. */
+  private lineAt = 0;
+  private carryAt = 0;
   private carry: Uint8Array | null = null;
   private words = new Float64Array(26);
   /** Letters present in the last `parseWords`, with or without a number ("G28 X"). */
@@ -387,6 +393,7 @@ export class GcodeParser {
 
   /** Feed the next chunk of the file. */
   push(chunk: Uint8Array): void {
+    const base = this.bytes;
     this.bytes += chunk.length;
     let start = 0;
     if (this.carry) {
@@ -402,16 +409,21 @@ export class GcodeParser {
       joined.set(this.carry);
       joined.set(chunk.subarray(0, nl), this.carry.length);
       this.carry = null;
+      this.lineAt = this.carryAt;
       this.line(joined, 0, joined.length);
       start = nl + 1;
     }
     for (;;) {
       const nl = chunk.indexOf(10, start);
       if (nl < 0) break;
+      this.lineAt = base + start;
       this.line(chunk, start, nl);
       start = nl + 1;
     }
-    if (start < chunk.length) this.carry = chunk.slice(start);
+    if (start < chunk.length) {
+      this.carry = chunk.slice(start);
+      this.carryAt = base + start;
+    }
   }
 
   // ---- lines --------------------------------------------------------------------
@@ -828,8 +840,10 @@ export class GcodeParser {
       this.zLayers.push(b);
     }
     const c = this.ex;
+    const gap = c.n;
     c.from(this.x, this.y, this.z, this.tool);
     const n = c.to(tx, ty, tz);
+    for (let i = gap; i <= n; i++) c.offset[i] = this.lineAt >>> 0;
     const height = this.commentHeight > 0 ? this.commentHeight : this.zLayerHeight;
     let width = this.commentWidth;
     // Custom G-code (start sequence, purges) carries no width comment; the
@@ -1001,6 +1015,7 @@ export class GcodeParser {
     if (this.carry) {
       const last = this.carry;
       this.carry = null;
+      this.lineAt = this.carryAt;
       this.line(last, 0, last.length);
     }
     this.flush(0);

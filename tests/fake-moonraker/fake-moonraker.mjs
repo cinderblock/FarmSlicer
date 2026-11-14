@@ -86,7 +86,7 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
     set("print_stats", { state: "printing", filename: file, print_duration: 0, total_duration: 0, message: "", info: { current_layer: null, total_layer: null } });
     set("pause_resume", { is_paused: false });
     set("display_status", { progress: 0 });
-    set("virtual_sdcard", { progress: 0, is_active: true });
+    set("virtual_sdcard", { progress: 0, is_active: true, file_position: 0 });
     notify("notify_history_changed", [{ action: "added", job: { job_id: "0000A1", filename: file, status: "in_progress" } }]);
   };
   const endJob = (state, message = "") => {
@@ -115,7 +115,9 @@ export async function startFakeMoonraker({ port = 0, apiKey = null, printSeconds
       const info = count ? { total_layer: count, current_layer: Math.max(1, Math.ceil(progress * count)) } : objects.print_stats.info;
       set("print_stats", { print_duration: printing, total_duration: job.elapsed, info });
       set("display_status", { progress });
-      set("virtual_sdcard", { progress });
+      // Klipper's progress is the file position over the file's size.
+      const size = files.get(job.file)?.length ?? 0;
+      set("virtual_sdcard", { progress, file_position: Math.round(progress * size) });
       if (progress >= 1) endJob("complete");
     }
     if (Object.keys(dirty).length) {

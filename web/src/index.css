@@ -4746,6 +4746,11 @@ a.btn-sm {
   color: var(--error);
 }
 
+.job-alert-live {
+  border-color: var(--success);
+  background: var(--tone-success);
+}
+
 .job-progress {
   display: flex;
   flex-direction: column;

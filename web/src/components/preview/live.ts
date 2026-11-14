@@ -2,6 +2,8 @@
 // Pure (no DOM, no React): unit-tested in web/test/preview-live.test.ts.
 //
 // Printers tell us different things (src/printer/status.rs):
+//  - where they are in the file, in bytes (Klipper, OctoPrint): exact to
+//    the move (a second or so ahead: the printer's motion queue);
 //  - the layer (Bambu, Klipper, Elegoo SDCP): exact to the layer; inside it
 //    we estimate from the time since the layer changed and the layer's moves;
 //  - only a percentage (OctoPrint, PrusaLink): mapped onto the file's time
@@ -11,6 +13,8 @@ import { GAP, type ParsedGcode } from "./types";
 
 /** What the page knows about the print, from the printer's status. */
 export interface PrintProgress {
+  /** Bytes of the file the printer has read: exact to the move. */
+  filePosition?: number | null;
   /** The printer's layer (1-based; 0 or null before the first). */
   layer?: number | null;
   totalLayers?: number | null;
@@ -31,8 +35,12 @@ export interface LivePosition {
   layer: number;
   /** Extrusion segment index (exclusive end) within that layer. */
   upTo: number;
-  /** How the position inside the layer was found: "layer" = the layer is exact, the move an estimate. */
-  source: "layer" | "percent" | "done";
+  /**
+   * How it was found: "file" = the printer's place in the file (exact);
+   * "layer" = the layer is exact, the move an estimate; "percent" = both
+   * estimated from the slicer's times.
+   */
+  source: "file" | "layer" | "percent" | "done";
   /** The printer's layer count differs from the file's. */
   layerMismatch: boolean;
 }
@@ -75,6 +83,32 @@ export function segmentAtFraction(parsed: ParsedGcode, layer: number, fraction: 
   return end;
 }
 
+/** Segments (exclusive end) made by lines that start before `position` (bytes). */
+export function segmentAtOffset(parsed: ParsedGcode, position: number): number {
+  const { offset, count } = parsed.extrusions;
+  let lo = 0;
+  let hi = count;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (offset[mid] < position) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The layer holding segment `segment` (the last layer starting at or before it). */
+export function layerOfSegment(parsed: ParsedGcode, segment: number): number {
+  const { extrusionStart, count } = parsed.layers;
+  let lo = 0;
+  let hi = count - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (extrusionStart[mid] <= segment) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
 /**
  * Where the print is. `layerElapsed` = seconds since the printer's layer
  * last changed (for the estimate inside a layer); null = unknown (the
@@ -89,6 +123,11 @@ export function livePosition(parsed: ParsedGcode, progress: PrintProgress, layer
   if (progress.done) return { layer: last, upTo: end, source: "done", layerMismatch: false };
 
   const layerMismatch = !!progress.totalLayers && progress.totalLayers !== count;
+  if (progress.filePosition != null && progress.filePosition >= 0 && parsed.extrusions.count > 0) {
+    const upTo = segmentAtOffset(parsed, progress.filePosition);
+    const layer = layerOfSegment(parsed, Math.max(0, upTo - 1));
+    return { layer, upTo, source: "file", layerMismatch };
+  }
   if (progress.layer != null) {
     // Bambu reports 0 during the start sequence, which the file counts as layer 1.
     const layer = Math.max(0, Math.min(last, progress.layer - 1));

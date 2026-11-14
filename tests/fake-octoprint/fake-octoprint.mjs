@@ -61,6 +61,8 @@ export async function startFakeOctoPrint({ port = 0, apiKey = "FARMSLICERTESTKEY
     },
     progress: {
       completion,
+      // OctoPrint's completion is the file position over the file's size.
+      filepos: job && completion != null ? Math.round(((files.get(job.path)?.data.length ?? 0) * completion) / 100) : null,
       printTime: job ? Math.round(job.elapsed) : null,
       printTimeLeft: job ? Math.max(0, Math.round(printSeconds - job.elapsed)) : null,
       printTimeLeftOrigin: "linear",

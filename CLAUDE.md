@@ -457,7 +457,20 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   `BEAD_BUDGET`, lines while the camera moves above `MOVING_LINES`. Same
   scene convention as `viewer/` (bed centre at the origin), damping off
 - `web/src/pages/Job.tsx` — `/jobs/:id`: facts, slicer warnings (support
-  ones in red), progress, the preview per plate, G-code check, Print…
+  ones in red), progress, the preview per plate (`?plate=&layer=`, 1-based,
+  kept in the URL), G-code check, Print…, a link to its prints under way.
+  `web/src/links.ts` (`previewPath`, `printPath`) is how every page links
+  to a sliced plate; `web/src/jobConfig.ts` reads a job's bed, plates and
+  colours for the preview
+- `web/src/pages/Print.tsx` — `/prints/:id`: the plate's preview following
+  the printer (`GcodePreview`'s `live` prop), status, camera, controls,
+  outcome. Where the print is: `components/preview/live.ts` (pure,
+  `web/test/preview-live.test.ts`): `PrinterStatus.file_position`
+  (Klipper `virtual_sdcard.file_position`, OctoPrint `progress.filepos`)
+  against the parser's byte offset per segment (`Extrusions.offset`;
+  printers get the plate's bytes as the preview serves them), else the
+  layer plus an estimate in it from the time since it changed, else the
+  percentage over the layers' times. Plan: `plans/sliced-view-everywhere.md`
 - `cxx/thumbnail.{hpp,cpp}` — software rasteriser for plate thumbnails (no
   GL anywhere) and the label/logo overlay (stb_truetype from libslic3r's
   Emboss.cpp; logo arrives as RGBA). slice_core passes it to

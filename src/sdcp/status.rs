@@ -148,6 +148,7 @@ pub fn summarize(connected: bool, error: Option<String>, updated_at: Option<Stri
         remaining_minutes: if active { remaining } else { None },
         layer: if active { layer } else { None },
         total_layers: if active { total } else { None },
+        file_position: None,
         job_name: filename.map(stem),
         job_key: filename.map(stem),
         job_file: filename.map(String::from),

@@ -171,6 +171,8 @@ export interface PrinterStatus {
   remaining_minutes: number | null;
   layer: number | null;
   total_layers: number | null;
+  /** Bytes of the job's file the printer has read, while it prints (Klipper, OctoPrint). */
+  file_position: number | null;
   job_name: string | null;
   /** What the printer calls the job (matches what FarmSlicer sends); null when unnamed. */
   job_key: string | null;
