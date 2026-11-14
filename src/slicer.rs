@@ -25,6 +25,12 @@ mod ffi {
         logo_height: u32,
         /// TrueType font for the label.
         font_path: String,
+        /// Changes by height (`server::HeightChange`), the same on every
+        /// plate: where (mm), what (0 filament, 1 pause, 2 swap the spool)
+        /// and the filament (1-based).
+        height_z: Vec<f64>,
+        height_kind: Vec<u8>,
+        height_filament: Vec<u32>,
     }
 
     /// One model file and every copy of it on the job's plates
@@ -135,6 +141,9 @@ mod stub {
         pub logo_width: u32,
         pub logo_height: u32,
         pub font_path: String,
+        pub height_z: Vec<f64>,
+        pub height_kind: Vec<u8>,
+        pub height_filament: Vec<u32>,
     }
 
     pub struct ModelInput {

@@ -56,4 +56,33 @@ check(r.status === 201, "copies may be scaled and mirrored", json(r));
 const stored = JSON.parse(r.json?.plate_json ?? "{}");
 check(stored.plates?.[0]?.objects?.[0]?.placement?.rotation?.[8] === 2, "the scale is kept", r.json?.plate_json);
 
+// Changes by height: kept with the job's inputs, handed to the browser engine.
+/** A browser job of two filaments (`form` can't repeat a field). */
+const twoFilamentJob = (changes) => {
+  const fd = new FormData();
+  fd.append("source", "browser");
+  fd.append("model_name", "tower.stl");
+  fd.append("filament", "Bambu PLA Basic @BBL X1C");
+  fd.append("filament", "Bambu PLA Basic @BBL X1C");
+  fd.append("height_changes", JSON.stringify(changes));
+  return member.call("POST", "/api/jobs", fd);
+};
+r = await twoFilamentJob([
+  { z: 10.2, kind: "filament", filament: 2 },
+  { z: 20, kind: "pause" },
+  { z: 30, kind: "swap" },
+]);
+check(r.status === 201, "a job with changes by height", json(r));
+check(JSON.parse(r.json?.inputs_json ?? "{}").height_changes?.length === 3, "kept with its inputs", r.json?.inputs_json);
+check(r.json?.slice_options?.height_changes?.[0]?.filament === 2, "the browser engine gets them", json(r));
+for (const [label, bad] of [
+  ["a filament the job hasn't", [{ z: 5, kind: "filament", filament: 3 }]],
+  ["no height", [{ z: 0, kind: "pause" }]],
+  ["an unknown kind", [{ z: 5, kind: "gcode", filament: 1 }]],
+  ["free-form G-code", [{ z: 5, kind: "pause", gcode: "M104 S300" }]],
+]) {
+  r = await twoFilamentJob(bad);
+  check(r.status === 400 && /height_changes/.test(r.json?.error ?? ""), `refuses ${label}`, json(r));
+}
+
 finish();

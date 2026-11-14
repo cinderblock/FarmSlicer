@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import Icon from "../components/Icon";
 import ModelViewer, { type BedShape, type PlateState, type SupportCheck } from "../components/ModelViewer";
 import { FALLBACK_COLORS } from "../components/viewer/part";
+import type { HeightChange } from "../engine/types";
 import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
 import NozzlePlanView from "../components/NozzlePlanView";
 import SliceResult from "../components/SliceResult";
@@ -87,6 +88,7 @@ interface SliceSettings {
   /** Filaments 2.. of the model, and filament 1's colour. */
   slots?: FilamentSlot[];
   firstColor?: string;
+  heightChanges?: HeightChange[];
 }
 
 interface MeGroups {
@@ -184,6 +186,7 @@ interface ResliceJob {
     routing: string;
     color: string;
     colours?: string[];
+    height_changes?: HeightChange[];
     group_id: string | null;
   } | null;
   /** The only plate (null with several, or from servers before plates). */
@@ -306,6 +309,8 @@ export default function SlicePage() {
   // being `filament`. Their colours show on the plate and go to the job.
   const [slots, setSlots] = useState<FilamentSlot[]>([]);
   const [firstColor, setFirstColor] = useState("");
+  // From a height on: another filament, a pause, a spool swap.
+  const [heightChanges, setHeightChanges] = useState<HeightChange[]>([]);
   const filamentRef = useRef(filament);
   useEffect(() => {
     filamentRef.current = filament;
@@ -444,6 +449,7 @@ export default function SlicePage() {
         if (s.materialsChoice !== undefined) setMaterialsChoice(s.materialsChoice);
         if (s.slots) setSlots(s.slots);
         if (s.firstColor !== undefined) setFirstColor(s.firstColor);
+        if (s.heightChanges) setHeightChanges(s.heightChanges);
         if (s.routing) setRouting(s.routing);
         if (s.groupChoice !== undefined) setGroupChoice(s.groupChoice);
         // ?project= in the address says which project; else the draft's.
@@ -515,6 +521,7 @@ export default function SlicePage() {
     materialsChoice,
     slots,
     firstColor,
+    heightChanges,
     routing,
     groupChoice,
     projectChoice,
@@ -648,6 +655,7 @@ export default function SlicePage() {
             .filter((_, i) => i > 0 && !supportOnly.has(i + 1)),
         );
         setFirstColor(inputs.colours?.[0] ?? "");
+        setHeightChanges(inputs.height_changes ?? []);
       }
       setOverrides(Object.fromEntries(Object.entries(saved).filter(([k]) => !SUPPORT_KEYS.includes(k))));
       setInitialPlate({ key: fromJob, files, plates: job.plates ?? (job.plate ? [job.plate] : null) });
@@ -786,6 +794,14 @@ export default function SlicePage() {
     return o;
   }, [overrides, supports, supportPlan]);
 
+  // Heights snap to the layers: the first layer, then layer_height each.
+  const layerStep = Number(jobOverrides.layer_height ?? resolvedConfig?.layer_height ?? 0.2) || 0.2;
+  const firstLayer = Number(resolvedConfig?.initial_layer_print_height ?? layerStep) || layerStep;
+  const snapToLayer = (z: number) => {
+    if (!(z > 0)) return 0;
+    const k = Math.max(0, Math.round((z - firstLayer) / layerStep));
+    return Math.round((firstLayer + k * layerStep) * 1000) / 1000;
+  };
   // The machine profile to slice with
   const resolvedMachine = selectedPrinter
     ? printerProfile(selectedPrinter, machineModels)
@@ -1005,6 +1021,7 @@ export default function SlicePage() {
     if (process) formData.append("process", process);
     if (filament) for (const f of supportPlan.filaments) formData.append("filament", f);
     if (filament && jobColours) formData.append("colours", JSON.stringify(jobColours));
+    if (heightChanges.length) formData.append("height_changes", JSON.stringify(heightChanges));
     if (plate) formData.append("bed_type", plate);
     if (color) formData.append("color", color);
     formData.append("overrides", JSON.stringify(jobOverrides));
@@ -1031,7 +1048,7 @@ export default function SlicePage() {
       }),
     );
     return formData;
-  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, projectChoice, newProjectName, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials, jobColours]);
+  }, [routing, printerId, resolvedMachine, process, filament, plate, color, jobOverrides, groupId, layout, projectChoice, newProjectName, supportPlan, defaultNozzle, model, defaultPlate, defaultMaterials, jobColours, heightChanges]);
 
   // What a slice now would be made from (sliceHistory.ts): the job form's
   // choices, the models by digest, the resolved profile, the dual-nozzle
@@ -1052,8 +1069,9 @@ export default function SlicePage() {
       profile: resolvedConfig ? await sha256Text(stableStringify(resolvedConfig)) : "",
       nozzle_plan: dualNozzle ? nozzlePlan : null,
       colours: jobColours ?? undefined,
+      height_changes: heightChanges.length ? heightChanges : undefined,
     }),
-    [resolvedMachine, process, filament, supportPlan, plate, color, jobOverrides, printerId, routing, groupId, layout, modelFiles, resolvedConfig, dualNozzle, nozzlePlan, jobColours],
+    [resolvedMachine, process, filament, supportPlan, plate, color, jobOverrides, printerId, routing, groupId, layout, modelFiles, resolvedConfig, dualNozzle, nozzlePlan, jobColours, heightChanges],
   );
   // The remembered slice of exactly this (for the project chosen), if any:
   // Slice then shows it instead of slicing again.
@@ -1323,6 +1341,10 @@ export default function SlicePage() {
               colors={displayColors}
               filamentCount={slotNames.length}
               onPalette={handlePalette}
+              heightMarks={heightChanges.map((h) => ({
+                z: h.z,
+                color: h.kind === "filament" ? displayColors[(h.filament ?? 1) - 1] ?? "#ffffff" : "#ffd23f",
+              }))}
             />
           </div>
           {sliced && view === "preview" && (
@@ -1589,6 +1611,74 @@ export default function SlicePage() {
               title="Another filament for the model: pick it for a part, or paint with it"
             >
               + Filament
+            </button>
+          </div>
+
+          <div className="filament-slots" aria-label="Changes by height">
+            {heightChanges.length > 0 && <span className="filament-slot-name">Changes by height (every plate)</span>}
+            {heightChanges.map((h, i) => (
+              <div className="filament-slot" key={i}>
+                <input
+                  type="number"
+                  className="height-change-z"
+                  min={0}
+                  step={layerStep}
+                  defaultValue={h.z}
+                  key={`${i}:${h.z}`}
+                  aria-label="Height (mm)"
+                  title="From the first layer at or above this height (mm)"
+                  onBlur={(e) => {
+                    const z = snapToLayer(Number(e.target.value));
+                    if (z > 0) setHeightChanges((all) => all.map((x, j) => (j === i ? { ...x, z } : x)).sort((a, b) => a.z - b.z));
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                />
+                <span className="placement-unit">mm</span>
+                <select
+                  value={h.kind === "filament" ? `f${h.filament ?? 1}` : h.kind}
+                  aria-label="What happens there"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const next: HeightChange =
+                      v === "pause" || v === "swap" ? { z: h.z, kind: v } : { z: h.z, kind: "filament", filament: Number(v.slice(1)) };
+                    setHeightChanges((all) => all.map((x, j) => (j === i ? next : x)));
+                  }}
+                >
+                  {slotNames.map((_, f) => (
+                    <option key={f} value={`f${f + 1}`}>
+                      Filament {f + 1}
+                    </option>
+                  ))}
+                  <option value="pause">Pause</option>
+                  <option value="swap">Swap the spool</option>
+                </select>
+                <button
+                  type="button"
+                  className="btn-sm btn-ghost"
+                  onClick={() => setHeightChanges((all) => all.filter((_, j) => j !== i))}
+                  title="Remove this change"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={!filament}
+              onClick={() =>
+                setHeightChanges((all) =>
+                  [
+                    ...all,
+                    slotNames.length > 1
+                      ? { z: snapToLayer((all.at(-1)?.z ?? 0) + 5), kind: "filament" as const, filament: 2 }
+                      : { z: snapToLayer((all.at(-1)?.z ?? 0) + 5), kind: "swap" as const },
+                  ].sort((a, b) => a.z - b.z),
+                )
+              }
+              title="From a height on: another filament, a pause, or a spool swap (on every plate)"
+            >
+              + Change by height
             </button>
           </div>
 

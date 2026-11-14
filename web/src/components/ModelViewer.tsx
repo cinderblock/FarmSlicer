@@ -232,6 +232,7 @@ function Scene({
   paint,
   paintNow,
   cut,
+  heightMarks,
   onSelect,
   onChange,
   onCommit,
@@ -246,6 +247,7 @@ function Scene({
   paintNow: { readonly current: PaintSettings };
   /** Cutting: the plane's settings and where the connectors would go. */
   cut: { settings: CutSettings; points: THREE.Vector3[] } | null;
+  heightMarks: { z: number; color: string }[];
   onSelect: (part: Part) => void;
   onChange: () => void;
   onCommit: () => void;
@@ -275,6 +277,12 @@ function Scene({
       ))}
       <Guides guides={guides} bed={bed} />
       {cut && selected && <CutPlane part={selected} settings={cut.settings} points={cut.points} />}
+      {heightMarks.map((m, i) => (
+        <mesh key={i} position={[(bed.min.x + bed.max.x) / 2, (bed.min.y + bed.max.y) / 2, m.z]} renderOrder={14}>
+          <planeGeometry args={[bed.max.x - bed.min.x, bed.max.y - bed.min.y]} />
+          <meshBasicMaterial color={m.color} transparent opacity={0.12} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      ))}
       {paint && selected && (
         <PaintSurface key={selected.id} part={selected} settings={paint} current={paintNow} onStroke={onStroke} />
       )}
@@ -375,6 +383,7 @@ export default function ModelViewer({
   colors = [],
   filamentCount = 1,
   onPalette,
+  heightMarks = [],
 }: {
   /** The selected printer's bed; a 256 mm bed until there is one. */
   bed?: BedShape | null;
@@ -394,6 +403,8 @@ export default function ModelViewer({
   filamentCount?: number;
   /** A loaded file named its own colours for filaments 1..N. */
   onPalette?: (colors: string[]) => void;
+  /** Heights (mm) to show across the bed: the job's changes by height. */
+  heightMarks?: { z: number; color: string }[];
 }) {
   // Every part on every plate (`Part.plate`); the view shows the active one.
   const [parts, setParts] = useState<Part[]>([]);
@@ -1602,6 +1613,7 @@ export default function ModelViewer({
           paint={painting ? paintSettings : null}
           paintNow={paintNow}
           cut={cutPreview}
+          heightMarks={heightMarks}
           onSelect={select}
           onStroke={recordPaint}
           onChange={refresh}

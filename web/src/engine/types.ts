@@ -73,6 +73,16 @@ export interface SliceOptions {
   plates?: PlateLayout[];
   /** The job's models, in order. */
   models?: { name: string }[];
+  /** Changes by height, on every plate (server::HeightChange). */
+  height_changes?: HeightChange[];
+}
+
+/** From the first layer at or above `z` (mm): another filament, a pause, or a spool swap. */
+export interface HeightChange {
+  z: number;
+  kind: "filament" | "pause" | "swap";
+  /** `filament` changes: which one (1-based). */
+  filament?: number;
 }
 
 export interface SliceOutput {

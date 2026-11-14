@@ -50,6 +50,8 @@ let placesModels = false;
 let takesPlates = false;
 /** The engine slices several plates into one package. */
 let takesPlateList = false;
+/** The engine applies SliceOptions.height_changes (older engines ignore them). */
+let takesHeightChanges = false;
 let currentId = 0;
 
 function writeString(m: EngineModule, s: string): { ptr: number; len: number } {
@@ -87,6 +89,7 @@ async function init(variant: "st" | "mt", baseUrl: string, threads?: number) {
   placesModels = Boolean(version.placement);
   takesPlates = Boolean(version.plate) && typeof engine._fs_stage_model === "function";
   takesPlateList = takesPlates && Boolean(version.plates);
+  takesHeightChanges = Boolean(version.height_changes);
   const threadCount = threaded && engine._fs_thread_count ? engine._fs_thread_count() : 1;
   post({ type: "ready", version, threadCount });
 }
@@ -170,6 +173,11 @@ async function slice(id: number, models: { name: string; data: ArrayBuffer }[], 
   // placement: the G-code would come out centred, in the file's orientation.
   if (options?.placement && !placesModels) {
     post({ type: "error", id, error: "this browser engine predates part placement; reload the page, or slice on the server" });
+    return;
+  }
+  // Changes by height an older engine would leave out.
+  if (options?.height_changes?.length && !takesHeightChanges) {
+    post({ type: "error", id, error: "this browser engine predates changes by height; reload the page, or slice on the server" });
     return;
   }
   if (options && !setOptions(m, options) && (options.placement || options.plate || options.plates)) {

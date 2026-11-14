@@ -365,7 +365,7 @@ EMSCRIPTEN_KEEPALIVE const char* fs_version()
         // model with an engine that would ignore it), and a plate of several
         // parts with fs_stage_model for the further models, and several
         // plates (`plates`; their G-code goes into the package).
-        ",\"placement\":true,\"plate\":true,\"plates\":true}";
+        ",\"placement\":true,\"plate\":true,\"plates\":true,\"height_changes\":true}";
     return v.c_str();
 }
 
@@ -411,6 +411,17 @@ EMSCRIPTEN_KEEPALIVE int fs_set_options(const char* json, int json_len, const ui
         const auto j = nlohmann::json::parse(std::string(json ? json : "", json_len > 0 ? size_t(json_len) : 0));
         if (j.value("package", false)) o.package_path = PACKAGE_PATH;
         o.printer_model_id = j.value("printer_model_id", std::string());
+        if (const auto hc = j.find("height_changes"); hc != j.end() && hc->is_array())
+            for (const auto& c : *hc) {
+                farmslicer::core::HeightChange h;
+                h.z = c.at("z").get<double>();
+                const std::string kind = c.value("kind", std::string("filament"));
+                h.kind = kind == "pause" ? farmslicer::core::HeightChange::Pause
+                       : kind == "swap"  ? farmslicer::core::HeightChange::Swap
+                                         : farmslicer::core::HeightChange::Filament;
+                h.filament = c.value("filament", 1);
+                o.height_changes.push_back(h);
+            }
         n.model_name = j.value("model_name", std::string());
         o.overlay.label = j.value("label", std::string());
         o.overlay.logo_width = j.value("logo_width", 0u);

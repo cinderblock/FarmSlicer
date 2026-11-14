@@ -29,6 +29,8 @@ export interface SliceInputs {
   nozzle_plan: unknown;
   /** The filaments' colours, when the page set any ("" = the profile's). */
   colours?: string[];
+  /** Changes by height, when there are any. */
+  height_changes?: unknown[];
 }
 
 export interface SliceStats {

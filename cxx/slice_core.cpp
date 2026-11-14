@@ -14,6 +14,7 @@
 #include <libslic3r/Utils.hpp>
 #include <libslic3r/BuildVolume.hpp>
 #include <libslic3r/Model.hpp>
+#include <libslic3r/CustomGCode.hpp>
 #include <libslic3r/Print.hpp>
 #include <libslic3r/Layer.hpp>
 #include <libslic3r/PrintBase.hpp>
@@ -33,6 +34,7 @@
 
 #include <array>
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -476,6 +478,41 @@ void check_filaments(const Slic3r::Model& model, int filament_count)
     }
 }
 
+// The job's changes by height as libslic3r's custom G-code for a plate.
+// A switch to a filament the job doesn't have is refused.
+Slic3r::CustomGCode::Info height_changes(const std::vector<HeightChange>& changes, int filament_count)
+{
+    using namespace Slic3r;
+    CustomGCode::Info info;
+    for (const HeightChange& h : changes) {
+        if (!(h.z > 0) || !std::isfinite(h.z)) throw std::runtime_error("a change by height needs a height above the plate");
+        CustomGCode::Item item;
+        item.print_z = h.z;
+        item.extruder = h.kind == HeightChange::Filament ? h.filament : 1;
+        switch (h.kind) {
+        case HeightChange::Filament:
+            if (h.filament < 1 || h.filament > filament_count) {
+                char z[32];
+                std::snprintf(z, sizeof z, "%g", h.z);
+                throw std::runtime_error(std::string("the change at ") + z + " mm is to filament " +
+                                         std::to_string(h.filament) + ", which the job doesn't have");
+            }
+            item.type = CustomGCode::ToolChange;
+            break;
+        case HeightChange::Pause:
+            item.type = CustomGCode::PausePrint;
+            break;
+        case HeightChange::Swap:
+            item.type = CustomGCode::ColorChange;
+            break;
+        }
+        info.gcodes.push_back(item);
+    }
+    std::sort(info.gcodes.begin(), info.gcodes.end());
+    CustomGCode::check_mode_for_custom_gcode_per_print_z(info);
+    return info;
+}
+
 // Only the parts on `parts` print (Print::apply and the thumbnails skip
 // instances that aren't printable).
 void select_plate(Slic3r::Model& model, const std::vector<std::pair<int, int>>& parts)
@@ -610,6 +647,7 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 
         const int filament_count = int(std::max<size_t>(1, vector_size(base_config, "filament_diameter")));
         check_filaments(model, filament_count);
+        const CustomGCode::Info changes = height_changes(options.height_changes, filament_count);
         const bool bambu = base_config.opt_string("printer_model", true).rfind("Bambu Lab", 0) == 0;
 
         // Thumbnails: the G-code exporter asks for the sizes the printer
@@ -654,6 +692,10 @@ Outcome slice_models(const std::vector<ModelInput>& models,
             try {
                 select_plate(model, plate_parts[p]);
                 check_build_volume(model, base_config);
+                // The changes by height: libslic3r reads the plate's.
+                model.curr_plate_index = int(p);
+                model.plates_custom_gcodes.clear();
+                if (!changes.gcodes.empty()) model.plates_custom_gcodes[int(p)] = changes;
 
                 // The prime tower's position and the filament map can move
                 // per plate.

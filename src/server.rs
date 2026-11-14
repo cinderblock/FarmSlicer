@@ -558,6 +558,7 @@ pub(crate) fn job_inputs(job: &Job) -> Option<JobInputs> {
         routing: job.routing.clone(),
         color: String::new(),
         colours: Vec::new(),
+        height_changes: Vec::new(),
         group_id: job.group_id.clone(),
         source: job.source.clone(),
     })
@@ -695,11 +696,64 @@ pub struct JobInputs {
     /// profiles' own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub colours: Vec<String>,
+    /// Changes by height, on every plate: another filament, a pause or a
+    /// spool swap from a height on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub height_changes: Vec<HeightChange>,
     #[serde(default)]
     pub group_id: Option<String>,
     /// "server" or "browser".
     #[serde(default)]
     pub source: String,
+}
+
+/// A change at a height (the desktop slicers' custom G-code per height,
+/// without free-form G-code): from the first layer at or above `z` print
+/// with filament `filament`, or pause there, or swap the spool there (the
+/// printer profile's colour-change G-code).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeightChange {
+    pub z: f64,
+    pub kind: HeightChangeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filament: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HeightChangeKind {
+    Filament,
+    Pause,
+    Swap,
+}
+
+/// The most changes by height a job may have.
+const MAX_HEIGHT_CHANGES: usize = 200;
+
+/// Parse and check a job's changes by height for `filaments` filaments.
+fn parse_height_changes(text: &str, filaments: usize) -> Result<Vec<HeightChange>, String> {
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let list: Vec<HeightChange> = serde_json::from_str(text).map_err(|e| format!("height_changes: {e}"))?;
+    if list.len() > MAX_HEIGHT_CHANGES {
+        return Err(format!("height_changes: at most {MAX_HEIGHT_CHANGES}"));
+    }
+    for c in &list {
+        if !(c.z.is_finite() && c.z > 0.0 && c.z <= 10_000.0) {
+            return Err("height_changes: each needs a height above the plate".into());
+        }
+        match (c.kind, c.filament) {
+            (HeightChangeKind::Filament, Some(f)) if f >= 1 && (f as usize) <= filaments => {}
+            (HeightChangeKind::Filament, _) => {
+                return Err(format!("height_changes: a change at {} mm names a filament the job doesn't have", c.z));
+            }
+            (_, None) => {}
+            (_, Some(_)) => return Err("height_changes: only filament changes name a filament".into()),
+        }
+    }
+    Ok(list)
 }
 
 /// The most filaments a job may use (a plate's parts and supports; AMS
@@ -802,6 +856,7 @@ async fn create_job(
     let mut placement_str = String::new();
     let mut plate_str = String::new();
     let mut proposed_str = String::new();
+    let mut height_str = String::new();
     let mut project_str = String::new();
 
     while let Some(field) = multipart.next_field().await.map_err(|e| bad(&e))? {
@@ -829,6 +884,7 @@ async fn create_job(
             "process" => inputs.process = text,
             "filament" if !text.is_empty() => inputs.filaments.push(text),
             "color" => inputs.color = text.trim().to_string(),
+            "height_changes" => height_str = text,
             "colours" => {
                 inputs.colours = serde_json::from_str(&text).map_err(|e| bad(&format!("colours: {e}")))?;
             }
@@ -864,6 +920,7 @@ async fn create_job(
         return Err(bad(&"source must be 'server' or 'browser'"));
     }
     check_colours(&inputs.colours, inputs.filaments.len()).map_err(|e| bad(&e))?;
+    inputs.height_changes = parse_height_changes(&height_str, inputs.filaments.len().max(1)).map_err(|e| bad(&e))?;
     // An integration key's jobs are its group's.
     if let Some(g) = scope.as_ref().and_then(|s| s.group_id.clone()) {
         match &inputs.group_id {
@@ -1393,6 +1450,7 @@ fn browser_slice_options(state: &AppState, job: &Job, config_json: &str) -> Valu
         "label": overlay.label,
         "logo_url": overlay.logo.as_ref().and(job.group_id.as_ref()).map(|g| format!("/api/groups/{g}/overlay/logo")),
         "placement": job_placement(job),
+        "height_changes": job_inputs(job).map(|i| i.height_changes).unwrap_or_default(),
     })
 }
 
@@ -1409,6 +1467,15 @@ fn slice_options(state: &AppState, job_id: &str, config_json: &str) -> slicer::S
         options.package_path = package_output_path(state, job_id);
     }
     if let Some(job) = job {
+        for c in job_inputs(&job).map(|i| i.height_changes).unwrap_or_default() {
+            options.height_z.push(c.z);
+            options.height_kind.push(match c.kind {
+                HeightChangeKind::Filament => 0,
+                HeightChangeKind::Pause => 1,
+                HeightChangeKind::Swap => 2,
+            });
+            options.height_filament.push(c.filament.unwrap_or(1));
+        }
         let overlay = crate::overlay::overlay_for_job(state, &job);
         options.font_path = crate::overlay::font_path();
         options.label = overlay.label;

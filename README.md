@@ -45,7 +45,9 @@ can run in the user's browser.
   triangles, smart fill, fill, or a band of heights. 3MF projects from Bambu
   Studio, OrcaSlicer and PrusaSlicer keep their painting, parts, modifiers,
   filaments and per-object settings; an edited model is sent as a 3MF the
-  browser writes in OrcaSlicer's dialect, so it opens there too.
+  browser writes in OrcaSlicer's dialect, so it opens there too. Changes by
+  height switch filament, pause, or swap the spool (the printer profile's
+  colour-change G-code) from a layer on, on every plate; no free-form G-code.
 - **Supports:** their own section on the Slice page, on by default (the
   slicer only adds them where a part needs them): style, only from the
   plate, and which filaments print them. With an AMS the interface (the
