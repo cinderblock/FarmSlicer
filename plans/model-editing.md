@@ -227,6 +227,9 @@ Bring the Slice page's plate up to what desktop slicers offer
   2 = blocker.
 - The 3MF reader flips a volume whose signed volume is negative. Triangle
   order is kept, so paint still lines up.
+- buildhost's sshd cuts off (then times out) after many quick connections:
+  batch work into one ssh session per step. Snap Chromium can't read
+  /tmp (private); keep test files under ~.
 - Building the server stage on buildhost against
   `farmslicer:openssl-test-libslic3r` needs `--build-arg UBUNTU_VERSION=24.04`
   (that stage is GCC 13; 26.04's GCC 15 fails linking: "bytecode stream
@@ -269,11 +272,26 @@ Bring the Slice page's plate up to what desktop slicers offer
   Gotcha fixed: the R3F canvas is its own React root and gets props a
   frame late, so the paint tool reads settings from a ref the viewer keeps
   current, and a stroke fixes its settings at pointer-down.
-- [ ] (current) Phase 6: cut.
-- [ ] Phase 6: cut. Phase 7: cut to fit. Phase 8: layer colour changes.
-- [ ] Split to objects / parts, merge (basic tools still missing).
-- [ ] Docs: README, CLAUDE.md (web/src/model, viewer/history.ts,
-  ObjectPanel, src/model_check.rs, job `colours`).
+- [x] Phase 6 committed `584f700` (+ fix `a82722c`): Cut tool (C): plane
+  height/tilt, keep both/upper/lower, turn the upper half onto its cut
+  face, plug and dowel connectors (round/square/hexagon, size, depth, glue
+  gap, 1-6 spread along the face). Headless: block cut at 10 mm with 2
+  plugs → 2 models, undo/redo, slices. Found on the way: three's clone
+  copies userData through JSON, so a material kept there became a plain
+  object in copies ("onBeforeRender is not a function" once a part had
+  been red); materials now come from the shape.
+- [x] Split to models / parts and Merge with (Objects panel) `6ad3141`.
+- [x] Phase 7 committed `e8c3302`: Cut to fit (warning bar and Cut panel):
+  even cuts per axis, room for skirt and plugs, connectors on every cut,
+  pieces packed over plates. Headless: 320 mm bar → 2 pieces, 1 plate,
+  slices.
+- [ ] (current) Phase 8: colour changes and pauses at a height (job field,
+  slice_core custom G-code per plate, both bridges, Slice page list).
+- [ ] Not done yet: multi-select and copy/paste, measure, dovetail and snap
+  connectors, auto-orient, dragging the cut plane in 3D.
+- [ ] Clean up on buildhost when done: container `fs-me-ui` (127.0.0.1:9354),
+  images `farmslicer:model-edit*`, `~/farmslicer-model-edit*`, /tmp/fsui.*.
+- [x] Docs: README, CLAUDE.md (in `584f700`).
 
 ## Open questions for the user
 
