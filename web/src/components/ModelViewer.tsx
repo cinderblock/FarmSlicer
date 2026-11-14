@@ -18,7 +18,7 @@ import { usedFilaments, type ModelObject } from "../model/document";
 import ObjectPanel from "./viewer/ObjectPanel";
 import { PaintControls, PaintSurface } from "./viewer/PaintTool";
 import { CutControls, CutPlane } from "./viewer/CutTool";
-import { cutNormal, DEFAULT_CUT, type CutSettings } from "./viewer/cutSettings";
+import { cutNormal, cutPivot, DEFAULT_CUT, type CutSettings } from "./viewer/cutSettings";
 import {
   addConnectors,
   connectorPoints,
@@ -238,6 +238,7 @@ function Scene({
   onChange,
   onCommit,
   onStroke,
+  onCutSettings,
 }: {
   parts: Part[];
   selected: Part | null;
@@ -253,6 +254,7 @@ function Scene({
   onChange: () => void;
   onCommit: () => void;
   onStroke: (change: PaintChange) => void;
+  onCutSettings: (s: CutSettings) => void;
 }) {
   const [guides, setGuides] = useState<Guide[]>([]);
   return (
@@ -277,7 +279,7 @@ function Scene({
         />
       ))}
       <Guides guides={guides} bed={bed} />
-      {cut && selected && <CutPlane part={selected} settings={cut.settings} points={cut.points} />}
+      {cut && selected && <CutPlane part={selected} settings={cut.settings} points={cut.points} onSettings={onCutSettings} />}
       {heightMarks.map((m, i) => (
         <mesh key={i} position={[(bed.min.x + bed.max.x) / 2, (bed.min.y + bed.max.y) / 2, m.z]} renderOrder={14}>
           <planeGeometry args={[bed.max.x - bed.min.x, bed.max.y - bed.min.y]} />
@@ -674,7 +676,7 @@ export default function ModelViewer({
   const startCut = useCallback(() => {
     if (!selected) return;
     const h = selected.worldBox().max.z;
-    setCutSettings((s) => ({ ...s, height: Math.round((h / 2) * 10) / 10, tiltX: 0, tiltY: 0 }));
+    setCutSettings((s) => ({ ...s, height: Math.round((h / 2) * 10) / 10, tiltX: 0, tiltY: 0, shift: 0 }));
   }, [selected]);
 
   /** The world matrix of a part's model frame (the object's own coordinates). */
@@ -687,8 +689,9 @@ export default function ModelViewer({
   const cutPlane = useCallback(
     (p: Part, s: CutSettings): Plane => {
       const n = cutNormal(s);
+      const at = cutPivot(s, p.center.x, p.center.y);
       return planeInFrame(
-        { point: [p.center.x, p.center.y, s.height], normal: [n.x, n.y, n.z] },
+        { point: [at.x, at.y, at.z], normal: [n.x, n.y, n.z] },
         Float64Array.from(objectFrame(p).elements),
       );
     },
@@ -705,7 +708,7 @@ export default function ModelViewer({
       const section = cutSection(selected.shape.object, plane);
       if (section) {
         const frame = objectFrame(selected);
-        for (const q of connectorPoints(section, plane, cutSettings.count))
+        for (const q of connectorPoints(section, plane, cutSettings.count, cutSettings.connector.kind))
           points.push(new THREE.Vector3(q[0], q[1], q[2]).applyMatrix4(frame));
       }
     }
@@ -764,7 +767,8 @@ export default function ModelViewer({
 
   /** How long a piece may be along each scene axis to fit the printer (room left for plugs). */
   const fitLimits = useCallback((): [number, number, number] => {
-    const plug = cutSettings.connector.kind === "plug" ? cutSettings.connector.depth : 0;
+    // Everything but dowels stands out of its piece by its depth.
+    const plug = cutSettings.connector.kind === "dowel" ? 0 : cutSettings.connector.depth;
     const w = shape.max.x - shape.min.x - FIT_MARGIN - plug;
     const d = shape.max.y - shape.min.y - FIT_MARGIN - plug;
     const h = shape.height > 0 ? shape.height - 1 - plug : Infinity;
@@ -850,7 +854,13 @@ export default function ModelViewer({
     if (cutSettings.keep === "both" && cutSettings.count > 0 && upper && lower) {
       const section = cutSection(shapeBefore.object, plane);
       if (section)
-        ({ upper, lower, pins } = addConnectors({ upper, lower }, plane, connectorPoints(section, plane, cutSettings.count), cutSettings.connector));
+        ({ upper, lower, pins } = addConnectors(
+          { upper, lower },
+          plane,
+          connectorPoints(section, plane, cutSettings.count, cutSettings.connector.kind),
+          cutSettings.connector,
+          section,
+        ));
     }
     if (cutSettings.keep === "upper") lower = null;
     if (cutSettings.keep === "lower") upper = null;
@@ -1673,6 +1683,7 @@ export default function ModelViewer({
           heightMarks={heightMarks}
           onSelect={select}
           onStroke={recordPaint}
+          onCutSettings={setCutSettings}
           onChange={refresh}
           onCommit={() => commit(tool === "rotate" ? "Rotate" : tool === "flat" ? "Lay on face" : "Move")}
         />

@@ -28,7 +28,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Print in several colours: the Slice page lists the model's filaments, each with its own colour, and each model, or each part of it, picks which one it prints with. 3MF projects from Bambu Studio, OrcaSlicer and PrusaSlicer keep their painted colours, parts, modifiers and per-object settings, and get the filaments they need.",
       "Scale parts (all together or along one axis, by percent or to a size in millimetres) and mirror them. Each copy on the plate can be scaled on its own.",
       "Paint on models: filament colours, where supports must or mustn't go, where seams go, and fuzzy skin. Brush with a circle or a sphere, paint whole triangles, fill a smooth region or a region of one colour, or colour a band of heights.",
-      "Cut a model on a plane at any height and angle: keep both halves or one, turn the top half onto its cut face, and add plugs or dowels (with a gap for glue) so the halves fit back together.",
+      "Cut a model on a plane: drag it into place and tilt it, keep both halves or one, turn the top half onto its cut face, and join the halves with plugs, dowels, snaps that click together, or dovetails that slide on (with a gap for glue).",
       "A model too big for the printer: Cut to fit cuts it into as few pieces as fit, joined by plugs or dowels, and lays them out over as many plates as they need.",
       "Split a model that's several pieces into models or parts, and merge two models into one.",
       "Change filament, pause, or swap the spool at a height (Changes by height, under the filaments): stripes of colour on any printer, inserts dropped in mid-print.",

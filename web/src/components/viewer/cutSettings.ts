@@ -9,6 +9,8 @@ export interface CutSettings {
   /** Tilt about the scene's X and Y axes (degrees). */
   tiltX: number;
   tiltY: number;
+  /** How far the plane is moved along its normal from that point (mm): a steep plane moves sideways with it. */
+  shift: number;
   /** Which halves to keep. */
   keep: "both" | "upper" | "lower";
   /** Turn the upper half over onto its cut face. */
@@ -22,11 +24,17 @@ export const DEFAULT_CUT: CutSettings = {
   height: 10,
   tiltX: 0,
   tiltY: 0,
+  shift: 0,
   keep: "both",
   layUpper: true,
   connector: DEFAULT_CONNECTOR,
   count: 0,
 };
+
+/** The point the plane goes through, in the scene, for a part centred at (`x`, `y`). */
+export function cutPivot(s: CutSettings, x: number, y: number): THREE.Vector3 {
+  return new THREE.Vector3(x, y, s.height).addScaledVector(cutNormal(s), s.shift);
+}
 
 /** The plane's normal in the scene: up, tilted. */
 export function cutNormal(s: CutSettings): THREE.Vector3 {

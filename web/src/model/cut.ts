@@ -6,7 +6,7 @@
 import { ShapeUtils, Vector2 } from "three";
 import { makeObject, makeVolume, type ModelObject, type Volume } from "./document";
 import { determinant, identity, invert, multiply, translation, type Mat4, type Mesh, type Vec3 } from "./mesh";
-import { frustum } from "./primitives";
+import { box, frustum } from "./primitives";
 import { PaintLayer, type PaintKind } from "./paint";
 
 export interface Plane {
@@ -315,14 +315,20 @@ export function cutObject(o: ModelObject, plane: Plane): ObjectCut {
 
 // ---- Connectors -------------------------------------------------------------
 
-/** How the halves join (the desktop slicer's connectors). */
-export type ConnectorKind = "plug" | "dowel";
+/**
+ * How the halves join: a plug (a peg on the lower half), dowels (holes
+ * both sides, pins printed apart), a snap (a split peg with a bulb that
+ * clicks into its socket) or a dovetail (a key across the cut face that
+ * the upper half slides onto and can't be pulled off).
+ */
+export type ConnectorKind = "plug" | "dowel" | "snap" | "dovetail";
 export type ConnectorShape = "round" | "square" | "hexagon";
 
 export interface ConnectorSpec {
   kind: ConnectorKind;
+  /** Plugs and dowels (a snap is round, a dovetail a trapezoid). */
   shape: ConnectorShape;
-  /** Across (mm). */
+  /** Across (mm); a dovetail's width at the cut face. */
   size: number;
   /** How far it goes into each half (mm). */
   depth: number;
@@ -331,6 +337,87 @@ export interface ConnectorSpec {
 }
 
 export const DEFAULT_CONNECTOR: ConnectorSpec = { kind: "plug", shape: "round", size: 5, depth: 5, gap: 0.1 };
+
+/** How far a dovetail widens per mm of height (15 degrees each side). */
+const DOVETAIL_FLARE = Math.tan((15 * Math.PI) / 180);
+/** A snap's bulb: how much wider than the peg (share of its radius), and where it is (share of the depth). */
+const SNAP_BULGE = 0.15;
+const SNAP_BULB_AT = 0.7;
+
+/** A rotation taking +X to `x` and +Z to `z` (perpendicular unit vectors). */
+function frameXZ(x: Vec3, z: Vec3): Mat4 {
+  const y = cross(z, x);
+  const m = identity();
+  m[0] = x[0];
+  m[1] = x[1];
+  m[2] = x[2];
+  m[4] = y[0];
+  m[5] = y[1];
+  m[6] = y[2];
+  m[8] = z[0];
+  m[9] = z[1];
+  m[10] = z[2];
+  return m;
+}
+
+/**
+ * A closed solid of revolution about Z: `profile` is (z, radius) from the
+ * bottom up, every radius > 0; flat caps at both ends.
+ */
+export function lathe(profile: [number, number][], segments = 48): Mesh {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const rings = profile.map(([z, r]) => {
+    const start = pos.length / 3;
+    for (let i = 0; i < segments; i++) {
+      const a = (i / segments) * Math.PI * 2;
+      pos.push(r * Math.cos(a), r * Math.sin(a), z);
+    }
+    return start;
+  });
+  const bottomCentre = pos.push(0, 0, profile[0][0]) / 3 - 1;
+  const topCentre = pos.push(0, 0, profile[profile.length - 1][0]) / 3 - 1;
+  const bottom = rings[0];
+  const top = rings[rings.length - 1];
+  for (let i = 0; i < segments; i++) {
+    const j = (i + 1) % segments;
+    idx.push(bottomCentre, bottom + j, bottom + i);
+    for (let k = 0; k + 1 < rings.length; k++) {
+      const lo = rings[k];
+      const hi = rings[k + 1];
+      idx.push(lo + i, lo + j, hi + j, lo + i, hi + j, hi + i);
+    }
+    idx.push(topCentre, top + i, top + j);
+  }
+  return { positions: Float32Array.from(pos), indices: Uint32Array.from(idx) };
+}
+
+/**
+ * A trapezoid prism along X, `length` long and centred on x = 0: `bottom`
+ * wide at z = `z0`, `top` wide at z = `z1` (a dovetail key or its slot).
+ */
+function trapezoidPrism(length: number, bottom: number, top: number, z0: number, z1: number): Mesh {
+  // A box's corners, moved: the same faces, still closed and outward.
+  const m = box(length, 1, 1);
+  const p = m.positions;
+  for (let i = 0; i < p.length; i += 3) {
+    const high = p[i + 2] > 0;
+    p[i + 1] = (Math.sign(p[i + 1]) * (high ? top : bottom)) / 2;
+    p[i + 2] = high ? z1 : z0;
+  }
+  return m;
+}
+
+/** A snap peg's outline (z, radius): `r` its radius, `depth` its height, `grow` added all round (its socket). */
+function snapProfile(r: number, depth: number, grow: number, z0 = 0): [number, number][] {
+  const bulb = r * (1 + SNAP_BULGE);
+  return [
+    [z0, r + grow],
+    [depth * (SNAP_BULB_AT - 0.2), r + grow],
+    [depth * SNAP_BULB_AT, bulb + grow],
+    [depth + grow, r * 0.8 + grow],
+  ];
+}
 
 /** A rotation taking +Z to `n`. */
 function alignZ(n: Vec3): Mat4 {
@@ -373,6 +460,8 @@ export function addConnectors(
   plane: Plane,
   points: Vec3[],
   spec: ConnectorSpec,
+  /** The cut face (a dovetail needs it to know how long its key can be). */
+  section?: { centroid: Vec3; points: Vec3[] } | null,
 ): { upper: ModelObject | null; lower: ModelObject | null; pins: ModelObject | null } {
   const { upper, lower } = cut;
   if (!upper || !lower || points.length === 0) return { upper, lower, pins: null };
@@ -391,6 +480,61 @@ export function addConnectors(
   const lowerVolumes = [...lower.volumes];
   let pins: ModelObject | null = null;
   points.forEach((p, i) => {
+    if (spec.kind === "snap") {
+      // The peg: a bulb near its tip, split down the middle so it squeezes
+      // through the socket's neck. The split is a negative volume above
+      // the cut face, where only the peg is.
+      const r = spec.size / 2;
+      lowerVolumes.push(
+        makeVolume(lathe(snapProfile(r, spec.depth, 0)), { name: `Snap ${i + 1}`, type: "part", matrix: at(p, up) }),
+      );
+      const slit = Math.max(0.6, spec.size * 0.2);
+      const z0 = spec.depth * 0.3;
+      const height = spec.depth - z0 + 1;
+      lowerVolumes.push(
+        makeVolume(box(2 * r * (1 + SNAP_BULGE) + 2, slit, height), {
+          name: `Snap ${i + 1} slit`,
+          type: "negative",
+          matrix: multiply(at(p, up), translation(0, 0, z0 + height / 2)),
+        }),
+      );
+      upperVolumes.push(
+        makeVolume(lathe(snapProfile(r, spec.depth, spec.gap, -0.01)), {
+          name: `Snap ${i + 1} socket`,
+          type: "negative",
+          matrix: at(p, up),
+        }),
+      );
+      return;
+    }
+    if (spec.kind === "dovetail") {
+      const top = spec.size + 2 * spec.depth * DOVETAIL_FLARE;
+      const span = section ? dovetailSpan(section, plane, p, top + 2 * spec.gap, 0.5) : null;
+      if (section && !span) return; // no room for a key here
+      const long = span?.long ?? norm(Math.abs(n[0]) < 0.9 ? cross(n, [1, 0, 0]) : cross(n, [0, 1, 0]));
+      const from = span?.from ?? -1.5 * spec.size;
+      const to = span?.to ?? 1.5 * spec.size;
+      const frame = frameXZ(long, n);
+      const mid = (from + to) / 2;
+      const centre: Vec3 = [p[0] + long[0] * mid, p[1] + long[1] * mid, p[2] + long[2] * mid];
+      lowerVolumes.push(
+        makeVolume(trapezoidPrism(to - from, spec.size, top, 0, spec.depth), {
+          name: `Dovetail ${i + 1}`,
+          type: "part",
+          matrix: at(centre, frame),
+        }),
+      );
+      // The slot runs out of the upper half at both ends: it slides on.
+      const reach = section ? Math.max(...sectionAxes(section, plane).extent(long).map(Math.abs)) : 500;
+      upperVolumes.push(
+        makeVolume(trapezoidPrism(4 * reach + 10, spec.size + 2 * spec.gap, top + 2 * spec.gap, -0.01, spec.depth + spec.gap), {
+          name: `Dovetail ${i + 1} slot`,
+          type: "negative",
+          matrix: at(centre, frame),
+        }),
+      );
+      return;
+    }
     upperVolumes.push(hole(p, up, i));
     if (spec.kind === "plug")
       lowerVolumes.push(
@@ -453,11 +597,35 @@ export function cutSection(o: ModelObject, plane: Plane): { centroid: Vec3; poin
 
 /**
  * Where `count` connectors go on a cut face: along its longest direction,
- * a quarter in from each end (the centroid alone for one).
+ * a quarter in from each end (the centroid alone for one). Dovetail keys
+ * run along the longest direction, so they spread across the other one.
  */
-export function connectorPoints(section: { centroid: Vec3; points: Vec3[] }, plane: Plane, count: number): Vec3[] {
-  const { centroid, points } = section;
+export function connectorPoints(
+  section: { centroid: Vec3; points: Vec3[] },
+  plane: Plane,
+  count: number,
+  kind: ConnectorKind = "plug",
+): Vec3[] {
+  const { centroid } = section;
   if (count <= 1) return [centroid];
+  const { long, short, extent } = sectionAxes(section, plane);
+  const dir = kind === "dovetail" ? short : long;
+  const [lo, hi] = extent(dir);
+  const out: Vec3[] = [];
+  for (let i = 0; i < count; i++) {
+    const t = lo + (hi - lo) * (0.25 + (0.5 * i) / (count - 1));
+    out.push([centroid[0] + dir[0] * t, centroid[1] + dir[1] * t, centroid[2] + dir[2] * t]);
+  }
+  return out;
+}
+
+/**
+ * A cut face's long axis (in its plane: the principal axis of its area, so
+ * a bar's runs along the bar, not corner to corner), the one across it,
+ * and its extent along a direction from the centroid.
+ */
+function sectionAxes(section: { centroid: Vec3; points: Vec3[] }, plane: Plane) {
+  const { centroid, points } = section;
   const n = norm(plane.normal);
   const u0 = norm(Math.abs(n[0]) < 0.9 ? cross(n, [1, 0, 0]) : cross(n, [0, 1, 0]));
   const w = cross(n, u0);
@@ -471,28 +639,94 @@ export function connectorPoints(section: { centroid: Vec3; points: Vec3[] }, pla
     }
     return [lo, hi];
   };
-  let best = u0;
-  let width = -1;
-  for (let k = 0; k < 18; k++) {
-    const a = (k / 18) * Math.PI;
-    const dir: Vec3 = [
-      u0[0] * Math.cos(a) + w[0] * Math.sin(a),
-      u0[1] * Math.cos(a) + w[1] * Math.sin(a),
-      u0[2] * Math.cos(a) + w[2] * Math.sin(a),
-    ];
-    const [lo, hi] = extent(dir);
-    if (hi - lo > width + 1e-9) {
-      width = hi - lo;
-      best = dir;
+  // Second moments of area about the centroid (exact per triangle:
+  // A/12 · (Σ vᵢvᵢᵀ + (Σ vᵢ)(Σ vᵢ)ᵀ)).
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (let t = 0; t + 2 < points.length; t += 3) {
+    const v = [0, 1, 2].map((k) => {
+      const d = sub(points[t + k], centroid);
+      return [dot(d, u0), dot(d, w)];
+    });
+    const area = Math.abs((v[1][0] - v[0][0]) * (v[2][1] - v[0][1]) - (v[2][0] - v[0][0]) * (v[1][1] - v[0][1])) / 2;
+    const sx = v[0][0] + v[1][0] + v[2][0];
+    const sy = v[0][1] + v[1][1] + v[2][1];
+    sxx += (area / 12) * (v.reduce((s, q) => s + q[0] * q[0], 0) + sx * sx);
+    syy += (area / 12) * (v.reduce((s, q) => s + q[1] * q[1], 0) + sy * sy);
+    sxy += (area / 12) * (v.reduce((s, q) => s + q[0] * q[1], 0) + sx * sy);
+  }
+  // The axis the area spreads along most (a round or square face: u0).
+  const a = Math.abs(sxx - syy) + Math.abs(sxy) > 1e-9 * (sxx + syy) ? 0.5 * Math.atan2(2 * sxy, sxx - syy) : 0;
+  const long = norm([
+    u0[0] * Math.cos(a) + w[0] * Math.sin(a),
+    u0[1] * Math.cos(a) + w[1] * Math.sin(a),
+    u0[2] * Math.cos(a) + w[2] * Math.sin(a),
+  ]);
+  return { long, short: norm(cross(n, long)), extent };
+}
+
+/**
+ * Where the line through `p` along `dir` (in the cut face) is inside the
+ * face: the stretch around `p`, as distances along `dir` (null: `p` is
+ * outside). The face is its triangles (`points`, three a triangle).
+ */
+function chordThrough(points: Vec3[], p: Vec3, dir: Vec3, across: Vec3): [number, number] | null {
+  const spans: [number, number][] = [];
+  for (let t = 0; t + 2 < points.length; t += 3) {
+    const uv = [0, 1, 2].map((k) => {
+      const d = sub(points[t + k], p);
+      return [dot(d, dir), dot(d, across)];
+    });
+    const hits: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      const [u0, v0] = uv[k];
+      const [u1, v1] = uv[(k + 1) % 3];
+      if ((v0 <= 0 && v1 >= 0) || (v0 >= 0 && v1 <= 0)) {
+        if (v0 === v1) hits.push(u0, u1);
+        else hits.push(u0 + ((u1 - u0) * (0 - v0)) / (v1 - v0));
+      }
+    }
+    if (hits.length >= 2) spans.push([Math.min(...hits), Math.max(...hits)]);
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  // Join touching spans; keep the run around 0.
+  let run: [number, number] | null = null;
+  for (const s of spans) {
+    if (run && s[0] <= run[1] + 1e-6) run[1] = Math.max(run[1], s[1]);
+    else {
+      if (run && run[0] <= 1e-6 && run[1] >= -1e-6) return run;
+      run = [s[0], s[1]];
     }
   }
-  const [lo, hi] = extent(best);
-  const out: Vec3[] = [];
-  for (let i = 0; i < count; i++) {
-    const t = lo + (hi - lo) * (0.25 + (0.5 * i) / (count - 1));
-    out.push([centroid[0] + best[0] * t, centroid[1] + best[1] * t, centroid[2] + best[2] * t]);
+  return run && run[0] <= 1e-6 && run[1] >= -1e-6 ? run : null;
+}
+
+/**
+ * A dovetail key at `p`: how far it can run along the face's longest
+ * direction, staying inside the face along both its sides and its middle
+ * (less `inset` at each end). Null when there's no room for one.
+ */
+function dovetailSpan(
+  section: { centroid: Vec3; points: Vec3[] },
+  plane: Plane,
+  p: Vec3,
+  width: number,
+  inset: number,
+): { long: Vec3; from: number; to: number } | null {
+  const { long, short } = sectionAxes(section, plane);
+  let from = -Infinity;
+  let to = Infinity;
+  for (const off of [-width / 2, 0, width / 2]) {
+    const q: Vec3 = [p[0] + short[0] * off, p[1] + short[1] * off, p[2] + short[2] * off];
+    const c = chordThrough(section.points, q, long, short);
+    if (!c) return null;
+    from = Math.max(from, c[0]);
+    to = Math.min(to, c[1]);
   }
-  return out;
+  from += inset;
+  to -= inset;
+  return to - from >= width ? { long, from, to } : null;
 }
 
 // ---- Cutting to fit the printer ----------------------------------------------
@@ -562,7 +796,8 @@ export function cutIntoPieces(
         const section = cutSection(piece, plane);
         const room = connector.spec.size * 3;
         if (section && section.area >= room * room) {
-          const joined = addConnectors(cut, plane, connectorPoints(section, plane, connector.count), connector.spec);
+          const points = connectorPoints(section, plane, connector.count, connector.spec.kind);
+          const joined = addConnectors(cut, plane, points, connector.spec, section);
           halves = joined;
           if (joined.pins) pins.push(joined.pins);
         }

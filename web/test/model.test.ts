@@ -14,6 +14,7 @@ import {
   signedVolume,
   translation,
   scaling,
+  transformMesh,
   weld,
   type Mesh,
 } from "../src/model/mesh";
@@ -419,6 +420,62 @@ describe("connectors", () => {
     expect(joined.lower!.volumes.map((v) => v.type)).toEqual(["part", "negative"]);
     expect(joined.pins!.volumes.length).toBe(1);
     expect(joined.pins!.name).toBe("Block dowels");
+  });
+
+  test("snaps: a split peg with a bulb, its socket in the upper half", async () => {
+    const { cutObject, addConnectors, lathe, DEFAULT_CONNECTOR } = await import("../src/model/cut");
+    const ring = lathe([
+      [0, 2],
+      [3, 2],
+      [4, 3],
+      [5, 1],
+    ]);
+    expect(openEdgeCount(ring)).toBe(0);
+    expect(signedVolume(ring)).toBeGreaterThan(0);
+    const o = makeObject("Block", [makeVolume(cube())]);
+    const joined = addConnectors(cutObject(o, plane), plane, [[10, 10, 10]], { ...DEFAULT_CONNECTOR, kind: "snap" });
+    expect(joined.lower!.volumes.map((v) => v.type)).toEqual(["part", "part", "negative"]);
+    expect(joined.upper!.volumes.map((v) => v.type)).toEqual(["part", "negative"]);
+    const peg = joined.lower!.volumes[1];
+    const b = meshBounds(peg.mesh, peg.matrix);
+    expect(b.min[2]).toBeCloseTo(10, 3);
+    expect(b.max[2]).toBeCloseTo(15, 3);
+    // The bulb is wider than the peg.
+    expect(b.max[0] - b.min[0]).toBeGreaterThan(5.5);
+    // The slit only cuts the peg: it starts above the cut face.
+    const slit = meshBounds(joined.lower!.volumes[2].mesh, joined.lower!.volumes[2].matrix);
+    expect(slit.min[2]).toBeGreaterThan(10.5);
+    const socket = meshBounds(joined.upper!.volumes[1].mesh, joined.upper!.volumes[1].matrix);
+    expect(socket.max[0] - socket.min[0]).toBeGreaterThan(b.max[0] - b.min[0]);
+  });
+
+  test("dovetails: a key inside the cut face, a slot through the upper half", async () => {
+    const { cutObject, addConnectors, cutSection, connectorPoints, DEFAULT_CONNECTOR } = await import("../src/model/cut");
+    const bar = makeObject("Bar", [makeVolume(transformMesh(cube(), scaling(3, 1, 1)))]);
+    const section = cutSection(bar, plane)!;
+    const spec = { ...DEFAULT_CONNECTOR, kind: "dovetail" as const };
+    const points = connectorPoints(section, plane, 1, "dovetail");
+    const joined = addConnectors(cutObject(bar, plane), plane, points, spec, section);
+    expect(joined.lower!.volumes.map((v) => v.type)).toEqual(["part", "part"]);
+    expect(joined.upper!.volumes.map((v) => v.type)).toEqual(["part", "negative"]);
+    const key = joined.lower!.volumes[1];
+    expect(openEdgeCount(key.mesh)).toBe(0);
+    expect(signedVolume(key.mesh)).toBeGreaterThan(0);
+    const k = meshBounds(key.mesh, key.matrix);
+    // Along the bar (its longest way), inside the outline by half a millimetre.
+    expect(k.min[0]).toBeCloseTo(0.5, 2);
+    expect(k.max[0]).toBeCloseTo(59.5, 2);
+    expect(k.min[2]).toBeCloseTo(10, 3);
+    expect(k.max[2]).toBeCloseTo(15, 3);
+    // Wider at the top than at the cut face: it locks.
+    expect(k.max[1] - k.min[1]).toBeGreaterThan(spec.size + 2);
+    const slot = meshBounds(joined.upper!.volumes[1].mesh, joined.upper!.volumes[1].matrix);
+    expect(slot.min[0]).toBeLessThan(0);
+    expect(slot.max[0]).toBeGreaterThan(60);
+    // Two keys sit side by side across the bar.
+    const two = connectorPoints(section, plane, 2, "dovetail");
+    expect(Math.abs(two[0][1] - two[1][1])).toBeGreaterThan(5);
+    expect(two[0][0]).toBeCloseTo(two[1][0], 3);
   });
 });
 
