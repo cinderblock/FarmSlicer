@@ -111,3 +111,15 @@ today; only signing up proves a name can be had (a site can hold names back).
   npm, crates.io, and PyPI (package names: only worth taking if publishing).
 - **Couldn't tell** (sign-in wall or bot check, so check by hand): Instagram,
   TikTok, Threads, Facebook, Twitch, Reddit (`u/` and `r/`), Printables.
+
+## `tests/printers-e2e.mjs` dies with EPIPE on the group-logo step
+
+Fails on `origin/master` too (checked 2026-11-13 on the build host, stub
+server). Right after "labels are limited", `tests/printers-e2e.mjs:326`
+(`user.call("PUT", /api/groups/{team}/logo, ...)`, a non-manager uploading a
+600×300 PNG, expecting 403) throws `TypeError: fetch failed` with
+`cause: write EPIPE`. The server answers before reading the multipart body
+and closes the connection while the client is still writing it. Reproduce:
+`PORT=9356 tests/run-e2e.sh tests/printers-e2e.mjs`. It matters because
+`run-e2e.sh` exits 1, so every e2e run (CI included) fails, and the rest of
+that suite never runs.
