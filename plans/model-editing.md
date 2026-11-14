@@ -190,6 +190,10 @@ Bring the Slice page's plate up to what desktop slicers offer
 
 ## Findings / gotchas
 
+- Shared tree, again: another thread's commit 6fca8fe swept an early copy
+  of my paint CSS out of the working tree; my commit then rebuilt
+  index.css from its parent. Read the real diff of shared files, not the
+  line count, before staging.
 - Shared tree: another thread's `git commit` took my staged phase 2
   (4dabb29), and my `git add web/src/changelog.ts` took another thread's
   changelog entry (amended out). Stage shared files as blobs from HEAD +
@@ -256,7 +260,16 @@ Bring the Slice page's plate up to what desktop slicers offer
   filaments [PLA×3, Support For PLA], filament_colour
   [#808080, #FF0000, #808080, #FFFFFF], no console errors. The Objects
   panel itself was not in that image yet (check it with Phase 5).
-- [ ] (current) Phase 5: painting UI.
+- [x] Phase 5 committed `41d7451`: paint tools (N colour, L supports,
+  P seam, H fuzzy skin), brushes circle/sphere/triangles/smart fill/fill/
+  height range, Shift = block or erase, undo per stroke, BVH raycasts
+  (three-mesh-bvh 0.8.3, drei's). Headless check: stroke of filament 2 on
+  a cube's top + support enforcer on its front land on exactly those
+  triangles in the uploaded 3MF; G-code changes to T1 for the top layers.
+  Gotcha fixed: the R3F canvas is its own React root and gets props a
+  frame late, so the paint tool reads settings from a ref the viewer keeps
+  current, and a stroke fixes its settings at pointer-down.
+- [ ] (current) Phase 6: cut.
 - [ ] Phase 6: cut. Phase 7: cut to fit. Phase 8: layer colour changes.
 - [ ] Split to objects / parts, merge (basic tools still missing).
 - [ ] Docs: README, CLAUDE.md (web/src/model, viewer/history.ts,
