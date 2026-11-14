@@ -442,6 +442,16 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   audit log (`audit::record`), `GET /api/audit`. Web: `web/src/roles.ts`,
   `pages/Roles.tsx`, `pages/Audit.tsx`; `useAuth().can(cap)`, nav items
   carry `cap`. Plan: `plans/organization-and-access.md`
+- `src/shares.rs` — sharing (`shares`; storage `src/db/shares.rs`):
+  `groups::Grants` (loaded in `Viewer::load`: shares with the user or a
+  group on their path, folders expanded to their filed items, libraries
+  by group) feed `Viewer::shared_job` / `shared_project`; `can_see_job`
+  = own sight or any share, `can_use_job` (send, queue, model download)
+  needs `use`, `can_edit_job` `edit`, `owns_job` (delete, move group,
+  share) none of that. Job lists add `JobFilter.shared_ids`. Public
+  links: `public_routes` (`/api/public/shares/…`, in `open_to_remote`),
+  site setting `public_shares`, page `pages/SharedLink.tsx` (`/s/:code`,
+  outside the Gate); `components/Share.tsx` (button + dialog)
 - `src/folders.rs` — library folders (`folders`, `folder_items`; storage
   `src/db/folders.rs`): a library is `("user", creator)` for items with no
   group or `("group", id)` (`library_of`); a folder holds only its

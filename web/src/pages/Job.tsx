@@ -2,6 +2,7 @@
 // G-code preview of each plate, its G-code check, and "Print…".
 // `?plate=N&layer=K` (1-based) open a plate at a layer; both follow the view.
 
+import { ShareButton } from "../components/Share";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { formatDuration, localDateTime, useJson } from "../api";
@@ -183,6 +184,7 @@ export default function JobPage() {
               Download G-code
             </a>
           )}
+          <ShareButton kind="job" id={job.id} name={job.model_name} />
         </div>
       </div>
 

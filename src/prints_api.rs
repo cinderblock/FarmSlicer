@@ -189,8 +189,13 @@ async fn job_thumbnail(
     Query(q): Query<PlateQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (job, _, _) = visible_job(&state, &user, &id)?;
-    let pkg = printing::package_of(&job).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no package"))?;
-    let index = q.plate.unwrap_or(pkg.plates[0].index);
+    plate_thumbnail(&job, q.plate).await
+}
+
+/// A plate's preview image (the first plate's without `plate`).
+pub(crate) async fn plate_thumbnail(job: &Job, plate: Option<u32>) -> Result<impl IntoResponse + use<>, ApiError> {
+    let pkg = printing::package_of(job).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no package"))?;
+    let index = plate.unwrap_or(pkg.plates[0].index);
     let path = job.package_path.clone().ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no package"))?;
     let format = pkg.format;
     let img = tokio::task::spawn_blocking(move || package::thumbnail(std::path::Path::new(&path), format, index))
@@ -403,6 +408,9 @@ async fn send_job(
     Json(body): Json<SendRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
+    if !viewer.can_use_job(&tree, &job) {
+        return Err(api_err(StatusCode::FORBIDDEN, "this job is shared with you to look at, not to print"));
+    }
     let (code, print) = send_plate(&state, &user, &tree, &viewer, &job, body, None).await?;
     Ok((code, Json(json!(print))))
 }

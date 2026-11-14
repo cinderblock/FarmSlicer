@@ -32,6 +32,7 @@ import RolesPage from "./pages/Roles";
 import AuditPage from "./pages/Audit";
 import AccessPage from "./pages/Access";
 import LabelsPage from "./pages/Labels";
+import SharedLinkPage from "./pages/SharedLink";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
@@ -122,6 +123,7 @@ function App() {
           <Route path="/recover" element={<RecoverPage />} />
           <Route path="/join/group/:id" element={<JoinPage />} />
           <Route path="/join/:code" element={<JoinPage />} />
+          <Route path="/s/:code" element={<SharedLinkPage />} />
           <Route path="/*" element={<Gate />} />
         </Routes>
       </ErrorBoundary>

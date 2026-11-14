@@ -203,8 +203,9 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 5. ~~Slice 2~~ (2026-11-14).
 6. ~~Slice 3~~ (2026-11-14).
 7. ~~Slice 4~~ (2026-11-14).
-8. **← current** Slice 5: sharing (items, folders, cross-group libraries,
-   public links). Then slice 6.
+8. ~~Slice 5~~ (2026-11-14).
+9. **← current** Slice 6: sessions and devices per user, sign out
+   everywhere.
 
 ## Findings / gotchas
 
@@ -249,6 +250,15 @@ Replace the single admin bit with **capabilities** granted by **roles**.
   folders but only the items they can see in them. The Library page lists
   slices (finished jobs) and projects; "Everything I can see" keeps the
   old flat list. New folders use the browser's prompt for a name.
+- Slice 5 as built (2026-11-14): grants are computed per request
+  (`groups::Grants`), not stored per item, so a folder share follows what's
+  filed in it. Public links show names, facts and plate pictures but **no
+  G-code layer preview**: the preview needs the G-code itself, which the
+  decision said links don't hand out (deviation from "preview" in the
+  approved design, for the user to confirm). Public links are a site
+  setting only (no per-group override). Libraries can't be shared by
+  link. "Shared with me" links folders and libraries to the flat view
+  (the file browser only shows libraries the viewer belongs to).
 - `tests/moonraker-e2e.mjs` can take ~4 min at its end: the fake's
   `close()` waits for an idle connection the server keeps open after the
   printer is deleted. It passes; seen once (2026-11-14).
@@ -284,7 +294,8 @@ Replace the single admin bit with **capabilities** granted by **roles**.
       picker and filters on Jobs, Projects, Printers, Groups)
 - [x] Slice 4: folders (`tests/folders-e2e.mjs`; Library page as a file
       browser)
-- [ ] Slice 5: sharing and public links
+- [x] Slice 5: sharing and public links (`tests/sharing-e2e.mjs`; Share
+      dialog on jobs, projects, folders, libraries; Shared with me; /s/)
 - [ ] Slice 6: sessions and devices
 
 ## Open questions for the user

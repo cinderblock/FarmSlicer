@@ -18,6 +18,8 @@ mod labels;
 pub use labels::Label;
 mod folders;
 pub use folders::Folder;
+mod shares;
+pub use shares::Share;
 pub use access::{AccessRule, Certification, PrintHold, Principal};
 pub use audit::{AuditFilter, NewAudit};
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
@@ -609,6 +611,7 @@ impl Db {
         access::migrate(&conn);
         labels::migrate(&conn);
         folders::migrate(&conn);
+        shares::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (
@@ -2170,6 +2173,8 @@ pub struct JobFilter {
     pub user_id: Option<String>,
     /// Only jobs charged to one of these groups.
     pub group_ids: Option<Vec<String>>,
+    /// With `visible_to`: jobs shared with the viewer one by one.
+    pub shared_ids: Vec<String>,
 }
 
 impl JobFilter {
@@ -2188,13 +2193,14 @@ impl JobFilter {
         let mut args: Vec<String> = Vec::new();
         if let Some((user_id, groups)) = &self.visible_to {
             args.push(user_id.clone());
-            let mine = format!("j.user_id = ?{}", args.len());
-            if groups.is_empty() {
-                clauses.push(mine);
-            } else {
-                let list = placeholders(&mut args, groups);
-                clauses.push(format!("({mine} OR j.group_id IN ({list}))"));
+            let mut any = vec![format!("j.user_id = ?{}", args.len())];
+            if !groups.is_empty() {
+                any.push(format!("j.group_id IN ({})", placeholders(&mut args, groups)));
             }
+            if !self.shared_ids.is_empty() {
+                any.push(format!("j.id IN ({})", placeholders(&mut args, &self.shared_ids)));
+            }
+            clauses.push(format!("({})", any.join(" OR ")));
         }
         if let Some(user_id) = &self.user_id {
             args.push(user_id.clone());

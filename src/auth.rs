@@ -312,6 +312,8 @@ fn open_to_remote(path: &str) -> bool {
         path,
         "/api/health" | "/api/auth/status" | "/api/auth/login/start" | "/api/auth/login/finish" | "/api/auth/logout"
     ) || path.starts_with("/api/auth/invite/")
+        // Public share links (src/shares.rs): read only, off unless a site setting allows them.
+        || path.starts_with("/api/public/shares/")
 }
 
 /// Middleware for the public (unauthenticated) routes.

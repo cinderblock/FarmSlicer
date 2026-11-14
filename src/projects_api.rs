@@ -365,6 +365,9 @@ async fn update_project(
         None => p.name.clone(),
     };
     let group = match &body.group_id {
+        Some(g) if g.as_deref().filter(|g| !g.is_empty()) != p.group_id.as_deref() && !projects::owns(&tree, &viewer, &p) => {
+            return Err(api_err(StatusCode::FORBIDDEN, "only its creator, the group's managers and admins move it to another group"));
+        }
         Some(g) => {
             let g = g.as_deref().filter(|g| !g.is_empty());
             check_group(&tree, &viewer, g)?;
@@ -453,10 +456,14 @@ async fn delete_project(
     Extension(KeyScope(scope)): Extension<KeyScope>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    editable(&state, &user, &scope, &id)?;
+    let (p, tree, viewer) = editable(&state, &user, &scope, &id)?;
+    if !projects::owns(&tree, &viewer, &p) {
+        return Err(api_err(StatusCode::FORBIDDEN, "only its creator, the group's managers and admins delete it"));
+    }
     state.db.delete_project(&id);
     state.db.delete_label_links_for("project", &id);
     state.db.file_item("project", &id, None, "");
+    state.db.delete_shares_of("project", &id);
     Ok(StatusCode::NO_CONTENT)
 }
 

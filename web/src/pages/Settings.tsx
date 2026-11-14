@@ -21,6 +21,7 @@ interface SiteSettings {
   finished_outcome: "ask" | "good";
   requeue_failed: boolean;
   mixing: "none" | "group" | "any";
+  public_shares: boolean;
 }
 
 /** /settings (admins): site-wide defaults. Group-level settings live on each group's page. */
@@ -127,6 +128,20 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
           </select>
           <span className="hint">For plates FarmSlicer makes from projects' missing parts; a pool can set its own.</span>
         </label>
+
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={s.public_shares}
+            onChange={(e) => setS({ ...s, public_shares: e.target.checked })}
+          />
+          Allow public share links
+        </label>
+        <span className="hint">
+          People may then share a job, project or folder with anyone holding a link, even from outside the local
+          network and without an account: names, facts and plate pictures only, no files. Turning this off stops every
+          link.
+        </span>
 
         <h3>Printer pools</h3>
         <PoolsEditor />

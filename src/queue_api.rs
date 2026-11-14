@@ -209,6 +209,9 @@ async fn add_entries(
     Json(body): Json<AddBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (job, tree, viewer) = crate::prints_api::visible_job(&state, &user, &body.job_id)?;
+    if !viewer.can_use_job(&tree, &job) {
+        return Err(api_err(StatusCode::FORBIDDEN, "this job is shared with you to look at, not to print"));
+    }
     let pkg = crate::printing::package_of(&job)
         .ok_or_else(|| api_err(StatusCode::CONFLICT, "the job has nothing printable yet"))?;
     let plates: Vec<i64> = match (body.plate, &body.plates) {
@@ -437,7 +440,7 @@ async fn send_one(
 /// Sending an entry: whoever sees its job may (like any send), and
 /// operators may send to their pools' printers.
 fn may_send_to(state: &AppState, tree: &Tree, viewer: &Viewer, e: &QueueEntry, printer_id: &str) -> Result<(), ApiError> {
-    let sees_job = entry_job(state, e).is_some_and(|j| viewer.can_see_job(tree, &j));
+    let sees_job = entry_job(state, e).is_some_and(|j| viewer.can_use_job(tree, &j));
     if viewer.can(Cap::PrintersOperate) || sees_job || crate::pools::operates(state, viewer, Some(printer_id)) {
         Ok(())
     } else {

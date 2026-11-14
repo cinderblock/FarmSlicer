@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::db::{Db, Group, Job, Membership, User};
 use crate::permissions::{self, Cap, GroupCap, GroupCaps, SiteCaps};
+use crate::shares::Level;
 
 /// Per-group settings as stored. `None` = inherit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -416,6 +417,80 @@ pub struct Viewer {
     pub memberships: Vec<Membership>,
     /// Every group role's capabilities, by role id.
     group_roles: HashMap<String, GroupCaps>,
+    /// What's been shared with the viewer (src/shares.rs).
+    pub grants: Grants,
+}
+
+/// What's shared with someone, at the highest level each is shared at:
+/// jobs and projects (directly or through a shared folder) and whole
+/// group libraries (a group's and its subgroups' work).
+#[derive(Debug, Default, Clone)]
+pub struct Grants {
+    pub jobs: HashMap<String, Level>,
+    pub projects: HashMap<String, Level>,
+    pub libraries: HashMap<String, Level>,
+}
+
+impl Grants {
+    fn add(map: &mut HashMap<String, Level>, id: &str, level: Level) {
+        let e = map.entry(id.to_string()).or_insert(level);
+        if level > *e {
+            *e = level;
+        }
+    }
+
+    /// Everything shared with `user` or with a group they're in (a share
+    /// with a group reaches its subgroups' members too).
+    pub fn load(db: &Db, user_id: &str, memberships: &[Membership]) -> Grants {
+        let groups = db.list_groups();
+        let parent = |id: &str| groups.iter().find(|g| g.id == id).and_then(|g| g.parent_id.clone());
+        let mut principals: Vec<String> = Vec::new();
+        for m in memberships.iter().filter(|m| m.status == "active") {
+            let mut at = Some(m.group_id.clone());
+            while let Some(g) = at {
+                at = parent(&g);
+                if !principals.contains(&g) {
+                    principals.push(g);
+                }
+            }
+        }
+        let shares = db.shares_for(user_id, &principals);
+        let mut out = Grants::default();
+        if shares.is_empty() {
+            return out;
+        }
+        let folders = if shares.iter().any(|s| s.target_kind == "folder") { db.list_folders() } else { Vec::new() };
+        let filed = if folders.is_empty() { Vec::new() } else { db.list_folder_items() };
+        for s in &shares {
+            let Some(level) = Level::parse(&s.level) else { continue };
+            match s.target_kind.as_str() {
+                "job" => Self::add(&mut out.jobs, &s.target_id, level),
+                "project" => Self::add(&mut out.projects, &s.target_id, level),
+                "library" => Self::add(&mut out.libraries, &s.target_id, level),
+                "folder" => {
+                    // The folder and every folder below it.
+                    let mut within = vec![s.target_id.clone()];
+                    let mut i = 0;
+                    while i < within.len() {
+                        let id = within[i].clone();
+                        within.extend(folders.iter().filter(|f| f.parent_id.as_deref() == Some(id.as_str())).map(|f| f.id.clone()));
+                        i += 1;
+                    }
+                    for (kind, item, folder) in &filed {
+                        if within.contains(folder) {
+                            match kind.as_str() {
+                                "job" => Self::add(&mut out.jobs, item, level),
+                                "project" => Self::add(&mut out.projects, item, level),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
 }
 
 impl Viewer {
@@ -425,7 +500,43 @@ impl Viewer {
             caps: permissions::site_caps(db, &user.role),
             memberships: db.memberships_of_user(&user.id),
             group_roles: permissions::group_role_caps(db),
+            grants: Grants::default(),
         }
+        .with_grants(db)
+    }
+
+    fn with_grants(mut self, db: &Db) -> Viewer {
+        self.grants = Grants::load(db, &self.user.id, &self.memberships);
+        self
+    }
+
+    /// The level a job is shared with the viewer at, if it is: directly,
+    /// through a folder, or through its group's library.
+    pub fn shared_job(&self, tree: &Tree, job: &Job) -> Option<Level> {
+        let direct = self.grants.jobs.get(&job.id).copied();
+        let library = job.group_id.as_deref().and_then(|g| self.library_share(tree, g));
+        direct.max(library)
+    }
+
+    /// The level a project is shared at, if it is.
+    pub fn shared_project(&self, tree: &Tree, project_id: &str, group_id: Option<&str>) -> Option<Level> {
+        let direct = self.grants.projects.get(project_id).copied();
+        direct.max(group_id.and_then(|g| self.library_share(tree, g)))
+    }
+
+    /// A share of `group`'s library or an ancestor's.
+    fn library_share(&self, tree: &Tree, group: &str) -> Option<Level> {
+        self.grants
+            .libraries
+            .iter()
+            .filter(|(lib, _)| tree.is_within(group, lib))
+            .map(|(_, l)| *l)
+            .max()
+    }
+
+    /// Jobs shared with the viewer one by one (for list queries).
+    pub fn shared_job_ids(&self) -> Vec<String> {
+        self.grants.jobs.keys().cloned().collect()
     }
 
     /// Holds this site capability.
@@ -521,10 +632,15 @@ impl Viewer {
                 out.insert(m.group_id.clone());
             }
         }
+        // Libraries shared with the viewer.
+        for lib in self.grants.libraries.keys() {
+            out.extend(tree.subtree(lib));
+        }
         Some(out.into_iter().collect())
     }
 
-    pub fn can_see_job(&self, tree: &Tree, job: &Job) -> bool {
+    /// Sees a job without anything shared: theirs, their group's library.
+    fn sees_own(&self, tree: &Tree, job: &Job) -> bool {
         if self.can(Cap::LibraryViewAll) || job.user_id.as_deref() == Some(self.user.id.as_str()) {
             return true;
         }
@@ -535,9 +651,25 @@ impl Viewer {
         self.is_active_member(gid) && tree.effective(gid).shared_library
     }
 
+    pub fn can_see_job(&self, tree: &Tree, job: &Job) -> bool {
+        self.sees_own(tree, job) || self.shared_job(tree, job).is_some()
+    }
+
+    /// May print it, queue it, download its model and slice it again:
+    /// whoever sees it on their own, or has it shared to use.
+    pub fn can_use_job(&self, tree: &Tree, job: &Job) -> bool {
+        self.sees_own(tree, job) || self.shared_job(tree, job).is_some_and(|l| l >= Level::Use)
+    }
+
     /// May change (move, rename, delete) a job: its creator, the library
-    /// editors of its group, "edit every job".
+    /// editors of its group, "edit every job", and those it's shared with
+    /// to edit (who don't delete it or move it to another group).
     pub fn can_edit_job(&self, tree: &Tree, job: &Job) -> bool {
+        self.owns_job(tree, job) || self.shared_job(tree, job).is_some_and(|l| l >= Level::Edit)
+    }
+
+    /// Changes a job as its own: delete it, move it between groups, share it.
+    pub fn owns_job(&self, tree: &Tree, job: &Job) -> bool {
         self.can(Cap::LibraryEditAll)
             || job.user_id.as_deref() == Some(self.user.id.as_str())
             || job.group_id.as_deref().is_some_and(|g| self.can_in(tree, g, GroupCap::LibraryEdit))

@@ -31,9 +31,18 @@ pub fn can_see(tree: &Tree, viewer: &Viewer, p: &Project) -> bool {
     viewer.can(Cap::LibraryViewAll)
         || p.user_id.as_deref() == Some(viewer.user.id.as_str())
         || p.group_id.as_deref().is_some_and(|g| viewer.is_active_member(g) || viewer.can_in(tree, g, GroupCap::LibraryView))
+        || viewer.shared_project(tree, &p.id, p.group_id.as_deref()).is_some()
 }
 
 pub fn can_edit(tree: &Tree, viewer: &Viewer, p: &Project) -> bool {
+    owns(tree, viewer, p)
+        || viewer
+            .shared_project(tree, &p.id, p.group_id.as_deref())
+            .is_some_and(|l| l >= crate::shares::Level::Edit)
+}
+
+/// Changes a project as its own: delete it, move it, share it.
+pub fn owns(tree: &Tree, viewer: &Viewer, p: &Project) -> bool {
     viewer.can(Cap::LibraryEditAll)
         || p.user_id.as_deref() == Some(viewer.user.id.as_str())
         || p.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::LibraryEdit))

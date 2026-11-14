@@ -48,6 +48,15 @@ export const CHANGELOG: ChangelogEntry[] = [
     fixes: "3MF files slice on the server again (they failed with \"the file is empty\").",
   },
   {
+    id: "2026-11-14e",
+    date: "2026-11-14",
+    title: "Sharing",
+    highlights: [
+      "Share a job, a project, a folder or a whole group library with a person or a group: to look at, to use (print it, download the model, slice it again), or to edit (label and file it). The Share button is on each job and project, on your folders, and on a group's library; the Library's \"Shared with me\" lists what's been shared with you.",
+      "If the site allows it, a public link shows a job, project or folder to anyone, even without an account: names, facts and plate pictures, no files.",
+    ],
+  },
+  {
     id: "2026-11-14d",
     date: "2026-11-14",
     title: "Labels and folders",

@@ -277,6 +277,7 @@ async fn remove(
     let (tree, viewer) = groups_api::context(&state, &user);
     let old = managed(&state, &tree, &viewer, &id)?;
     state.db.delete_folder(&id);
+    state.db.delete_shares_of("folder", &id);
     record(&state, &user, "folder.delete", &old, json!({}));
     Ok(StatusCode::NO_CONTENT)
 }

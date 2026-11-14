@@ -981,6 +981,7 @@ async fn delete_user(
     state.db.delete_user(&id);
     state.db.delete_labels_of("user", &id);
     state.db.delete_library_folders("user", &id);
+    state.db.delete_shares_with("user", &id);
     audit::record(&state.db, &actor, "user.delete", audit::user(&target), json!({"role": target.role}));
     Ok(StatusCode::NO_CONTENT)
 }

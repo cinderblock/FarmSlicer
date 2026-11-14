@@ -365,6 +365,8 @@ async fn delete_group(
     state.db.delete_label_links_for("group", &id);
     state.db.delete_labels_of("group", &id);
     state.db.delete_library_folders("group", &id);
+    state.db.delete_shares_of("library", &id);
+    state.db.delete_shares_with("group", &id);
     audit::record(&state.db, &user, "group.delete", group_target(&g), json!({"parent_id": g.parent_id}));
     Ok(StatusCode::NO_CONTENT)
 }
@@ -757,6 +759,7 @@ fn settings_json(state: &AppState) -> Value {
         "finished_outcome": crate::outcomes::finished_outcome(state),
         "requeue_failed": crate::queue::requeue_failed(state),
         "mixing": crate::pools::site_mixing(state),
+        "public_shares": crate::shares::public_links_allowed(&state.db),
     })
 }
 
@@ -804,6 +807,9 @@ struct UpdateSettings {
     /// Which projects' parts may share a plate (src/pools.rs `MIXING`).
     #[serde(default)]
     mixing: Option<String>,
+    /// Public share links (src/shares.rs) may be made.
+    #[serde(default)]
+    public_shares: Option<bool>,
 }
 
 async fn update_settings(
@@ -865,6 +871,9 @@ async fn update_settings(
             return Err(err(StatusCode::BAD_REQUEST, "mixing: none | group | any"));
         }
         state.db.set_setting("mixing", Some(m));
+    }
+    if let Some(v) = body.public_shares {
+        state.db.set_setting("public_shares", Some(if v { "true" } else { "false" }));
     }
     if let Some(v) = body.requeue_failed {
         state.db.set_setting("requeue_failed", Some(if v { "true" } else { "false" }));

@@ -422,6 +422,7 @@ fn job_filter(tree: &Tree, viewer: &Viewer, q: &JobQuery) -> JobFilter {
             .map(|groups| (viewer.user.id.clone(), groups)),
         user_id: q.mine.unwrap_or(false).then(|| viewer.user.id.clone()),
         group_ids: q.group.as_deref().map(|g| tree.subtree(g)),
+        shared_ids: viewer.shared_job_ids(),
     }
 }
 
@@ -482,7 +483,7 @@ async fn update_job(
     Json(body): Json<UpdateJob>,
 ) -> Result<Json<Value>, ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
-    if !viewer.can_edit_job(&tree, &job) {
+    if !viewer.owns_job(&tree, &job) {
         return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator or those who edit its library can move it"));
     }
     if let Some(g) = &body.group_id {
@@ -593,7 +594,10 @@ async fn download_model(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<axum::response::Response, ApiError> {
-    let (job, _, _) = visible_job(&state, &user, &id)?;
+    let (job, tree, viewer) = visible_job(&state, &user, &id)?;
+    if !viewer.can_use_job(&tree, &job) {
+        return Err(api_err(StatusCode::FORBIDDEN, "this job is shared with you to look at, not to download"));
+    }
     match state.db.job_models(&id).into_iter().find(|m| m.stored()) {
         Some(m) => model_response(&m.path, &m.name),
         None if model_available(&job) => model_response(&job.model_path, &job.model_name),
@@ -607,7 +611,10 @@ async fn download_job_model(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path((id, idx)): Path<(String, i64)>,
 ) -> Result<axum::response::Response, ApiError> {
-    visible_job(&state, &user, &id)?;
+    let (job, tree, viewer) = visible_job(&state, &user, &id)?;
+    if !viewer.can_use_job(&tree, &job) {
+        return Err(api_err(StatusCode::FORBIDDEN, "this job is shared with you to look at, not to download"));
+    }
     match state.db.job_models(&id).into_iter().find(|m| m.idx == idx) {
         Some(m) if m.stored() => model_response(&m.path, &m.name),
         Some(_) => Err(api_err(StatusCode::NOT_FOUND, "this model stayed in the browser that sliced it")),
@@ -620,7 +627,7 @@ async fn download_job_model(
 /// first) or while a print still needs its package.
 fn delete_one_job(state: &AppState, user: &User, id: &str) -> Result<(), ApiError> {
     let (job, tree, viewer) = visible_job(state, user, id)?;
-    if !viewer.can_edit_job(&tree, &job) && !auth::auth_disabled() {
+    if !viewer.owns_job(&tree, &job) && !auth::auth_disabled() {
         return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator or those who edit its library can delete it"));
     }
     if matches!(job.status.as_str(), "queued" | "slicing") {
@@ -632,6 +639,7 @@ fn delete_one_job(state: &AppState, user: &User, id: &str) -> Result<(), ApiErro
     let files = state.db.delete_job(id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "job not found"))?;
     state.db.delete_label_links_for("job", id);
     state.db.file_item("job", id, None, "");
+    state.db.delete_shares_of("job", id);
     for f in files {
         // Only ever files the server made, under its data directory.
         let path = std::path::Path::new(&f);
@@ -1688,7 +1696,7 @@ async fn cancel_job(
     let Ok((job, tree, viewer)) = visible_job(&state, &user, &id) else {
         return StatusCode::NOT_FOUND;
     };
-    if !viewer.can_edit_job(&tree, &job) {
+    if !viewer.owns_job(&tree, &job) {
         return StatusCode::FORBIDDEN;
     }
     // Flag first so a running slice stops at its next checkpoint; the DB row
@@ -1933,6 +1941,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/health", get(health))
         .merge(auth_api::public_routes())
         .merge(join_api::public_routes())
+        .merge(crate::shares::public_routes())
         .route_layer(middleware::from_fn(auth::remote_gate))
         .with_state(state.clone());
 
@@ -1973,6 +1982,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::access_api::routes())
         .merge(crate::labels::routes())
         .merge(crate::folders::routes())
+        .merge(crate::shares::routes())
         .merge(crate::audit::routes())
         .route(
             "/api/custom-profiles",

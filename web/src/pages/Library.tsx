@@ -3,6 +3,7 @@
 // what's charged to it) has its own tree of folders. `?lib=me|<group>|all`
 // and `?folder=<id>` keep the place in the URL. Drag a row onto a folder,
 // or use its "Move to", to file it.
+import { ShareButton } from "../components/Share";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { apiJson, useAuth } from "../auth";
@@ -53,6 +54,64 @@ interface FoldersData {
 
 type Dragged = { kind: "job" | "project"; id: string };
 
+interface SharedWithMe {
+  id: string;
+  target_kind: "job" | "project" | "folder" | "library";
+  target_id: string;
+  name: string;
+  level: "view" | "use" | "edit";
+  by: string | null;
+  expires_at: string | null;
+  through_group: string | null;
+}
+
+/** What's been shared with this account, and from whom. */
+function SharedList({ list }: { list: SharedWithMe[] | undefined }) {
+  if (!list) return <p className="hint">Loading…</p>;
+  if (list.length === 0) {
+    return (
+      <EmptyState icon="users" title="Nothing shared with you yet">
+        When someone shares a job, project, folder or library with you, it shows up here.
+      </EmptyState>
+    );
+  }
+  const href = (s: SharedWithMe) =>
+    s.target_kind === "job"
+      ? `/jobs/${s.target_id}`
+      : s.target_kind === "project"
+        ? `/projects/${s.target_id}`
+        : s.target_kind === "library"
+          ? `/library?lib=all`
+          : `/library?lib=all`;
+  return (
+    <table className="data-table cards">
+      <thead>
+        <tr>
+          <th>What</th>
+          <th>From</th>
+          <th>May</th>
+          <th>Until</th>
+        </tr>
+      </thead>
+      <tbody>
+        {list.map((s) => (
+          <tr key={s.id}>
+            <td className="cell-title">
+              <Link to={href(s)}>{s.name}</Link> <span className="hint">{s.target_kind}</span>
+            </td>
+            <td data-label="From">
+              {s.by ?? "—"}
+              {s.through_group && <div className="hint">to {s.through_group}</div>}
+            </td>
+            <td data-label="May">{s.level}</td>
+            <td data-label="Until">{s.expires_at ? localDate(s.expires_at) : "—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export default function LibraryPage() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
@@ -70,7 +129,9 @@ export default function LibraryPage() {
 
   const libKey = params.get("lib") ?? "me";
   const folderId = params.get("folder");
-  const flat = libKey === "all";
+  const sharedView = libKey === "shared";
+  const flat = libKey === "all" || sharedView;
+  const sharedWithMe = useJson<SharedWithMe[]>(sharedView ? "/api/shares/mine" : null, rev).data;
   const lib: Library | undefined = flat
     ? undefined
     : (folders?.libraries.find((l) => (libKey === "me" ? l.kind === "user" : l.kind === "group" && l.id === libKey)) ??
@@ -215,12 +276,13 @@ export default function LibraryPage() {
       </PageHeader>
       <div className="list-toolbar">
         <label>
-          <select value={flat ? "all" : lib?.kind === "group" ? lib.id : "me"} onChange={(e) => go(e.target.value)} aria-label="Library">
+          <select value={flat ? libKey : lib?.kind === "group" ? lib.id : "me"} onChange={(e) => go(e.target.value)} aria-label="Library">
             {folders?.libraries.map((l) => (
               <option key={`${l.kind}:${l.id}`} value={l.kind === "user" ? "me" : l.id}>
                 {l.name}
               </option>
             ))}
+            <option value="shared">Shared with me</option>
             <option value="all">Everything I can see</option>
           </select>
         </label>
@@ -230,9 +292,12 @@ export default function LibraryPage() {
         </label>
         <LabelFilter value={labelFilter} onChange={setLabelFilter} />
         {lib?.kind === "group" && (
-          <Link to={`/groups/${lib.id}`} className="hint">
-            The group's library by season
-          </Link>
+          <>
+            <Link to={`/groups/${lib.id}`} className="hint">
+              The group's library by season
+            </Link>
+            <ShareButton kind="library" id={lib.id} name={`${lib.name}'s library`} />
+          </>
         )}
       </div>
 
@@ -269,6 +334,7 @@ export default function LibraryPage() {
               <span className="folder-name">{f.name}</span>
               {f.can_manage && (
                 <span className="folder-actions" onClick={(e) => e.stopPropagation()}>
+                  <ShareButton kind="folder" id={f.id} name={f.name} />
                   <button className="btn-sm btn-ghost btn-icon" title="Rename" aria-label={`Rename ${f.name}`} onClick={() => renameFolder(f)}>
                     <Icon name="edit" size={14} />
                   </button>
@@ -282,7 +348,9 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {loading ? (
+      {sharedView ? (
+        <SharedList list={sharedWithMe} />
+      ) : loading ? (
         <p className="hint">Loading…</p>
       ) : empty ? (
         <EmptyState

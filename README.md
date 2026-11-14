@@ -318,6 +318,13 @@ There are no passwords and no secrets to configure.
   Group folders are arranged by holders of the group's `folders`
   capability; anyone who can change an item files it. Deleting a folder
   moves its contents up a level.
+- **Sharing**: a job, project, folder (with everything below it) or a
+  group's whole library, shared with a person, a group (its subgroups'
+  members too) or, when the site setting `public_shares` allows, anyone
+  with a link. Levels: `view`, `use` (print, queue, download the model,
+  re-slice) and `edit` (label, file); deleting, moving between groups and
+  sharing stay with the owners. Public links (`/s/<code>`, reachable from
+  the internet) show names, facts and plate pictures only.
 - **Labels** (`/labels`, and the tag button in the Jobs, Projects,
   Printers and Groups lists, which filter by them): personal labels (only
   their owner sees them; they go on anything the owner can see), group
@@ -600,6 +607,8 @@ summary prints the `pin.json` to paste there.
 | `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}` | roles and the permission lists (`{roles, capabilities: {site, group}}`, anyone signed in); custom roles `{name, scope: site\|group, description, caps}` (`roles.manage`; group roles need `groups.manage_all`); a role someone holds can't be deleted |
 | `GET /api/printer-access`, `GET /api/printer-access/mine`, `POST /api/printer-access/rules`, `PUT/DELETE /api/printer-access/rules/{id}`, `PUT /api/printer-access/order` | printer access rules (`printers.manage`; reading also `certifications.grant`): `{target_kind: printer\|pool\|model\|site, target_id, who: {kind: everyone\|user\|group\|role\|certified, id}, effect: allow\|approve\|deny, approvers, note}` (a user by id or username); `mine`: where the caller stands per printer, and their certifications. Job targets carry `access` per printer, queue fits `needs_approval` |
 | `GET/POST /api/folders`, `PUT/DELETE /api/folders/{id}`, `PUT /api/folders/items` | folders of the libraries the caller sees, the libraries, and where items are filed (`items: {job\|project: {id: folder}}`); `{name, parent_id, library: user\|group, group_id}`; rename/move `{name, parent_id}`; file `{kind, item_id, folder_id}` (null = the top) |
+| `GET/POST /api/shares?kind=&id=`, `DELETE /api/shares/{id}`, `GET /api/shares/mine` | shares of a target (its owners) `{kind: job\|project\|folder\|library, target_id, with: {kind: user\|group\|link, id}, level: view\|use\|edit, expires_days}` (sharing again changes the level); what's shared with the caller; the person it's shared with may drop it |
+| `GET /api/public/shares/{code}`, `…/jobs/{job}/thumbnail?plate=` | a public link's names, facts and plate pictures (no account; open from the internet; 404 when links are off) |
 | `GET/POST /api/labels`, `PUT/DELETE /api/labels/{id}`, `PUT /api/labels/{id}/items` | labels the caller sees and what they're on (`links: {job\|project\|printer\|group: {id: [label]}}`, only items the caller sees); `{name, color, scope: user\|group\|site, group_id}`; `{kind, target_id, on}` puts one on or takes it off |
 | `POST /api/certifications`, `PUT/DELETE /api/certifications/{id}`, `POST /api/certifications/{id}/holders`, `DELETE /api/certifications/{id}/holders/{user_id}` | certifications `{name, description, valid_days}` (`printers.manage`; one a rule names can't be deleted); sign someone off `{username, valid_days, note}` or take it back (`certifications.grant`) |
 | `GET /api/audit?actor=&action=<prefix>&target_kind=&target=&before=&limit=` | the audit log, newest first, `next_before` for the next page (`audit.view`) |

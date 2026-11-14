@@ -1,6 +1,7 @@
 // /projects/:id: one project, its items and how far each has got, the job
 // plates carrying them and their prints, and fulfillment.
 
+import { ShareButton } from "../components/Share";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { previewPath } from "../links";
@@ -79,6 +80,7 @@ export default function ProjectPage() {
             </button>
           </span>
         )}
+        <ShareButton kind="project" id={p.id} name={p.name} />
       </div>
       {error && <p className="login-error">{error}</p>}
       {p.status_note && <p className="hint">{p.status_note}</p>}
