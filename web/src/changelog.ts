@@ -21,7 +21,7 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "2026-11-14",
+    id: "2026-11-14f",
     date: "2026-11-14",
     title: "Multi-colour models, and more ways to edit them",
     highlights: [
