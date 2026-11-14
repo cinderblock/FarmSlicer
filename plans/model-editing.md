@@ -190,6 +190,10 @@ Bring the Slice page's plate up to what desktop slicers offer
 
 ## Findings / gotchas
 
+- Shared tree: another thread's `git commit` took my staged phase 2
+  (4dabb29), and my `git add web/src/changelog.ts` took another thread's
+  changelog entry (amended out). Stage shared files as blobs from HEAD +
+  my edit; commit in the same command.
 - `read_from_file(path)` used `LoadStrategy::AddDefaultInstances` only; the
   BBS 3MF importer creates no objects without `LoadStrategy::LoadModel`.
   Proved on 2026-11-14 with the production image: an STL cube sliced, the
@@ -239,13 +243,24 @@ Bring the Slice page's plate up to what desktop slicers offer
   with filament 3 but the job has one filament"; plain 3MF cube slices.
   The code is in `4dabb29` (another thread's commit swept up my staged
   files; its message is about its own plan) and the plan in `9c025c1`.
-- [ ] Changelog entry: when the editor ships (3MF uploads slicing again is
-  one of its fixes).
-- [ ] (current) Phase 3 server part: the job's `colours` field (working
-  tree, src/server.rs, not committed: the other thread edits server.rs; my
-  edit is `colours_patch.py` in the session scratchpad, re-creatable from
-  this plan: JobInputs.colours, multipart `colours` JSON, check_colours,
-  job_config sets filament_colour, NozzlePlanQuery.colours).
+- [x] Phase 3 + 4 (first part) committed `4388978`: filament slots with
+  colours (job `colours` field), viewer on editor objects (filament
+  colours, colour paint shown), scale/mirror per copy, undo/redo, Objects
+  panel (rename, filament per model/part, add primitives as parts,
+  modifiers, negative volumes, enforcers, blockers; move/size them;
+  per-object and per-modifier settings), changelog entry 2026-11-14.
+  Verified headless on buildhost (`~/farmslicer-model-edit-ui/ui-test.mjs`,
+  Chromium from snap + playwright-core, image `farmslicer:model-edit2`
+  with the real slicer on 127.0.0.1:9353): painted.3mf → 3 slots shown,
+  scale 50 % → undo → redo, a slot colour picked, sliced on the server:
+  filaments [PLA×3, Support For PLA], filament_colour
+  [#808080, #FF0000, #808080, #FFFFFF], no console errors. The Objects
+  panel itself was not in that image yet (check it with Phase 5).
+- [ ] (current) Phase 5: painting UI.
+- [ ] Phase 6: cut. Phase 7: cut to fit. Phase 8: layer colour changes.
+- [ ] Split to objects / parts, merge (basic tools still missing).
+- [ ] Docs: README, CLAUDE.md (web/src/model, viewer/history.ts,
+  ObjectPanel, src/model_check.rs, job `colours`).
 
 ## Open questions for the user
 
