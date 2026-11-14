@@ -363,6 +363,16 @@ export default function AccountPage() {
               Turn on <strong>Use 3rd-party print host</strong> and <strong>Use 3MF instead of G-code</strong>.
             </li>
           </ol>
+
+          <h3>Connect an AI agent</h3>
+          <p className="hint">
+            Agents such as Claude Code can use FarmSlicer through its MCP server: list printers, jobs, and the
+            queue, queue plates, pause or stop prints, and manage projects. An agent can do what the API key can,
+            and nothing more. Create a key above for the agent, then add the server. For Claude Code:
+          </p>
+          <pre className="hint">
+            <code>{`claude mcp add --transport http farmslicer ${window.location.origin}/api/mcp --header "Authorization: Bearer fsk_…"`}</code>
+          </pre>
         </>
       )}
     </div>

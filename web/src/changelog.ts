@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-13e",
+    date: "2026-11-13",
+    title: "AI agents can run the farm",
+    highlights: [
+      "AI agents such as Claude Code can connect to FarmSlicer's MCP server with one of your API keys: they can check printers, jobs, and the queue, queue plates, pause or stop prints, and set up projects, with exactly the key's permissions. Your Account page shows how to connect one.",
+    ],
+  },
+  {
     id: "2026-11-13d",
     date: "2026-11-13",
     title: "Send from your slicer",

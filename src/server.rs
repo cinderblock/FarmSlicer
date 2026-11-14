@@ -1813,6 +1813,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(printers_api::routes())
         .merge(prints_api::routes())
         .merge(crate::print_host::routes())
+        .merge(crate::mcp::routes())
         .merge(crate::projects_api::routes())
         .merge(crate::queue_api::routes())
         .merge(crate::pools::routes())
@@ -1853,6 +1854,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), auth::require_auth))
         .with_state(state);
+    // The MCP endpoint's tools are requests through these same routes.
+    crate::mcp::install(protected.clone());
 
     let static_files = ServeDir::new("dist/web")
         .append_index_html_on_directories(true)

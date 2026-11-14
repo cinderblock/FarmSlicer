@@ -102,6 +102,12 @@ can run in the user's browser.
   "Upload" makes a job, and "Upload and print" also queues the plate. For
   Bambu printers in OrcaSlicer, turn on "Use 3rd-party print host" and "Use
   3MF instead of G-code" in the printer's settings.
+- **AI agents (MCP):** an MCP server at `https://<farm>/api/mcp`
+  (Streamable HTTP, API key only) gives agents such as Claude Code tools
+  for printers, jobs, the queue, prints and projects. Each tool is a call
+  to the REST API with the agent's key, so it can do what the key can do
+  and nothing more. Claude Code: `claude mcp add --transport http
+  farmslicer https://<farm>/api/mcp --header "Authorization: Bearer fsk_…"`.
 - **Printers:** five kinds, each on the LAN (see [Printers](#printers)):
   Bambu Lab, Klipper (Moonraker), OctoPrint, Prusa (PrusaLink) and Elegoo
   Centauri Carbon (SDCP). Discovery, live status (state, progress,
@@ -529,6 +535,7 @@ summary prints the `pin.json` to paste there.
 | `GET/PUT/DELETE /api/groups/{id}/logo`, `GET /api/groups/{id}/overlay`, `GET /api/groups/{id}/overlay/logo` | a group's thumbnail logo (managers set it; PNG/JPEG, stored ≤ 256 px); the label and logo its jobs get |
 | `POST /api/uploads` (multipart `file`, optional `group_id`) | a sliced `.gcode.3mf` or `.gcode` becomes a finished, sendable job (what it needs is read from the slicer's comments); its G-code is checked at once (each plate's `check` in `package_json`). 400 for ambiguous archives or G-code changed after slicing; 403 where uploads are denied |
 | `GET /api/octoprint/api/version`, `POST /api/octoprint/api/files/local` (multipart `file`, `print`, `plateindex`) | OctoPrint's upload API for desktop slicers (key in `X-Api-Key`): the file becomes a job as with `/api/uploads`; `print=true` also queues the plate `plateindex` names (else every plate). Errors are plain text |
+| `POST /api/mcp` | MCP (Streamable HTTP, stateless, JSON answers; GET/DELETE 405): JSON-RPC `initialize`, `ping`, `tools/list`, `tools/call`. API keys only, not session cookies. Tools: whoami, list_printers, list_jobs, get_job, list_queue, queue_plates, cancel_queue_entry, list_prints, control_print, list_projects, get_project, create_project, add_project_item; an integration key sees only those its routes allow |
 | `GET /api/jobs/{id}/thumbnail?plate=`, `GET /api/jobs/{id}/targets?plate=` | plate preview; every printer with fit, availability, its capabilities and (Bambu) a suggested AMS mapping, plus the plate's `gcode_check`, `blocked` and `needs_review` findings |
 | `POST /api/jobs/{id}/print` | `{printer_id, plate, ams_mapping, options, ignore_mapping_problems, acknowledge_review}`: upload and start. 409 when the plate's G-code is blocked; findings that need review make a member's print wait for an admin, and an admin's send needs `acknowledge_review` |
 | `GET /api/prints?printer=&active=1&pending=1&unchecked=1`, `GET /api/prints/{id}`, `POST /api/prints/{id}/control` | print history and status (each print's `lines`: what it holds, one per kind of part, and `outcome`); pause/resume/stop/speed as the printer allows (sender, group managers, admins) |

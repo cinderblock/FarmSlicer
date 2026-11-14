@@ -375,7 +375,11 @@ pub fn session_token_from_request(req: &Request) -> Option<String> {
 /// `X-Api-Key: fsk_...` (what desktop slicers send to an OctoPrint print
 /// host, src/print_host.rs).
 fn bearer_from_request(req: &Request) -> Option<String> {
-    let headers = req.headers();
+    api_key_from_headers(req.headers())
+}
+
+/// [`bearer_from_request`] on headers alone.
+pub fn api_key_from_headers(headers: &HeaderMap) -> Option<String> {
     let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

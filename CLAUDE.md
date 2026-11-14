@@ -327,6 +327,15 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   tests), a delivery task (`webhooks::run`) on its own reqwest client
   with Mozilla's roots (`webpki-roots`; the printers' client accepts any
   certificate), retries per `RETRY_AFTER`
+- `src/print_host.rs` — FarmSlicer as an OctoPrint print host for desktop
+  slicers (`/api/octoprint/api/{version,files/local}`, key in `X-Api-Key`):
+  uploads via `prints_api::store_upload`, "Upload and print" queues via
+  `queue_api::enqueue`; errors plain text. `src/mcp.rs` — the MCP server
+  (`POST /api/mcp`, stateless Streamable HTTP, API keys only): every tool
+  forwards to REST routes through the protected router (`mcp::install`,
+  `oneshot` with the caller's headers), so permissions and integration
+  scopes apply unchanged; `Tool.routes` filters tools/list per scope.
+  Plan: `plans/slicer-upload-and-mcp.md`
 - `src/events.rs` — every event goes through `emit` → `webhooks::enqueue`
   (print status from `printing::apply` and the send task, outcomes from
   `outcomes::after_record`, item/project from `projects::refresh` via

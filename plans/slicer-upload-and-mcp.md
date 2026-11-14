@@ -58,7 +58,42 @@ with no export and manual upload. Then let AI agents do the same, and more.
 6. [x] e2e test `tests/print-host-e2e.mjs`.
 7. [x] Account page: "Send from your slicer" with the host URL and the
    settings to tick; README; changelog.
-8. [ ] **(current)** Server MCP endpoint: separate plan section once 1-7 are in.
+8. [x] Server MCP endpoint (design below).
+   1. [x] `src/mcp.rs`: JSON-RPC over Streamable HTTP at `POST /api/mcp`.
+   2. [x] Tools forward to the REST routes (internal `oneshot` on the
+      protected router, with the caller's headers).
+   3. [x] `integration::allows`: `/api/mcp` for any key; tools/list filtered
+      by what the key reaches.
+   4. [x] e2e test `tests/mcp-e2e.mjs`; Account page "Connect an agent";
+      README; changelog.
+9. [ ] **(next, not started)** WebMCP (later, when the spec settles), and
+   MCP tools for slicing and uploads if agents need them (see below).
+
+## MCP design (step 8)
+
+- **Transport**: MCP Streamable HTTP, stateless. `POST /api/mcp` takes one
+  JSON-RPC message (or a batch) and answers `application/json`; no SSE
+  stream, no `Mcp-Session-Id`. `GET`/`DELETE` answer 405, as the spec
+  allows for a server without a stream. Notifications and responses from
+  the client get 202. Protocol versions: 2025-11-25, 2025-06-18,
+  2025-03-26 (the client's if we know it, else the newest).
+- **Auth**: an API key only (`Authorization: Bearer fsk_…` or `X-Api-Key`),
+  never a session cookie: no cross-site requests riding a browser session.
+  The usual `require_auth` applies (remote rules, integration scopes).
+  Claude Code: `claude mcp add --transport http farmslicer
+  https://<farm>/api/mcp --header "Authorization: Bearer fsk_…"`.
+- **Tools are REST calls**: each tool runs one or more requests through the
+  protected router itself (`tower::ServiceExt::oneshot`), carrying the
+  caller's headers. So a tool can do exactly what the key can do over REST,
+  with the same checks, and nothing new to keep in sync. Outputs are
+  trimmed for an agent's context (no `config_json`, plates summarised).
+- **v1 tools**: whoami, list_printers (merged with live status), list_jobs,
+  get_job, list_queue, queue_plates, cancel_queue_entry, list_prints,
+  control_print, list_projects, get_project, create_project,
+  add_project_item. Annotated read-only / destructive.
+- **Not in v1**: slicing (`POST /api/jobs` is multipart with models) and
+  uploads (binary): an agent with a file uses `POST /api/uploads` or the
+  OctoPrint host with the same key; the server's `instructions` say so.
 
 ## Findings / gotchas
 
@@ -72,6 +107,16 @@ with no export and manual upload. Then let AI agents do the same, and more.
   does, and the real slicers use curl.
 - Not yet tried with a real OrcaSlicer: the e2e test replays the requests
   from `OctoPrint.cpp`.
+- MCP: `GET /api/jobs/{id}/parts` gives part keys (`model:N`,
+  `object:<name>`), but `POST /api/projects/{id}/items` takes `model` (an
+  index) or `part` (an object name), not the key. `add_project_item`
+  translates the key; passing the key straight through gave "the job has
+  no such part".
+- MCP: the router's error type is `Infallible`, so `oneshot` can't fail
+  (`let Ok(res) = ...`).
+- Running a test server by hand on buildhost needs
+  `FARMSLICER_ORIGINS=http://localhost:<port>` (passkey setup checks the
+  origin) and the test pointed at `localhost`, not `127.0.0.1`.
 
 ## Progress log
 
@@ -80,7 +125,13 @@ with no export and manual upload. Then let AI agents do the same, and more.
   allowlist, `tests/print-host-e2e.mjs` (passes on buildhost, with the
   integration and queue suites and `cargo test`), Account page section,
   README, changelog.
-- [ ] Try it from a real OrcaSlicer against the dev instance (manual).
+- 2026-11-13: MCP endpoint done: `src/mcp.rs`, 13 tools,
+  `tests/mcp-e2e.mjs` (passes on buildhost with print-host, integration,
+  queue and projects suites, `cargo test` 185), Account page "Connect an
+  AI agent", README, CLAUDE.md, changelog.
+- [ ] Try the adapter from a real OrcaSlicer against the dev instance (manual).
+- [ ] Try the MCP server from a real Claude Code against the dev instance
+  (manual).
 
 ## Open questions for the user
 

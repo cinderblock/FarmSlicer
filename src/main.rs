@@ -18,6 +18,7 @@ mod groups_api;
 mod incidents;
 mod integration;
 mod join_api;
+mod mcp;
 mod moonraker;
 mod notifications;
 mod nozzles;

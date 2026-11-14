@@ -77,6 +77,8 @@ pub fn allows(scope: &Scope, method: &Method, path: &str) -> Result<(), String> 
         // A desktop slicer's print-host upload (src/print_host.rs).
         (["api", "octoprint", "api", "version"], true) => None,
         (["api", "octoprint", "api", "files", "local"], false) if method == Method::POST => Some("projects:write"),
+        // The MCP endpoint (src/mcp.rs): each tool's own requests are checked.
+        (["api", "mcp"], _) => None,
         (["api", "jobs", _], true) | (["api", "jobs", _, "parts" | "thumbnail"], true) => Some("projects:read"),
         (["api", "usage", "prints"], true) => Some("usage:read"),
         _ => return Err("this integration key doesn't reach that (it works with projects and usage)".into()),
@@ -483,6 +485,7 @@ mod tests {
         assert!(allows(&read, &Method::GET, "/api/projects").is_ok());
         assert!(allows(&read, &Method::GET, "/api/projects/abc").is_ok());
         assert!(allows(&read, &Method::GET, "/api/me").is_ok());
+        assert!(allows(&read, &Method::POST, "/api/mcp").is_ok(), "MCP: each tool is checked itself");
         assert!(allows(&read, &Method::POST, "/api/projects").unwrap_err().contains("projects:write"));
         assert!(allows(&read, &Method::GET, "/api/usage/prints").unwrap_err().contains("usage:read"));
         assert!(allows(&read, &Method::GET, "/api/printers").is_err());
