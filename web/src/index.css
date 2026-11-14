@@ -1531,6 +1531,23 @@ a.card:hover {
   border-color: var(--error);
 }
 
+/* Ctrl-drag in the viewer: the box that selects the parts inside it. */
+.select-box {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+
+.measure-row > span:last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+.measure-result {
+  font-weight: 600;
+}
+
 /* A filament's colour, next to its number. */
 .filament-swatch {
   display: inline-block;

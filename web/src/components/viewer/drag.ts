@@ -6,7 +6,7 @@ import { useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Part, SceneBed } from "./part";
 
-export type Tool = "none" | "move" | "rotate" | "flat" | "cut";
+export type Tool = "none" | "move" | "rotate" | "flat" | "cut" | "measure";
 
 export const ROTATE_STEP = THREE.MathUtils.degToRad(15);
 const MOVE_STEP = 1; // mm

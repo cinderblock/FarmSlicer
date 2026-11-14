@@ -1,5 +1,5 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { useRef, useState, useCallback, useEffect, useMemo, type SetStateAction } from "react";
+import { Canvas, useFrame, useThree, type RootState, type ThreeEvent } from "@react-three/fiber";
 import { Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import type { PlateLayout } from "../engine/types";
@@ -18,6 +18,8 @@ import { usedFilaments, type ModelObject } from "../model/document";
 import ObjectPanel from "./viewer/ObjectPanel";
 import { PaintControls, PaintSurface } from "./viewer/PaintTool";
 import { CutControls, CutPlane } from "./viewer/CutTool";
+import { MeasureControls, MeasureMarks } from "./viewer/MeasureTool";
+import { useMeasurePick, type MeasureMode, type MeasurePoint } from "./viewer/measure";
 import { cutNormal, cutPivot, DEFAULT_CUT, type CutSettings } from "./viewer/cutSettings";
 import {
   addConnectors,
@@ -192,10 +194,37 @@ function Guides({ guides, bed }: { guides: Guide[]; bed: SceneBed }) {
   );
 }
 
+/** The outline of a multiple selection: one box round all of it, on the plate. */
+function GroupBox({ parts }: { parts: Part[] }) {
+  const line = useRef<THREE.LineSegments>(null);
+  useFrame(() => {
+    if (!line.current) return;
+    const box = new THREE.Box3();
+    for (const p of parts) box.union(p.worldBox());
+    const size = box.getSize(new THREE.Vector3());
+    line.current.position.copy(box.getCenter(new THREE.Vector3()));
+    line.current.scale.set(Math.max(size.x, 0.01) + 2, Math.max(size.y, 0.01) + 2, Math.max(size.z, 0.01) + 2);
+  });
+  const edges = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), []);
+  return (
+    <lineSegments ref={line} geometry={edges} renderOrder={20}>
+      <lineBasicMaterial color="#58a6ff" depthTest={false} transparent opacity={0.9} />
+    </lineSegments>
+  );
+}
+
 function PartView(
-  props: GizmoProps & { tool: Tool; selected: boolean; painting: boolean; onSelect: (part: Part) => void },
+  props: GizmoProps & {
+    tool: Tool;
+    /** The part the tools act on. */
+    selected: boolean;
+    painting: boolean;
+    /** `additive`: Ctrl/Cmd-click, which adds the part to the selection or takes it out. */
+    onSelect: (part: Part, additive: boolean) => void;
+    onMeasure: (e: ThreeEvent<PointerEvent>) => void;
+  },
 ) {
-  const { part, tool, selected, painting, onSelect } = props;
+  const { part, tool, selected, painting, onSelect, onMeasure } = props;
   const bodyDown = useBodyDrag(props);
   return (
     <>
@@ -206,9 +235,14 @@ function PartView(
             if (e.button !== 0) return;
             // The nearest part takes the click, not the ones behind it.
             if (e.intersections[0]?.object !== e.object) return;
-            onSelect(part);
+            if (tool === "measure" && !painting) {
+              onMeasure(e);
+              return;
+            }
+            const additive = e.nativeEvent.ctrlKey || e.nativeEvent.metaKey;
+            onSelect(part, additive);
             // Painting: a click picks the part to paint, nothing moves.
-            if (painting) return;
+            if (painting || additive) return;
             // On a touch screen the parts cover most of the view: a finger
             // landing on one orbits the camera and selects it; only a part
             // already selected is dragged.
@@ -228,6 +262,7 @@ function PartView(
 function Scene({
   parts,
   selected,
+  group,
   bed,
   tool,
   paint,
@@ -239,9 +274,14 @@ function Scene({
   onCommit,
   onStroke,
   onCutSettings,
+  measure,
+  onMeasure,
+  stateRef,
 }: {
   parts: Part[];
   selected: Part | null;
+  /** Every selected part (the selected one first). */
+  group: Part[];
   bed: SceneBed;
   tool: Tool;
   /** Painting with these settings (null: not painting). */
@@ -250,13 +290,31 @@ function Scene({
   /** Cutting: the plane's settings and where the connectors would go. */
   cut: { settings: CutSettings; points: THREE.Vector3[] } | null;
   heightMarks: { z: number; color: string }[];
-  onSelect: (part: Part) => void;
+  onSelect: (part: Part, additive: boolean) => void;
   onChange: () => void;
   onCommit: () => void;
   onStroke: (change: PaintChange) => void;
   onCutSettings: (s: CutSettings) => void;
+  /** Measuring: the mode and the points so far (null: not measuring). */
+  measure: { mode: MeasureMode; points: MeasurePoint[] } | null;
+  onMeasure: (p: MeasurePoint) => void;
+  /** The viewer's way into the scene (box select picks parts by their place on screen). */
+  stateRef: { current: (() => RootState) | null };
 }) {
   const [guides, setGuides] = useState<Guide[]>([]);
+  const pick = useMeasurePick();
+  const get = useThree((s) => s.get);
+  useEffect(() => {
+    stateRef.current = get;
+  }, [get, stateRef]);
+  const measureMode = measure?.mode ?? "points";
+  const onMeasureDown = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      const p = pick(e, measureMode === "points" && !e.nativeEvent.shiftKey);
+      if (p) onMeasure(p);
+    },
+    [pick, measureMode, onMeasure],
+  );
   return (
     <>
       <ambientLight intensity={0.35} />
@@ -273,12 +331,15 @@ function Scene({
           selected={part === selected}
           painting={paint !== null}
           onSelect={onSelect}
+          onMeasure={onMeasureDown}
           onChange={onChange}
           onCommit={onCommit}
           onGuides={setGuides}
         />
       ))}
       <Guides guides={guides} bed={bed} />
+      {group.length > 1 && <GroupBox parts={group} />}
+      {measure && <MeasureMarks points={measure.points} mode={measure.mode} />}
       {cut && selected && <CutPlane part={selected} settings={cut.settings} points={cut.points} onSettings={onCutSettings} />}
       {heightMarks.map((m, i) => (
         <mesh key={i} position={[(bed.min.x + bed.max.x) / 2, (bed.min.y + bed.max.y) / 2, m.z]} renderOrder={14}>
@@ -353,14 +414,16 @@ const TOOLS: { tool: Tool; label: string; key: string }[] = [
   { tool: "rotate", label: "Rotate", key: "R" },
   { tool: "flat", label: "Lay on face", key: "F" },
   { tool: "cut", label: "Cut", key: "C" },
+  { tool: "measure", label: "Measure", key: "U" },
 ];
 
 const MOUSE_HINTS: Record<Tool, string> = {
-  none: "Click a part to select it · drag to move it",
+  none: "Click a part to select it · drag to move it · Ctrl+click or Ctrl+drag selects several · Ctrl+A: all",
   move: "Drag an arrow or the part · snaps to 1 mm, the bed's centre and edges · Shift: free",
   rotate: "Drag a ring · snaps to 15° · Shift: free",
   flat: "Click a face to put it on the plate",
-  cut: "Set the plane's height and tilt, then Cut · the plane cuts every copy of the model",
+  cut: "Drag the arrow or the rings, or set the numbers, then Cut · the plane cuts every copy of the model",
+  measure: "Click two points (snaps to corners · Shift: free), or two faces in Faces mode",
 };
 
 /** Touch screens: no Shift, and a part is selected before it can be dragged. */
@@ -369,7 +432,8 @@ const TOUCH_HINTS: Record<Tool, string> = {
   move: "Drag an arrow or the part · snaps to 1 mm, the bed's centre and edges",
   rotate: "Drag a ring · snaps to 15°",
   flat: "Tap a face to put it on the plate",
-  cut: "Set the plane's height and tilt, then Cut",
+  cut: "Drag the arrow or the rings, or set the numbers, then Cut",
+  measure: "Tap two points, or two faces in Faces mode",
 };
 
 const TOOL_HINTS = window.matchMedia("(hover: none)").matches ? TOUCH_HINTS : MOUSE_HINTS;
@@ -413,7 +477,22 @@ export default function ModelViewer({
   const [parts, setParts] = useState<Part[]>([]);
   const [plateCount, setPlateCount] = useState(1);
   const [active, setActive] = useState(0);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // The selected part (the one the tools act on), and the others selected
+  // with it (Ctrl+click, Ctrl+drag, Ctrl+A).
+  const [selectedId, setPrimaryId] = useState<number | null>(null);
+  const [alsoIds, setAlsoIds] = useState<number[]>([]);
+  /** Select one part (or none): the rest of a multiple selection is dropped. */
+  const setSelectedId = useCallback((id: SetStateAction<number | null>) => {
+    setAlsoIds([]);
+    setPrimaryId(id);
+  }, []);
+  // Measuring: the mode and the points picked so far.
+  const [measureMode, setMeasureMode] = useState<MeasureMode>("points");
+  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
+  const sceneState = useRef<(() => RootState) | null>(null);
+  const [selectBox, setSelectBox] = useState<{ x0: number; y0: number; x1: number; y1: number; ox: number; oy: number } | null>(
+    null,
+  );
   // The volume picked in the object panel (its settings and size show).
   const [volumeId, setVolumeId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("move");
@@ -472,6 +551,9 @@ export default function ModelViewer({
   }, [onPlateChange]);
   const shown = useMemo(() => parts.filter((p) => p.plate === active), [parts, active]);
   const selected = shown.find((p) => p.id === selectedId) ?? null;
+  /** Every selected part on the plate shown, the selected one first. */
+  const group = selected ? [selected, ...shown.filter((p) => p !== selected && alsoIds.includes(p.id))] : [];
+  const groupKey = group.map((p) => p.id).join(",");
 
   useEffect(() => {
     if (!notice) return;
@@ -487,7 +569,7 @@ export default function ModelViewer({
   useEffect(() => {
     for (const p of parts) {
       const bad = status.fits.get(p) !== "inside" || status.clash.has(p);
-      p.setLook(bad ? "error" : shown.length > 1 && p.id !== selectedId ? "idle" : "normal");
+      p.setLook(bad ? "error" : shown.length > 1 && !group.includes(p) ? "idle" : "normal");
     }
   });
 
@@ -499,6 +581,27 @@ export default function ModelViewer({
       tickPending.current = false;
       setTick((t) => t + 1);
     });
+  }, []);
+
+  // A multiple selection moves together: where each part was when the
+  // selection or the plate last settled, and how far the others have been
+  // moved since (the part being dragged is the one that moved otherwise).
+  const anchors = useRef<{ at: Map<Part, THREE.Vector2>; moved: THREE.Vector2 }>({ at: new Map(), moved: new THREE.Vector2() });
+  useEffect(() => {
+    anchors.current = { at: new Map(group.map((p) => [p, p.center.clone()])), moved: new THREE.Vector2() };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupKey, settled, parts]);
+  const followGroup = useCallback(() => {
+    const { at, moved } = anchors.current;
+    if (at.size < 2) return;
+    for (const [p, c] of at) {
+      const d = p.center.clone().sub(c);
+      if (d.distanceToSquared(moved) < 1e-12) continue;
+      // `p` is being dragged: the rest follow it.
+      for (const [q, cq] of at) if (q !== p) q.setCenter(cq.x + d.x, cq.y + d.y);
+      anchors.current.moved = d;
+      return;
+    }
   }, []);
 
   /** Record the plate as it is now, if it changed since the last record. */
@@ -609,7 +712,7 @@ export default function ModelViewer({
       setSettled((n) => n + 1);
       refresh();
     },
-    [parts, shape, plateCount, refresh],
+    [parts, shape, plateCount, refresh, setSelectedId],
   );
 
   const undo = useCallback(() => {
@@ -671,6 +774,8 @@ export default function ModelViewer({
       });
     recordPaint({ shape: s, layers }, "Clear paint");
   }, [selected, painting, recordPaint]);
+
+  const addMeasurePoint = useCallback((p: MeasurePoint) => setMeasurePoints((pts) => (pts.length >= 2 ? [p] : [...pts, p])), []);
 
   /** The cut tool opens: the plane level, half way up the selected part. */
   const startCut = useCallback(() => {
@@ -741,7 +846,7 @@ export default function ModelViewer({
       setVolumeId(null);
       setSettled((n) => n + 1);
     },
-    [parts, setPlate],
+    [parts, setPlate, setSelectedId],
   );
 
   const splitModel = useCallback(
@@ -839,7 +944,7 @@ export default function ModelViewer({
         bad: openLoops > 0,
       });
     },
-    [fitLimits, cutSettings, shape, parts, plateCount, active, setPlate],
+    [fitLimits, cutSettings, shape, parts, plateCount, active, setPlate, setSelectedId],
   );
 
   /** Cut every copy of the selected part's model; the halves take their place. */
@@ -930,7 +1035,7 @@ export default function ModelViewer({
           : `Cut into ${[upper, lower].filter(Boolean).length} ${pins ? "halves and dowel pins" : upper && lower ? "halves" : "half"}`,
       bad: openLoops > 0,
     });
-  }, [selected, cutSettings, cutPlane, parts, shape, setPlate]);
+  }, [selected, cutSettings, cutPlane, parts, shape, setPlate, setSelectedId]);
 
   /**
    * Show plate `index`, selecting its first part. Leaving an empty plate
@@ -949,7 +1054,7 @@ export default function ModelViewer({
       setActive(target);
       setSelectedId(parts.find((p) => p.plate === target)?.id ?? null);
     },
-    [parts, active, plateCount],
+    [parts, active, plateCount, setSelectedId],
   );
 
   /** Load model files onto the plate shown: one part each, placed in free space (centred on an empty plate). */
@@ -1007,7 +1112,7 @@ export default function ModelViewer({
         setLoading(false);
       }
     },
-    [parts, shown, active, shape, setPlate],
+    [parts, shown, active, shape, setPlate, setSelectedId],
   );
 
   // A job's models and plates (re-slicing): replace them all.
@@ -1055,7 +1160,7 @@ export default function ModelViewer({
     return () => {
       cancelled = true;
     };
-  }, [initialKey]);
+  }, [initialKey, setSelectedId]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -1066,58 +1171,100 @@ export default function ModelViewer({
     [addFiles],
   );
 
-  const center = useCallback(() => {
+  /** The box round every selected part, on the plate. */
+  const groupBox = () => {
+    const box = new THREE.Box3();
+    for (const p of group) box.union(p.worldBox());
+    return box;
+  };
+  /** Move every selected part by (dx, dy). */
+  const moveGroup = (dx: number, dy: number) => {
+    for (const p of group) p.setCenter(p.center.x + dx, p.center.y + dy);
+  };
+  /** Select these parts, the first the one the tools act on. */
+  const selectParts = useCallback((ps: Part[]) => {
+    setPrimaryId(ps[0]?.id ?? null);
+    setAlsoIds(ps.slice(1).map((p) => p.id));
+  }, []);
+
+  const center = () => {
     if (!selected) return;
-    selected.setCenter(0, 0);
+    const mid = groupBox().getCenter(new THREE.Vector3());
+    moveGroup(-mid.x, -mid.y);
     commit("Center");
-  }, [selected, commit]);
+  };
 
-  const resetOrientation = useCallback(() => {
+  const resetOrientation = () => {
     if (!selected) return;
-    selected.setRotation(new THREE.Quaternion());
+    for (const p of group) p.setRotation(new THREE.Quaternion());
     commit("Reset rotation");
-  }, [selected, commit]);
+  };
 
-  /** Turn the selected part the way it prints best (least overhang, most on the plate). */
+  /** Turn the selected parts the way they print best (least overhang, most on the plate). */
   const autoOrient = useCallback(() => {
     if (!selected) return;
-    const best = bestOrientation(selected.shape.object, supportThreshold);
-    if (!best) return;
-    // A face's direction under the copy's scale: divided by it.
-    const down = new THREE.Vector3(...best.down).divide(selected.scale).normalize();
-    selected.setRotation(new THREE.Quaternion().setFromUnitVectors(down, new THREE.Vector3(0, 0, -1)));
+    let left = 0;
+    for (const p of group) {
+      const best = bestOrientation(p.shape.object, supportThreshold);
+      if (!best) continue;
+      // A face's direction under the copy's scale: divided by it.
+      const down = new THREE.Vector3(...best.down).divide(p.scale).normalize();
+      p.setRotation(new THREE.Quaternion().setFromUnitVectors(down, new THREE.Vector3(0, 0, -1)));
+      left += best.overhang;
+    }
     commit("Auto orient");
     setNotice({
-      text: best.overhang > 1 ? `Turned: ${Math.round(best.overhang)} mm² still overhangs` : "Turned so nothing overhangs",
+      text: left > 1 ? `Turned: ${Math.round(left)} mm² still overhangs` : "Turned so nothing overhangs",
     });
-  }, [selected, supportThreshold, commit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, groupKey, supportThreshold, commit]);
 
-  // Copy and paste (Ctrl+C, Ctrl+V): another copy of a part, onto the plate shown.
-  const clipboard = useRef<{ shape: PartShape; quaternion: THREE.Quaternion; scale: THREE.Vector3 } | null>(null);
+  // Copy and paste (Ctrl+C, Ctrl+V): more copies of the selected parts, onto the plate shown.
+  const clipboard = useRef<{ shape: PartShape; quaternion: THREE.Quaternion; scale: THREE.Vector3 }[]>([]);
   const copySelected = useCallback(() => {
     if (!selected) return;
-    clipboard.current = { shape: selected.shape, quaternion: selected.quaternion.clone(), scale: selected.scale.clone() };
-    setNotice({ text: `Copied ${selected.name}: Ctrl+V puts another copy on the plate shown` });
-  }, [selected]);
-  const paste = useCallback(() => {
-    const c = clipboard.current;
-    if (!c) return;
-    const part = new Part(c.shape);
-    part.setScale(c.scale.clone());
-    part.setRotation(c.quaternion.clone());
-    part.setPlate(active);
-    if (shown.length > 0) {
-      const spot = findFreeSpot(part, shown, shape);
-      if (!spot) {
-        part.dispose();
-        setNotice({ text: "No free room on this plate: add a plate, or Arrange", bad: true });
-        return;
+    clipboard.current = group.map((p) => ({ shape: p.shape, quaternion: p.quaternion.clone(), scale: p.scale.clone() }));
+    setNotice({
+      text: `Copied ${group.length > 1 ? `${group.length} parts` : selected.name}: Ctrl+V puts more on the plate shown`,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, groupKey]);
+  /** Copies of `items` in free room on the plate shown (null: no room for them all). */
+  const placeCopies = useCallback(
+    (items: { shape: PartShape; quaternion: THREE.Quaternion; scale: THREE.Vector3 }[]) => {
+      const placed = [...shown];
+      const made: Part[] = [];
+      for (const c of items) {
+        const part = new Part(c.shape);
+        part.setScale(c.scale.clone());
+        part.setRotation(c.quaternion.clone());
+        part.setPlate(active);
+        if (placed.length > 0) {
+          const spot = findFreeSpot(part, placed, shape);
+          if (!spot) {
+            part.dispose();
+            made.forEach((m) => m.dispose());
+            return null;
+          }
+          part.setCenter(spot.x, spot.y);
+        }
+        placed.push(part);
+        made.push(part);
       }
-      part.setCenter(spot.x, spot.y);
+      return made;
+    },
+    [shown, active, shape],
+  );
+  const paste = useCallback(() => {
+    if (clipboard.current.length === 0) return;
+    const made = placeCopies(clipboard.current);
+    if (!made) {
+      setNotice({ text: "No free room on this plate: add a plate, or Arrange", bad: true });
+      return;
     }
-    setPlate([...parts, part], "Paste");
-    setSelectedId(part.id);
-  }, [active, shown, shape, parts, setPlate]);
+    setPlate([...parts, ...made], "Paste");
+    selectParts(made);
+  }, [placeCopies, parts, setPlate, selectParts]);
 
   /** Mirror the selected part along a scene axis (it stays where it is). */
   const mirror = useCallback(
@@ -1171,22 +1318,40 @@ export default function ModelViewer({
       setSelectedId(here.id);
       setVolumeId(null);
     },
-    [parts, active],
+    [parts, active, setSelectedId],
   );
 
-  const duplicate = useCallback(() => {
+  const duplicate = () => {
     if (!selected) return;
-    const copy = selected.clone();
-    const spot = findFreeSpot(copy, shown, shape);
-    if (!spot) {
-      copy.dispose();
-      setNotice({ text: "No free room on this plate for another copy: add a plate, or Arrange to spread over more", bad: true });
+    const made = placeCopies(group.map((p) => ({ shape: p.shape, quaternion: p.quaternion.clone(), scale: p.scale.clone() })));
+    if (!made) {
+      setNotice({ text: "No free room on this plate for more copies: add a plate, or Arrange to spread over more", bad: true });
       return;
     }
-    copy.setCenter(spot.x, spot.y);
-    setPlate([...parts, copy], "Duplicate");
-    setSelectedId(copy.id);
-  }, [selected, parts, shown, shape, setPlate]);
+    setPlate([...parts, ...made], "Duplicate");
+    selectParts(made);
+  };
+
+  /** The selected parts become one model (the first one's, the rest as its parts), where they are. */
+  const mergeSelected = () => {
+    if (group.length < 2) return;
+    const [lead, ...others] = group;
+    const frame = objectFrame(lead);
+    const toLead = frame.clone().invert();
+    let object = lead.shape.object;
+    for (const p of others)
+      object = mergeInto(object, p.shape.object, Float64Array.from(toLead.clone().multiply(objectFrame(p)).elements));
+    const s = new PartShape(object, null, colorsRef.current);
+    const part = new Part(s);
+    part.setScale(lead.scale.clone());
+    part.setRotation(lead.quaternion.clone());
+    part.setPlate(lead.plate);
+    const mid = s.offset.clone().negate().applyMatrix4(frame);
+    part.setCenter(mid.x, mid.y);
+    setPlate([...parts.filter((p) => !group.includes(p)), part], "Merge");
+    setSelectedId(part.id);
+    setSettled((n) => n + 1);
+  };
 
   const fill = useCallback(() => {
     if (!selected) return;
@@ -1223,23 +1388,24 @@ export default function ModelViewer({
 
   const remove = useCallback(() => {
     if (!selected) return;
-    const rest = parts.filter((p) => p !== selected);
+    const rest = parts.filter((p) => !group.includes(p));
     setPlate(rest, "Delete");
     setSelectedId(rest.filter((p) => p.plate === active).at(-1)?.id ?? null);
-  }, [selected, parts, active, setPlate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, groupKey, parts, active, setPlate, setSelectedId]);
 
   const clear = useCallback(() => {
     setPlate([], "Clear");
     setPlateCount(1);
     setActive(0);
     setSelectedId(null);
-  }, [setPlate]);
+  }, [setPlate, setSelectedId]);
 
   const addPlate = useCallback(() => {
     setPlateCount(plateCount + 1);
     setActive(plateCount);
     setSelectedId(null);
-  }, [plateCount]);
+  }, [plateCount, setSelectedId]);
 
   /** Delete the plate shown and its parts; later plates move up. */
   const deletePlate = useCallback(() => {
@@ -1251,17 +1417,20 @@ export default function ModelViewer({
     const next = Math.min(active, plateCount - 2);
     setActive(next);
     setSelectedId(rest.find((p) => p.plate === next)?.id ?? null);
-  }, [parts, active, plateCount, setPlate]);
+  }, [parts, active, plateCount, setPlate, setSelectedId]);
 
-  /** Move the selected part to plate `target` (plateCount: a new one), in free space there; show it. */
+  /** Move the selected parts to plate `target` (plateCount: a new one), in free space there; show it. */
   const moveToPlate = useCallback(
     (target: number) => {
       if (!selected || target === active) return;
       const there = parts.filter((p) => p.plate === target);
-      selected.setPlate(target);
-      const spot = there.length > 0 ? findFreeSpot(selected, there, shape) : new THREE.Vector2(0, 0);
-      if (spot) selected.setCenter(spot.x, spot.y);
-      else setNotice({ text: `No free room on plate ${target + 1}: it overlaps there`, bad: true });
+      for (const p of group) {
+        p.setPlate(target);
+        const spot = there.length > 0 ? findFreeSpot(p, there, shape) : new THREE.Vector2(0, 0);
+        if (spot) p.setCenter(spot.x, spot.y);
+        else setNotice({ text: `No free room on plate ${target + 1}: it overlaps there`, bad: true });
+        there.push(p);
+      }
       let count = Math.max(plateCount, target + 1);
       let next = target;
       // The part was the plate's last: drop the plate (later plates move up).
@@ -1274,7 +1443,8 @@ export default function ModelViewer({
       setActive(next);
       setPlate([...parts], `Move to plate ${target + 1}`);
     },
-    [selected, active, parts, shape, plateCount, setPlate],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected, groupKey, active, parts, shape, plateCount, setPlate],
   );
 
   useEffect(() => {
@@ -1290,6 +1460,12 @@ export default function ModelViewer({
         e.preventDefault();
         if (key === "y" || e.shiftKey) redo();
         else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && key === "a" && shown.length > 0) {
+        if (window.getSelection()?.toString()) return;
+        e.preventDefault();
+        selectParts(selected ? [selected, ...shown.filter((p) => p !== selected)] : shown);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (key === "c" || key === "v")) {
@@ -1326,15 +1502,92 @@ export default function ModelViewer({
       const t = TOOLS.find((x) => x.key.toLowerCase() === key);
       if (t) {
         setPainting(null);
+        if (t.tool === "measure") setMeasurePoints([]);
         setTool((cur) => (cur === t.tool ? "none" : t.tool));
         if (t.tool === "cut") startCut();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [parts, remove, arrangeAll, undo, redo, togglePaint, startCut, copySelected, paste, autoOrient]);
+  }, [parts, shown, selected, selectParts, remove, arrangeAll, undo, redo, togglePaint, startCut, copySelected, paste, autoOrient]);
 
-  const select = useCallback((part: Part) => setSelectedId(part.id), []);
+  /**
+   * A part clicked: it becomes the one the tools act on. A plain click on
+   * a part outside the selection selects just it; Ctrl/Cmd-click adds it
+   * to the selection or takes it out.
+   */
+  const select = useCallback(
+    (part: Part, additive: boolean) => {
+      if (additive) {
+        if (part.id === selectedId) {
+          setPrimaryId(alsoIds.at(-1) ?? null);
+          setAlsoIds(alsoIds.slice(0, -1));
+        } else if (alsoIds.includes(part.id)) setAlsoIds(alsoIds.filter((id) => id !== part.id));
+        else {
+          if (selectedId !== null) setAlsoIds([...alsoIds, selectedId]);
+          setPrimaryId(part.id);
+        }
+        return;
+      }
+      if (part.id === selectedId) return;
+      if (alsoIds.includes(part.id) && selectedId !== null) {
+        setAlsoIds([...alsoIds.filter((id) => id !== part.id), selectedId]);
+        setPrimaryId(part.id);
+        return;
+      }
+      setSelectedId(part.id);
+    },
+    [selectedId, alsoIds, setSelectedId],
+  );
+
+  /**
+   * Ctrl/Cmd-drag on empty space draws a box: the parts whose middles fall
+   * in it join the selection. Caught before the camera controls see it.
+   */
+  const startBoxSelect = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !(e.ctrlKey || e.metaKey) || painting || tool === "measure") return;
+    const get = sceneState.current;
+    if (!get || !(e.target instanceof HTMLCanvasElement)) return;
+    const { camera, gl } = get();
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, camera);
+    // On a part: Ctrl-click toggles it (PartView).
+    if (ray.intersectObjects(shown.map((p) => p.content), true).length > 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    // The box is drawn in the viewer; parts are tested against the canvas.
+    const outer = e.currentTarget.getBoundingClientRect();
+    const ox = rect.left - outer.left;
+    const oy = rect.top - outer.top;
+    const x0 = e.clientX - rect.left;
+    const y0 = e.clientY - rect.top;
+    let last = { x0, y0, x1: x0, y1: y0, ox, oy };
+    setSelectBox(last);
+    const onMove = (ev: PointerEvent) => {
+      last = { x0, y0, x1: ev.clientX - rect.left, y1: ev.clientY - rect.top, ox, oy };
+      setSelectBox(last);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setSelectBox(null);
+      const [lx, hx] = [Math.min(last.x0, last.x1), Math.max(last.x0, last.x1)];
+      const [ly, hy] = [Math.min(last.y0, last.y1), Math.max(last.y0, last.y1)];
+      if (hx - lx < 3 && hy - ly < 3) return;
+      const inside = shown.filter((p) => {
+        const c = p.worldBox().getCenter(new THREE.Vector3()).project(camera);
+        const sx = ((c.x + 1) / 2) * rect.width;
+        const sy = ((1 - c.y) / 2) * rect.height;
+        return c.z < 1 && sx >= lx && sx <= hx && sy >= ly && sy <= hy;
+      });
+      if (inside.length === 0) return;
+      selectParts([...group, ...inside.filter((p) => !group.includes(p))]);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   // Panel values: absolute slicer coordinates, like the desktop slicers show.
   const box = selected?.worldBox();
@@ -1351,6 +1604,13 @@ export default function ModelViewer({
     if (!selected) return;
     const v = absolute - (axis === 0 ? shape.center.x : shape.center.y);
     selected.setCenter(axis === 0 ? v : selected.center.x, axis === 1 ? v : selected.center.y);
+    commit("Move");
+  };
+  /** Move the whole selection so its box's middle is at `absolute` (slicer coordinates). */
+  const setGroupPosition = (axis: 0 | 1, absolute: number) => {
+    const mid = groupBox().getCenter(new THREE.Vector3());
+    const v = absolute - (axis === 0 ? shape.center.x : shape.center.y) - (axis === 0 ? mid.x : mid.y);
+    moveGroup(axis === 0 ? v : 0, axis === 1 ? v : 0);
     commit("Move");
   };
   /** Scale along a model axis to `factor` (1 = as loaded); with `uniform`, every axis by the same ratio. */
@@ -1396,7 +1656,19 @@ export default function ModelViewer({
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
+      onPointerDownCapture={startBoxSelect}
     >
+      {selectBox && (
+        <div
+          className="select-box"
+          style={{
+            left: selectBox.ox + Math.min(selectBox.x0, selectBox.x1),
+            top: selectBox.oy + Math.min(selectBox.y0, selectBox.y1),
+            width: Math.abs(selectBox.x1 - selectBox.x0),
+            height: Math.abs(selectBox.y1 - selectBox.y0),
+          }}
+        />
+      )}
       <input
         ref={inputRef}
         type="file"
@@ -1435,9 +1707,10 @@ export default function ModelViewer({
               <button
                 key={t.tool}
                 className={tool === t.tool && !painting ? "active" : ""}
-                disabled={!selected}
+                disabled={!selected && t.tool !== "measure"}
                 onClick={() => {
                   setPainting(null);
+                  if (t.tool === "measure") setMeasurePoints([]);
                   setTool(tool === t.tool && !painting ? "none" : t.tool);
                   if (t.tool === "cut") startCut();
                 }}
@@ -1472,7 +1745,7 @@ export default function ModelViewer({
             <button onClick={() => inputRef.current?.click()} title="Load more model files onto this plate">
               {loading ? "Loading…" : "Add parts…"}
             </button>
-            <button onClick={duplicate} disabled={!selected} title="Another copy of the selected part, in free space">
+            <button onClick={duplicate} disabled={!selected} title="Another copy of the selected parts, in free space">
               Duplicate
             </button>
             <button onClick={fill} disabled={!selected} title="As many copies of the selected part as fit">
@@ -1489,7 +1762,7 @@ export default function ModelViewer({
               Overhangs
             </button>
             <span className="toolbar-sep" />
-            <button onClick={remove} disabled={!selected} title="Remove the selected part">
+            <button onClick={remove} disabled={!selected} title="Remove the selected parts">
               Delete <kbd>Del</kbd>
             </button>
             <button onClick={clear} title="Remove every part from every plate">
@@ -1517,7 +1790,7 @@ export default function ModelViewer({
               <select
                 className="plate-move"
                 value=""
-                aria-label="Move the selected part to another plate"
+                aria-label="Move the selected parts to another plate"
                 onChange={(e) => moveToPlate(Number(e.target.value))}
               >
                 <option value="" disabled>
@@ -1596,7 +1869,60 @@ export default function ModelViewer({
         />
       )}
 
-      {selected && !painting && tool !== "cut" && box && sizeMm && euler && (
+      {tool === "measure" && !painting && (
+        <MeasureControls
+          points={measurePoints}
+          mode={measureMode}
+          onMode={(m) => {
+            setMeasureMode(m);
+            setMeasurePoints([]);
+          }}
+          onClear={() => setMeasurePoints([])}
+          origin={shape.center}
+        />
+      )}
+
+      {group.length > 1 && !painting && tool !== "cut" && tool !== "measure" && (
+        <div className="placement-panel">
+          <div className="placement-size">
+            {group.length} parts selected · Ctrl+click adds or takes one out · the tools turn {selected?.name}
+          </div>
+          {(() => {
+            const b = groupBox();
+            const mid = b.getCenter(new THREE.Vector3());
+            const size = b.getSize(new THREE.Vector3());
+            return (
+              <>
+                <div className="placement-row">
+                  <span className="placement-label">Position</span>
+                  <NumberField label="X" value={mid.x + shape.center.x} digits={2} onCommit={(v) => setGroupPosition(0, v)} />
+                  <NumberField label="Y" value={mid.y + shape.center.y} digits={2} onCommit={(v) => setGroupPosition(1, v)} />
+                  <span className="placement-unit">mm</span>
+                </div>
+                <div className="placement-row">
+                  <span className="placement-label">Size</span>
+                  <span>
+                    {size.x.toFixed(1)} × {size.y.toFixed(1)} × {size.z.toFixed(1)} mm
+                  </span>
+                </div>
+              </>
+            );
+          })()}
+          <div className="placement-row">
+            <button className="btn-sm" onClick={duplicate} title="Another copy of each, in free space">
+              Duplicate
+            </button>
+            <button className="btn-sm" onClick={mergeSelected} title="Make them one model, its parts where they are">
+              Merge into one model
+            </button>
+            <button className="btn-sm btn-danger" onClick={remove}>
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selected && group.length === 1 && !painting && tool !== "cut" && tool !== "measure" && box && sizeMm && euler && (
         <div className="placement-panel">
           {(shown.length > 1 || copiesOfSelected > 1) && (
             <div className="placement-size">
@@ -1671,10 +1997,21 @@ export default function ModelViewer({
         onMerge={mergeModels}
       />
 
-      <Canvas camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 1, far: 5000 }}>
+      <Canvas
+        camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 1, far: 5000 }}
+        onPointerMissed={(e) => {
+          // A click on empty space (not a drag of the view) lets go of the selection.
+          if (e.button !== 0 || e.ctrlKey || e.metaKey || painting || tool === "measure" || tool === "cut") return;
+          setSelectedId(null);
+        }}
+      >
         <Scene
           parts={shown}
           selected={selected}
+          group={group}
+          measure={tool === "measure" && !painting ? { mode: measureMode, points: measurePoints } : null}
+          onMeasure={addMeasurePoint}
+          stateRef={sceneState}
           bed={shape}
           tool={tool}
           paint={painting ? paintSettings : null}
@@ -1684,7 +2021,10 @@ export default function ModelViewer({
           onSelect={select}
           onStroke={recordPaint}
           onCutSettings={setCutSettings}
-          onChange={refresh}
+          onChange={() => {
+            followGroup();
+            refresh();
+          }}
           onCommit={() => commit(tool === "rotate" ? "Rotate" : tool === "flat" ? "Lay on face" : "Move")}
         />
       </Canvas>

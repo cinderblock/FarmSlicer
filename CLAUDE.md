@@ -492,7 +492,10 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (a model = `PartShape` built from a `ModelObject`; a copy = `Part` with
   rotation and scale; `history.ts` undo/redo; `ObjectPanel.tsx`;
   `PaintTool.tsx` (BVH raycasts, settings through a ref: the canvas is a
-  React root of its own and gets props a frame late); `CutTool.tsx`)
+  React root of its own and gets props a frame late); `CutTool.tsx` (the
+  plane's arrow and tilt rings); `MeasureTool.tsx` + `measure.ts`; a
+  multiple selection is `selectedId` (the part the tools act on) plus
+  `alsoIds`, moved together by `followGroup`)
   (tabs), and reports `PlateState` (files in plate order, the plates with
   parts, fit, overlaps) and the support check. No camera damping on purpose (CAD-style direct
   control)

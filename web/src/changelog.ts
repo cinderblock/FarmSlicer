@@ -33,6 +33,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Split a model that's several pieces into models or parts, and merge two models into one.",
       "Change filament, pause, or swap the spool at a height (Changes by height, under the filaments), on every plate or just one: stripes of colour on any printer, inserts dropped in mid-print.",
       "Undo and redo every change on the plate (Ctrl+Z, Ctrl+Shift+Z); copy a part and paste it onto another plate (Ctrl+C, Ctrl+V); Auto orient (O) turns a part the way it prints with the least overhang.",
+      "Select several parts with Ctrl+click, a Ctrl+drag box, or Ctrl+A, and move, copy, duplicate, delete or merge them together. Measure (U) shows the distance between two points, or the angle and gap between two faces.",
       "The Objects panel lists the models on the plate and what they're made of: rename them, add modifiers, negative volumes and support enforcers or blockers, and give a model or a modifier its own settings.",
     ],
     fixes: "3MF files slice on the server again (they failed with \"the file is empty\").",

@@ -31,6 +31,11 @@ can run in the user's browser.
   too.
 - **Editing models:** each copy scales (all axes or one, by percent or to a
   size in mm) and mirrors; every change can be undone (Ctrl+Z, Ctrl+Shift+Z).
+  Ctrl+click, Ctrl+drag (a box) or Ctrl+A selects several parts: they move,
+  copy, paste, duplicate, change plate, delete and merge into one model
+  together. Measure (U) gives the distance between two points (snapped to
+  corners, with its X, Y and Z), or the angle between two faces and the gap
+  between parallel ones.
   The Objects panel lists the models and their parts: rename them, pick a
   model's or a part's filament, add parts, modifiers, negative volumes and
   support enforcers or blockers (box, cylinder, sphere, cone), move and size
