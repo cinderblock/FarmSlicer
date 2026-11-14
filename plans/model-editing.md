@@ -313,13 +313,12 @@ Bring the Slice page's plate up to what desktop slicers offer
   passed, `tests/run-e2e.sh` every suite, exit 0. Buildhost cleaned
   (containers, model-edit images, /tmp files; `~/farmslicer-model-edit*`
   dirs kept like earlier sessions').
-- [ ] Not done (next): multi-select (group delete/move/arrange), a measure
-  tool, dovetail and snap connectors, dragging the cut plane in 3D,
-  changes by height per plate instead of job-wide.
+- [x] The "not done" list (multi-select, measure, dovetail and snap
+  connectors, dragging the cut plane, changes by height per plate): phase 9.
 - [ ] Unverified: a FarmSlicer-written 3MF opened in OrcaSlicer / Bambu
   Studio desktop (no desktop app here; libslic3r reads them, which is the
-  same reader). The browser (wasm) engine isn't rebuilt with
-  `height_changes`; CI builds it on push.
+  same reader). The browser (wasm) engine with `height_changes` came with
+  CI's build of `7a415db`; `height_change_plates` comes with `bca71f2`'s.
 - [x] Pushed 2026-11-14 (user's go-ahead): my commits cherry-picked onto
   origin/master (other threads' local commits stay theirs to push) as
   `7a415db`, with a fix: the multi-colour changelog entry shared the id
@@ -332,13 +331,25 @@ Bring the Slice page's plate up to what desktop slicers offer
   multi-select (Ctrl+click, Ctrl+drag box, Ctrl+A, group move, merge) and
   measure (U). Unit tests: 33 model tests; cargo test 194 passed, e2e
   model-3mf + placement exit 0 on buildhost.
-- [ ] Phase 9 checks (current): real image build, a two-plate slice with a
-  change on plate 2 only, the headless browser run
-  (`ui-test5.mjs`: group select/move/delete/box/merge, measure, arrow
-  drag, dovetail + snap cut, slice).
-- [ ] Deploy: ops `1def164e` pins `7a415db` (digest `sha256:e4e9b0f0…`;
-  user OK'd deploying, 2026-11-14); "Server Deploys" run 43621505382.
-  Phase 9 isn't in it: it needs another push and pin.
+- [x] Phase 9 checks (buildhost, 2026-11-14): image `farmslicer:model-edit6`
+  builds; a two-plate job with a filament change at 10 mm (every plate) and
+  a pause at 15 mm on plate 2 only: plate 1 G-code T1 at 10, no pause;
+  plate 2 T1 at 10, M400 U1 at 15. Headless `ui-test5.mjs` ALL OK:
+  Ctrl+click, group drag (both +26 mm), Ctrl+A, delete + undo, click to
+  let go, Ctrl+drag box, group X, measure corners (30.00 mm, snapped),
+  faces (90.0°), merge, the cut arrow (15 → 32 mm), dovetail and snap
+  cuts, the four halves slice, no console errors.
+  Found on the way: from the front the X tilt ring is edge-on over the
+  arrow and took its presses (fixed `646de6c`: the arrow wins); a
+  dovetail slot showed far past its part (`47eba94`).
+  Test gotchas: the page may pick a printer with another bed (pick X1
+  Carbon so the camera maths holds); a part's top centre is under the
+  move gizmo's Y arrow; the 3D view takes props a frame after the panel.
+- [x] Deploy 1: ops `1def164e` pins `7a415db` (digest
+  `sha256:e4e9b0f0…`); production serves `7a415db`, health 200.
+- [ ] Deploy 2 (current): phase 9 cherry-picked onto origin/master as
+  `bca71f2` (it also restores `.height-change-z`, a phase 8 CSS rule the
+  first cherry-pick lost); waiting for CI, then the ops pin.
 
 ## Open questions for the user
 
