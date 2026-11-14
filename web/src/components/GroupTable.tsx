@@ -1,8 +1,10 @@
 import { Link } from "react-router";
 import type { GroupSummary } from "../groups";
+import { roleName, useRoles } from "../roles";
 
 /** Groups with their path, member count and the viewer's role. */
 export default function GroupTable({ groups }: { groups: GroupSummary[] }) {
+  const roles = useRoles().data?.roles;
   return (
     <table className="data-table">
       <thead>
@@ -21,7 +23,7 @@ export default function GroupTable({ groups }: { groups: GroupSummary[] }) {
             </td>
             <td>{c.member_count}</td>
             <td>
-              {c.my_role ? `${c.my_role}${c.my_status === "pending" ? " (pending)" : ""}` : c.can_manage ? "manage" : "—"}
+              {c.my_role ? `${roleName(roles, c.my_role).toLowerCase()}${c.my_status === "pending" ? " (pending)" : ""}` : c.can_manage ? "manage" : "—"}
             </td>
           </tr>
         ))}

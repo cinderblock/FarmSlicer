@@ -89,7 +89,8 @@ function formatTime(sec: number): string {
 }
 
 export default function JobsPage() {
-  const { user, isAdmin } = useAuth();
+  const { user, can } = useAuth();
+  const editsAll = can("library.edit_all");
   const [rev, setRev] = useState(0);
   const [error, setError] = useState("");
   const [sending, setSending] = useState<Job | null>(null);
@@ -173,7 +174,7 @@ export default function JobsPage() {
     });
   // What the user may usually delete (managers of a group may delete more;
   // the server decides).
-  const deletable = jobs.filter((j) => finished(j) && (isAdmin || j.user_id === user?.id));
+  const deletable = jobs.filter((j) => finished(j) && (editsAll || j.user_id === user?.id));
   const selectedJobs = jobs.filter((j) => selected.has(j.id));
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
   const shownJob = (j: Job) =>
@@ -480,7 +481,7 @@ export default function JobsPage() {
                         Cancel
                       </button>
                     )}
-                    {finished(job) && (isAdmin || job.user_id === user?.id) && (
+                    {finished(job) && (editsAll || job.user_id === user?.id) && (
                       <button
                         className="btn-sm btn-ghost btn-icon btn-danger"
                         disabled={deleting}

@@ -4,10 +4,50 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 import { forgetDevice } from "./notifications";
 
+/** Site capabilities (src/permissions.rs `Cap`). */
+export type SiteCap =
+  | "users.view"
+  | "users.manage"
+  | "roles.manage"
+  | "settings.manage"
+  | "groups.manage_all"
+  | "library.view_all"
+  | "library.edit_all"
+  | "printers.manage"
+  | "printers.operate"
+  | "prints.approve"
+  | "prints.approve_safety"
+  | "prints.unrestricted"
+  | "gcode.custom"
+  | "feedback.triage"
+  | "integrations.manage"
+  | "reports.view"
+  | "audit.view";
+
+/** Group capabilities (src/permissions.rs `GroupCap`), held in a group and below it. */
+export type GroupCap =
+  | "members"
+  | "settings"
+  | "subgroups"
+  | "links"
+  | "govern"
+  | "library.view"
+  | "library.edit"
+  | "prints.approve"
+  | "prints.control"
+  | "prints.unrestricted"
+  | "integrations";
+
 export interface User {
   id: string;
   username: string;
-  role: "owner" | "admin" | "user";
+  /** Site role id: "owner" | "admin" | "user" | a custom role's id. */
+  role: string;
+  /** The role's name ("Printer admin"); on the signed-in account. */
+  role_name?: string;
+  /** The signed-in account's site capabilities. */
+  caps?: SiteCap[];
+  suspended_at?: string | null;
   /** "guest": no passkey; signs in with one-time sign-in codes. */
   kind: "full" | "guest";
   /** Approved for access from outside the local network (passkey only). */
@@ -28,6 +68,8 @@ export interface AuthStatus {
   remote: boolean;
   /** Signed in, but the session can't be used from here: why. */
   remote_refused: string | null;
+  /** The session's account is suspended. */
+  suspended?: boolean;
   /** Where this instance's source is (`{commit}` = this build's): source.ts. */
   source_url?: string;
 }
@@ -38,7 +80,8 @@ interface AuthContextValue {
   /** True if the status request itself failed (server unreachable). */
   offline: boolean;
   user: User | null;
-  isAdmin: boolean;
+  /** Holds this site capability (src/permissions.rs). */
+  can: (cap: SiteCap) => boolean;
   isGuest: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
@@ -74,11 +117,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(() => {
     const user = status?.user ?? null;
+    const caps = new Set(user?.caps ?? []);
     return {
       status,
       offline,
       user,
-      isAdmin: user?.role === "owner" || user?.role === "admin",
+      can: (cap: SiteCap) => caps.has(cap),
       isGuest: user?.kind === "guest",
       refresh,
       logout,

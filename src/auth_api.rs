@@ -15,7 +15,9 @@ use std::sync::Arc;
 use webauthn_rs::prelude::*;
 
 use crate::auth::{self, CurrentUser, Flow, RegisterPurpose};
+use crate::audit;
 use crate::db::{PasskeyRecord, User};
+use crate::permissions::{self, Cap};
 use crate::server::AppState;
 
 type ApiError = (StatusCode, Json<Value>);
@@ -33,6 +35,9 @@ fn user_json(user: &User) -> Value {
         "remote_access": user.remote_access,
         "created_at": user.created_at,
         "last_login": user.last_login,
+        "suspended_at": user.suspended_at,
+        // The signed-in account's site capabilities (empty elsewhere).
+        "caps": user.caps.ids(),
     })
 }
 
@@ -60,6 +65,10 @@ fn load_passkeys(state: &AppState, user_id: &str) -> Vec<(PasskeyRecord, Passkey
 
 /// `method`: how the user proved who they are (`auth::VIA_*`).
 pub(crate) fn start_session(state: &AppState, user: &User, extra: Value, days: i64, method: &str) -> Response {
+    // Every way in ends here, so a suspended account gets no session.
+    if state.db.get_user(&user.id).is_some_and(|u| u.suspended_at.is_some()) {
+        return auth::suspended_refusal();
+    }
     let token = auth::random_token();
     state
         .db
@@ -155,11 +164,21 @@ pub(crate) fn key_name(body: &Option<String>) -> String {
 async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<Value> {
     let setup_required = auth::setup_required(&state.db);
     let remote = auth::is_remote(req.headers());
+    let mut suspended = false;
     let (user, remote_refused) = match auth::authenticate(&state, &req) {
         Ok(user) => (Some(user), None),
         Err(auth::Refusal::Remote(msg)) => (None, Some(msg)),
+        Err(auth::Refusal::Suspended) => {
+            suspended = true;
+            (None, None)
+        }
         Err(auth::Refusal::Unauthenticated) => (None, None),
     };
+    let user_value = user.as_ref().map(|u| {
+        let mut v = user_json(u);
+        v["role_name"] = json!(crate::permissions::role(&state.db, &u.role).map(|r| r.name).unwrap_or_else(|| u.role.clone()));
+        v
+    });
     // The join flow is local-only, so the internet isn't shown the groups.
     let join_groups: Vec<Value> = if remote {
         Vec::new()
@@ -174,7 +193,9 @@ async fn auth_status(State(state): State<Arc<AppState>>, req: Request) -> Json<V
         "setup_required": setup_required,
         "auth_disabled": auth::auth_disabled(),
         "authenticated": user.is_some(),
-        "user": user.as_ref().map(user_json),
+        "user": user_value,
+        // The session's account is suspended.
+        "suspended": suspended,
         "rp_id": state.rp.rp_id,
         "join_groups": join_groups,
         // From the internet: only passkey sign-in (approved accounts) and
@@ -698,16 +719,31 @@ async fn delete_my_api_key(
     }
 }
 
-// ---- admin: users ---------------------------------------------------------------------
+/// ---- admin: users ---------------------------------------------------------------------
 
-fn admin_user_json(state: &AppState, tree: &crate::groups::Tree, user: &User) -> Value {
+fn admin_user_json(state: &AppState, tree: &crate::groups::Tree, actor: &User, user: &User) -> Value {
     let mut v = user_json(user);
     if let Some(obj) = v.as_object_mut() {
+        obj.remove("caps");
+        obj.insert(
+            "role_name".into(),
+            json!(permissions::role(&state.db, &user.role).map(|r| r.name).unwrap_or_else(|| user.role.clone())),
+        );
         obj.insert("passkeys".into(), json!(state.db.passkey_count(&user.id)));
         obj.insert("invite_expires_at".into(), json!(state.db.pending_invite_expiry(&user.id)));
         obj.insert(
             "quotas".into(),
             json!(user.quotas.as_deref().map(crate::quota::parse_rules)),
+        );
+        if let Some((by, reason)) = state.db.suspension(&user.id) {
+            let by = by.and_then(|id| state.db.get_user(&id)).map(|u| u.username);
+            obj.insert("suspended_by".into(), json!(by));
+            obj.insert("suspend_reason".into(), json!(reason));
+        }
+        // Whether the caller may change this account at all.
+        obj.insert(
+            "manageable".into(),
+            json!(auth::can(actor, Cap::UsersManage) && permissions::outranks(&state.db, &actor.role, actor.caps, &user.role)),
         );
         let groups: Vec<Value> = state
             .db
@@ -725,7 +761,7 @@ async fn list_users(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::UsersView)?;
     let tree = crate::groups::Tree::load(&state.db);
     let incidents = state.db.gcode_incident_counts();
     let users: Vec<Value> = state
@@ -733,7 +769,7 @@ async fn list_users(
         .list_users()
         .iter()
         .map(|u| {
-            let mut v = admin_user_json(&state, &tree, u);
+            let mut v = admin_user_json(&state, &tree, &user, u);
             // Custom G-code of theirs that failed its check or a print.
             let (count, last) = incidents.get(&u.id).cloned().unwrap_or((0, String::new()));
             v["gcode_incidents"] = json!(count);
@@ -742,6 +778,34 @@ async fn list_users(
         })
         .collect();
     Ok(Json(json!(users)))
+}
+
+/// The actor may change `target` (their site capabilities include all of
+/// the target's; only the owner changes the owner).
+fn manageable(state: &AppState, actor: &User, target: &User) -> Result<(), ApiError> {
+    auth::require(actor, Cap::UsersManage)?;
+    if permissions::outranks(&state.db, &actor.role, actor.caps, &target.role) {
+        Ok(())
+    } else if target.role == permissions::OWNER {
+        Err(err(StatusCode::FORBIDDEN, "only the owner can change the owner's account"))
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "that account has permissions you don't have"))
+    }
+}
+
+/// A site role the actor may give: it exists, isn't the owner's, and holds
+/// nothing the actor doesn't.
+fn assignable_site_role(state: &AppState, actor: &User, role: &str) -> Result<(), ApiError> {
+    if role == permissions::OWNER {
+        return Err(err(StatusCode::BAD_REQUEST, "there is one owner; the role can't be given"));
+    }
+    let Some(r) = permissions::role(&state.db, role).filter(|r| r.scope == permissions::Scope::Site) else {
+        return Err(err(StatusCode::BAD_REQUEST, "no such site role"));
+    };
+    if actor.role != permissions::OWNER && !permissions::site_caps(&state.db, &r.id).is_subset_of(&actor.caps) {
+        return Err(err(StatusCode::FORBIDDEN, format!("the role '{}' has permissions you don't have", r.name)));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -770,11 +834,9 @@ async fn create_user(
     Extension(CurrentUser(actor)): Extension<CurrentUser>,
     Json(body): Json<CreateUser>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    auth::require_admin(&actor)?;
-    let role = body.role.as_deref().unwrap_or("user");
-    if !matches!(role, "admin" | "user") {
-        return Err(err(StatusCode::BAD_REQUEST, "role must be 'admin' or 'user'"));
-    }
+    auth::require(&actor, Cap::UsersManage)?;
+    let role = body.role.as_deref().unwrap_or(permissions::USER);
+    assignable_site_role(&state, &actor, role)?;
     if !auth::valid_username(&body.username) {
         return Err(err(StatusCode::BAD_REQUEST, "username: 2-32 characters, letters, digits, . _ -"));
     }
@@ -784,32 +846,30 @@ async fn create_user(
         .map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
     if body.remote_access {
         state.db.set_user_remote_access(&user.id, true);
-        println!("'{}' approved '{}' for remote access", actor.username, user.username);
     }
+    audit::record(&state.db, &actor, "user.create", audit::user(&user), json!({"role": role, "remote_access": body.remote_access}));
     let user = state.db.get_user(&user.id).unwrap_or(user);
     let (invite_url, expires_at) = issue_invite(&state, &user.id, &actor.id);
     let tree = crate::groups::Tree::load(&state.db);
     Ok((
         StatusCode::CREATED,
-        Json(json!({"user": admin_user_json(&state, &tree, &user), "invite_url": invite_url, "expires_at": expires_at})),
+        Json(json!({"user": admin_user_json(&state, &tree, &actor, &user), "invite_url": invite_url, "expires_at": expires_at})),
     ))
 }
 
 /// (Re)issue an enrolment link, e.g. when a user lost every passkey and their
-/// recovery code. Admins cannot do this for the owner.
+/// recovery code. Only the owner can do this for the owner.
 async fn reissue_invite(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(actor)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&actor)?;
     let Some(target) = state.db.get_user(&id) else {
         return Err(err(StatusCode::NOT_FOUND, "user not found"));
     };
-    if target.role == "owner" && actor.id != target.id {
-        return Err(err(StatusCode::FORBIDDEN, "only the owner can re-enrol the owner"));
-    }
+    manageable(&state, &actor, &target)?;
     let (invite_url, expires_at) = issue_invite(&state, &target.id, &actor.id);
+    audit::record(&state.db, &actor, "user.invite", audit::user(&target), json!({}));
     Ok(Json(json!({"invite_url": invite_url, "expires_at": expires_at})))
 }
 
@@ -823,6 +883,12 @@ struct UpdateUser {
     /// Approve or revoke access from the internet.
     #[serde(default)]
     remote_access: Option<bool>,
+    /// Suspend (true) or reinstate (false) the account.
+    #[serde(default)]
+    suspended: Option<bool>,
+    /// Why, shown to admins (with `suspended: true`).
+    #[serde(default)]
+    suspend_reason: Option<String>,
 }
 
 /// Distinguish an absent field (None) from an explicit null (Some(None)).
@@ -840,41 +906,61 @@ async fn update_user(
     Path(id): Path<String>,
     Json(body): Json<UpdateUser>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&actor)?;
     let Some(target) = state.db.get_user(&id) else {
         return Err(err(StatusCode::NOT_FOUND, "user not found"));
     };
-    if let Some(role) = &body.role {
-        if target.role == "owner" {
+    manageable(&state, &actor, &target)?;
+    // Check everything before changing anything.
+    if let Some(role) = body.role.as_deref().filter(|r| *r != target.role) {
+        if target.role == permissions::OWNER {
             return Err(err(StatusCode::BAD_REQUEST, "the owner's role is fixed"));
         }
-        if !matches!(role.as_str(), "admin" | "user") {
-            return Err(err(StatusCode::BAD_REQUEST, "role must be 'admin' or 'user'"));
+        assignable_site_role(&state, &actor, role)?;
+    }
+    if let Some(Some(rules)) = &body.quotas {
+        crate::quota::validate_rules(rules).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+    }
+    if body.suspended == Some(true) {
+        if target.id == actor.id {
+            return Err(err(StatusCode::BAD_REQUEST, "you can't suspend yourself"));
         }
+        if target.role == permissions::OWNER {
+            return Err(err(StatusCode::FORBIDDEN, "the owner can't be suspended"));
+        }
+        if body.suspend_reason.as_deref().is_some_and(|r| r.len() > 500) {
+            return Err(err(StatusCode::BAD_REQUEST, "suspend_reason: up to 500 characters"));
+        }
+    }
+
+    if let Some(role) = body.role.as_deref().filter(|r| *r != target.role) {
         state.db.update_user_role(&id, role);
+        audit::record(&state.db, &actor, "user.role", audit::user(&target), json!({"from": target.role, "to": role}));
     }
     if let Some(quotas) = &body.quotas {
-        if target.role == "owner" && actor.id != target.id {
-            return Err(err(StatusCode::FORBIDDEN, "only the owner can change the owner's quotas"));
-        }
-        if let Some(rules) = quotas {
-            crate::quota::validate_rules(rules).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
-        }
         let json = quotas.as_ref().map(|r| serde_json::to_string(r).unwrap());
         state.db.set_user_quotas(&id, json.as_deref());
+        audit::record(&state.db, &actor, "user.quotas", audit::user(&target), json!({"to": quotas}));
     }
-    if let Some(allowed) = body.remote_access {
-        if target.role == "owner" && actor.id != target.id {
-            return Err(err(StatusCode::FORBIDDEN, "only the owner can change the owner's remote access"));
+    if let Some(allowed) = body.remote_access.filter(|a| *a != target.remote_access) {
+        state.db.set_user_remote_access(&id, allowed);
+        audit::record(&state.db, &actor, "user.remote_access", audit::user(&target), json!({"to": allowed}));
+    }
+    match body.suspended {
+        Some(true) => {
+            let reason = body.suspend_reason.as_deref().unwrap_or("");
+            if state.db.set_user_suspended(&id, Some(&actor.id), Some(reason)) {
+                audit::record(&state.db, &actor, "user.suspend", audit::user(&target), json!({"reason": reason}));
+            }
         }
-        if allowed != target.remote_access {
-            state.db.set_user_remote_access(&id, allowed);
-            let verb = if allowed { "approved" } else { "revoked" };
-            println!("'{}' {verb} remote access for '{}'", actor.username, target.username);
+        Some(false) => {
+            if state.db.set_user_suspended(&id, None, None) {
+                audit::record(&state.db, &actor, "user.reinstate", audit::user(&target), json!({}));
+            }
         }
+        None => {}
     }
     let tree = crate::groups::Tree::load(&state.db);
-    Ok(Json(admin_user_json(&state, &tree, &state.db.get_user(&id).unwrap_or(target))))
+    Ok(Json(admin_user_json(&state, &tree, &actor, &state.db.get_user(&id).unwrap_or(target))))
 }
 
 async fn delete_user(
@@ -882,17 +968,18 @@ async fn delete_user(
     Extension(CurrentUser(actor)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    auth::require_admin(&actor)?;
     let Some(target) = state.db.get_user(&id) else {
         return Err(err(StatusCode::NOT_FOUND, "user not found"));
     };
-    if target.role == "owner" {
+    if target.role == permissions::OWNER {
         return Err(err(StatusCode::FORBIDDEN, "the owner cannot be deleted"));
     }
     if target.id == actor.id {
         return Err(err(StatusCode::BAD_REQUEST, "you cannot delete yourself"));
     }
+    manageable(&state, &actor, &target)?;
     state.db.delete_user(&id);
+    audit::record(&state.db, &actor, "user.delete", audit::user(&target), json!({"role": target.role}));
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -395,8 +395,22 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   — Node fakes the e2e tests start in-process (`tests/fake-lib.mjs`: WebSocket
   server, multipart); `tests/fake-octoprint/Dockerfile` — real OctoPrint +
   Virtual Printer for conformance runs
-- `src/groups.rs` — group tree, inherited settings, permissions
-  (`can_manage`, `can_govern`), job visibility, seasons; `src/groups_api.rs`
+- `src/permissions.rs` — capabilities and roles: site `Cap`s from
+  `users.role`, group `GroupCap`s from `group_members.role` (held in that
+  group and below), built-in roles in code (owner, admin, user; manager,
+  member), custom ones in `roles` (`src/db/roles.rs`, API
+  `src/roles_api.rs`). `auth::authenticate` fills `User.caps`;
+  `auth::require(&user, Cap::X)` and `Viewer::can` / `can_in(tree, g,
+  GroupCap::X)` / `can_govern` / `can_edit_job` are the checks. **No
+  `admin` checks anywhere**: every gate names a capability. Nobody grants
+  what they don't hold (`permissions::outranks`, `Viewer::can_give_group_role`).
+  Suspended accounts (`users.suspended_at`): refused in `authenticate`
+  and `auth_api::start_session`. `src/audit.rs` + `src/db/audit.rs`: the
+  audit log (`audit::record`), `GET /api/audit`. Web: `web/src/roles.ts`,
+  `pages/Roles.tsx`, `pages/Audit.tsx`; `useAuth().can(cap)`, nav items
+  carry `cap`. Plan: `plans/organization-and-access.md`
+- `src/groups.rs` — group tree, inherited settings, `Viewer` (permissions
+  per request, see src/permissions.rs), job visibility, seasons; `src/groups_api.rs`
   (groups, members, links, library, usage, site settings);
   `src/join_api.rs` (join flow, guest accounts); `src/quota.rs`
   (rules, periods, three-layer check). Plan: `plans/groups-quotas-registration.md`

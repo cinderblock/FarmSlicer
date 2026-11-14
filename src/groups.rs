@@ -6,15 +6,17 @@
 //! - Settings (`groups.settings`, JSON, every key optional) are inherited
 //!   down the tree: the nearest group that sets a key wins, then the site
 //!   default. `listed` and `subgroups` apply to the group itself only.
-//! - `can_manage(G)`: admins, and active managers of G or any ancestor.
+//! - What someone may do in G comes from their roles in G and its
+//!   ancestors (`Viewer::caps_in`, src/permissions.rs).
 //! - A job charged to G is visible to its creator, G's active members when
-//!   G's `shared_library` is on, anyone who can manage G, and admins.
+//!   G's `shared_library` is on, holders of "see the library" in G, and
+//!   holders of "see every job".
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::auth;
 use crate::db::{Db, Group, Job, Membership, User};
+use crate::permissions::{self, Cap, GroupCap, GroupCaps, SiteCaps};
 
 /// Per-group settings as stored. `None` = inherit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -405,21 +407,32 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     ca.len().cmp(&cb.len())
 }
 
-/// The requesting user plus their memberships.
+//// The requesting user, their site capabilities and their memberships
+/// (src/permissions.rs).
 pub struct Viewer {
     pub user: User,
-    pub admin: bool,
+    /// From the site role.
+    pub caps: SiteCaps,
     pub memberships: Vec<Membership>,
+    /// Every group role's capabilities, by role id.
+    group_roles: HashMap<String, GroupCaps>,
 }
 
 impl Viewer {
     pub fn load(db: &Db, user: &User) -> Viewer {
         Viewer {
             user: user.clone(),
-            admin: auth::is_admin(user),
+            caps: permissions::site_caps(db, &user.role),
             memberships: db.memberships_of_user(&user.id),
+            group_roles: permissions::group_role_caps(db),
         }
     }
+
+    /// Holds this site capability.
+    pub fn can(&self, cap: Cap) -> bool {
+        self.caps.has(cap)
+    }
+
 
     pub fn membership(&self, group_id: &str) -> Option<&Membership> {
         self.memberships.iter().find(|m| m.group_id == group_id)
@@ -429,41 +442,80 @@ impl Viewer {
         self.membership(group_id).is_some_and(|m| m.status == "active")
     }
 
-    fn managed_roots(&self) -> impl Iterator<Item = &str> {
+    fn role_caps(&self, role: &str) -> GroupCaps {
+        self.group_roles.get(role).copied().unwrap_or_default()
+    }
+
+    /// Active memberships and what their roles grant.
+    fn active(&self) -> impl Iterator<Item = (&Membership, GroupCaps)> {
         self.memberships
             .iter()
-            .filter(|m| m.status == "active" && m.role == "manager")
-            .map(|m| m.group_id.as_str())
+            .filter(|m| m.status == "active")
+            .map(|m| (m, self.role_caps(&m.role)))
     }
 
-    /// Admin, or an active manager of the group or of an ancestor.
-    pub fn can_manage(&self, tree: &Tree, group_id: &str) -> bool {
-        self.admin || self.managed_roots().any(|root| tree.is_within(group_id, root))
+    /// What the viewer may do in group `id`: the roles held in it and in
+    /// its ancestors; everything with "manage every group".
+    pub fn caps_in(&self, tree: &Tree, id: &str) -> GroupCaps {
+        if self.can(Cap::GroupsManageAll) {
+            return GroupCaps::all();
+        }
+        self.held_in(tree, id)
     }
 
-    /// Admin, or an active manager of a strict ancestor (quotas, deletion:
-    /// a group's own managers cannot raise their own limits).
+    /// What the viewer's group roles alone grant in `id` (leaving out
+    /// site-wide capabilities).
+    pub fn held_in(&self, tree: &Tree, id: &str) -> GroupCaps {
+        self.active()
+            .filter(|(m, _)| tree.is_within(id, &m.group_id))
+            .fold(GroupCaps::none(), |acc, (_, c)| acc.union(c))
+    }
+
+    /// Holds a role with `cap` in some group.
+    pub fn holds_anywhere(&self, cap: GroupCap) -> bool {
+        self.active().any(|(_, c)| c.has(cap))
+    }
+
+    /// Holds `cap` in group `id` (through it or an ancestor).
+    pub fn can_in(&self, tree: &Tree, id: &str, cap: GroupCap) -> bool {
+        self.caps_in(tree, id).has(cap)
+    }
+
+    /// Holds any group capability there: may open the group's management.
+    pub fn manages(&self, tree: &Tree, id: &str) -> bool {
+        !self.caps_in(tree, id).is_empty()
+    }
+
+    /// "Govern" from a strict ancestor (quotas, deletion: a group's own
+    /// roles can't raise its own limits), or "manage every group".
     pub fn can_govern(&self, tree: &Tree, group_id: &str) -> bool {
-        if self.admin {
+        if self.can(Cap::GroupsManageAll) {
             return true;
         }
         let path = tree.path(group_id);
-        self.managed_roots()
-            .any(|root| path.iter().skip(1).any(|g| g.id == root))
+        self.active()
+            .filter(|(_, c)| c.has(GroupCap::Govern))
+            .any(|(m, _)| path.iter().skip(1).any(|g| g.id == m.group_id))
+    }
+
+    /// Group roles the viewer may give in `id`: those whose capabilities
+    /// they hold there (built-in member always, with the members
+    /// capability).
+    pub fn can_give_group_role(&self, tree: &Tree, id: &str, role: &str) -> bool {
+        let mine = self.caps_in(tree, id);
+        mine.has(GroupCap::Members)
+            && self.group_roles.get(role).is_some_and(|c| c.is_subset_of(&mine))
     }
 
     /// Groups whose jobs this viewer may see (beyond their own jobs).
-    /// None = all (admins).
+    /// None = all ("see every job").
     pub fn visible_groups(&self, tree: &Tree) -> Option<Vec<String>> {
-        if self.admin {
+        if self.can(Cap::LibraryViewAll) || self.can(Cap::GroupsManageAll) {
             return None;
         }
         let mut out: HashSet<String> = HashSet::new();
-        for m in &self.memberships {
-            if m.status != "active" {
-                continue;
-            }
-            if m.role == "manager" {
+        for (m, caps) in self.active() {
+            if caps.has(GroupCap::LibraryView) {
                 out.extend(tree.subtree(&m.group_id));
             } else if tree.effective(&m.group_id).shared_library {
                 out.insert(m.group_id.clone());
@@ -473,14 +525,28 @@ impl Viewer {
     }
 
     pub fn can_see_job(&self, tree: &Tree, job: &Job) -> bool {
-        if self.admin || job.user_id.as_deref() == Some(self.user.id.as_str()) {
+        if self.can(Cap::LibraryViewAll) || job.user_id.as_deref() == Some(self.user.id.as_str()) {
             return true;
         }
         let Some(gid) = &job.group_id else { return false };
-        if self.can_manage(tree, gid) {
+        if self.can_in(tree, gid, GroupCap::LibraryView) {
             return true;
         }
         self.is_active_member(gid) && tree.effective(gid).shared_library
+    }
+
+    /// May change (move, rename, delete) a job: its creator, the library
+    /// editors of its group, "edit every job".
+    pub fn can_edit_job(&self, tree: &Tree, job: &Job) -> bool {
+        self.can(Cap::LibraryEditAll)
+            || job.user_id.as_deref() == Some(self.user.id.as_str())
+            || job.group_id.as_deref().is_some_and(|g| self.can_in(tree, g, GroupCap::LibraryEdit))
+    }
+
+    /// Not held to print rules or the upload policy for work charged to
+    /// `group` (personal work: the site capability only).
+    pub fn unrestricted(&self, tree: &Tree, group: Option<&str>) -> bool {
+        self.can(Cap::PrintsUnrestricted) || group.is_some_and(|g| self.can_in(tree, g, GroupCap::PrintsUnrestricted))
     }
 
     /// Groups the viewer may charge a job to: active memberships.

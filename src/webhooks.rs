@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
+use crate::permissions::Cap;
 use crate::auth::{self, CurrentUser};
 use crate::server::AppState;
 
@@ -213,7 +214,7 @@ async fn list_hooks(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     let hooks: Vec<Value> = state.db.list_webhooks().iter().map(|h| hook_json(&state, h)).collect();
     Ok(Json(json!({ "webhooks": hooks, "events": EVENTS })))
 }
@@ -241,7 +242,7 @@ async fn create_hook(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<HookBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     let url = check_url(body.url.as_deref().unwrap_or(""))?;
     let events = check_events(&body.events.unwrap_or_else(|| vec!["*".into()]))?;
     let group = body.group_id.filter(|g| !g.is_empty());
@@ -266,7 +267,7 @@ async fn update_hook(
     Path(id): Path<String>,
     Json(body): Json<HookBody>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     let h = state.db.get_webhook(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such webhook"))?;
     let url = match &body.url {
         Some(u) => check_url(u)?,
@@ -297,7 +298,7 @@ async fn delete_hook(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     if !state.db.delete_webhook(&id) {
         return Err(api_err(StatusCode::NOT_FOUND, "no such webhook"));
     }
@@ -316,7 +317,7 @@ async fn list_deliveries(
     Path(id): Path<String>,
     Query(q): Query<LimitQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     state.db.get_webhook(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such webhook"))?;
     Ok(Json(json!(state.db.webhook_deliveries(&id, q.limit.unwrap_or(50).clamp(1, 500)))))
 }
@@ -327,7 +328,7 @@ async fn test_hook(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     state.db.get_webhook(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such webhook"))?;
     enqueue_for(&state, &id, "ping", &json!({"message": format!("{} is testing this webhook", user.username)}));
     Ok((StatusCode::ACCEPTED, Json(json!({"ok": true}))))
@@ -338,7 +339,7 @@ async fn retry_delivery(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     if !state.db.retry_delivery(&id) {
         return Err(api_err(StatusCode::NOT_FOUND, "no such delivery"));
     }

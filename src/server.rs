@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 
+use crate::permissions::{Cap, GroupCap};
 use crate::auth::{self, CurrentUser};
 use crate::auth_api;
 use crate::config_policy;
@@ -298,7 +299,7 @@ async fn create_custom_profile(
     }
     let overrides = body.overrides.as_deref().unwrap_or("{}");
     config_policy::parse(overrides)
-        .and_then(|m| config_policy::check(&m, auth::is_admin(&user)))
+        .and_then(|m| config_policy::check(&m, auth::can(&user, Cap::GcodeCustom)))
         .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
     let profile = state.db.create_custom_profile(
         &body.name,
@@ -329,7 +330,7 @@ async fn update_custom_profile(
     let overrides = body.overrides.as_deref().unwrap_or(&existing.overrides);
     if body.overrides.is_some() {
         config_policy::parse(overrides)
-            .and_then(|m| config_policy::check(&m, auth::is_admin(&user)))
+            .and_then(|m| config_policy::check(&m, auth::can(&user, Cap::GcodeCustom)))
             .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
     }
     if state.db.update_custom_profile(&id, name, overrides) {
@@ -481,15 +482,14 @@ async fn update_job(
     Json(body): Json<UpdateJob>,
 ) -> Result<Json<Value>, ApiError> {
     let (job, tree, viewer) = visible_job(&state, &user, &id)?;
-    let creator = job.user_id.as_deref() == Some(user.id.as_str());
-    if !creator && !viewer.admin {
-        return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator or an admin can move it"));
+    if !viewer.can_edit_job(&tree, &job) {
+        return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator or those who edit its library can move it"));
     }
     if let Some(g) = &body.group_id {
         if tree.get(g).is_none() {
             return Err(api_err(StatusCode::BAD_REQUEST, "no such group"));
         }
-        if !viewer.admin && !viewer.can_charge(g) {
+        if !viewer.can(Cap::GroupsManageAll) && !viewer.can_charge(g) {
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
         }
     }
@@ -614,10 +614,8 @@ async fn download_job_model(
 /// first) or while a print still needs its package.
 fn delete_one_job(state: &AppState, user: &User, id: &str) -> Result<(), ApiError> {
     let (job, tree, viewer) = visible_job(state, user, id)?;
-    let creator = job.user_id.as_deref() == Some(user.id.as_str());
-    let manager = job.group_id.as_deref().is_some_and(|g| viewer.can_manage(&tree, g));
-    if !creator && !manager && !viewer.admin && !auth::auth_disabled() {
-        return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator, its group's managers or an admin can delete it"));
+    if !viewer.can_edit_job(&tree, &job) && !auth::auth_disabled() {
+        return Err(api_err(StatusCode::FORBIDDEN, "only the job's creator or those who edit its library can delete it"));
     }
     if matches!(job.status.as_str(), "queued" | "slicing") {
         return Err(api_err(StatusCode::CONFLICT, "the job is still slicing: cancel it first"));
@@ -884,7 +882,7 @@ async fn create_job(
         // A key's own group: its maker (an admin or the group's manager) may.
         Some(g) if scope.as_ref().is_some_and(|s| s.group_id.as_deref() == Some(g.as_str()))
             && tree.get(g).is_some()
-            && (viewer.admin || viewer.can_manage(&tree, g) || viewer.can_charge(g)) =>
+            && (viewer.can(Cap::IntegrationsManage) || viewer.can_in(&tree, g, GroupCap::Integrations) || viewer.can_charge(g)) =>
         {
             quota::check(&state.db, &tree, &user, inputs.group_id.as_deref())
                 .map_err(|e| api_err(StatusCode::TOO_MANY_REQUESTS, e))?
@@ -897,11 +895,11 @@ async fn create_job(
     }
     // Overrides may only touch what the caller is allowed to (no G-code).
     let overrides = config_policy::parse(&overrides_str)
-        .and_then(|m| config_policy::check(&m, auth::is_admin(&user)).map(|()| m))
+        .and_then(|m| config_policy::check(&m, auth::can(&user, Cap::GcodeCustom)).map(|()| m))
         .map_err(|e| bad(&e))?;
     // Settings inside uploaded 3MF models (per object, per part): the same.
     for m in &models {
-        crate::model_check::check(std::path::Path::new(&m.path), &m.name, auth::is_admin(&user))
+        crate::model_check::check(std::path::Path::new(&m.path), &m.name, auth::can(&user, Cap::GcodeCustom))
             .map_err(|e| bad(&e))?;
     }
     let plate = if !plate_str.is_empty() {
@@ -1551,9 +1549,7 @@ async fn cancel_job(
     let Ok((job, tree, viewer)) = visible_job(&state, &user, &id) else {
         return StatusCode::NOT_FOUND;
     };
-    let creator = job.user_id.as_deref() == Some(user.id.as_str());
-    let manager = job.group_id.as_deref().is_some_and(|g| viewer.can_manage(&tree, g));
-    if !creator && !manager && !viewer.admin {
+    if !viewer.can_edit_job(&tree, &job) {
         return StatusCode::FORBIDDEN;
     }
     // Flag first so a running slice stops at its next checkpoint; the DB row
@@ -1833,6 +1829,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::printer_thumbs::routes())
         .merge(crate::feedback_api::routes())
         .merge(crate::reports_api::routes())
+        .merge(crate::roles_api::routes())
+        .merge(crate::audit::routes())
         .route(
             "/api/custom-profiles",
             get(list_custom_profiles).post(create_custom_profile),

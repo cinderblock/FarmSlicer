@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::permissions::{Cap, GroupCap};
 use crate::db::{Item, Job, JobItem, Progress, Project};
 use crate::groups::{Tree, Viewer};
 use crate::outcomes::Line;
@@ -27,15 +28,15 @@ pub const MAX_ITEMS: usize = 500;
 pub const MAX_QUANTITY: i64 = 100_000;
 
 pub fn can_see(tree: &Tree, viewer: &Viewer, p: &Project) -> bool {
-    viewer.admin
+    viewer.can(Cap::LibraryViewAll)
         || p.user_id.as_deref() == Some(viewer.user.id.as_str())
-        || p.group_id.as_deref().is_some_and(|g| viewer.is_active_member(g) || viewer.can_manage(tree, g))
+        || p.group_id.as_deref().is_some_and(|g| viewer.is_active_member(g) || viewer.can_in(tree, g, GroupCap::LibraryView))
 }
 
 pub fn can_edit(tree: &Tree, viewer: &Viewer, p: &Project) -> bool {
-    viewer.admin
+    viewer.can(Cap::LibraryEditAll)
         || p.user_id.as_deref() == Some(viewer.user.id.as_str())
-        || p.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+        || p.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::LibraryEdit))
 }
 
 /// Copies still without a plate: wanted minus what is good, unchecked,

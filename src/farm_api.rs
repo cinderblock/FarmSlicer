@@ -14,6 +14,7 @@ use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::permissions::Cap;
 use crate::auth::{self, CurrentUser};
 use crate::db::Printer;
 use crate::printer::status::state;
@@ -68,7 +69,7 @@ async fn list_reports(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Query(q): Query<ReportsQuery>,
 ) -> Json<Value> {
-    let admin = auth::is_admin(&user);
+    let admin = auth::can(&user, Cap::PrintersManage);
     let reports: Vec<_> = state
         .db
         .list_printer_reports(q.open.unwrap_or(false))
@@ -83,7 +84,7 @@ async fn resolve_report(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     if state.db.resolve_printer_report(&id, &user.username) {
         Ok(StatusCode::NO_CONTENT)
     } else {

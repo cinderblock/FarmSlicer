@@ -18,6 +18,7 @@ use axum::{Extension, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::permissions::Cap;
 use crate::auth::{self, CurrentUser};
 use crate::db::QueueEntry;
 use crate::groups::Viewer;
@@ -97,7 +98,7 @@ fn pool_json(p: &crate::db::Pool) -> Value {
 
 /// `GET /api/pools`: every pool (admins), or the pools one operates.
 async fn list_pools(State(state): State<Arc<AppState>>, Extension(CurrentUser(user)): Extension<CurrentUser>) -> Json<Value> {
-    let admin = auth::is_admin(&user);
+    let admin = auth::can(&user, Cap::PrintersManage) || auth::can(&user, Cap::PrintersOperate);
     let pools: Vec<Value> = state
         .db
         .list_pools()
@@ -162,7 +163,7 @@ async fn create_pool(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<PoolBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     let id = uuid::Uuid::new_v4().to_string();
     let v = save(&state, &id, body, None)?;
     println!("Pool {id}: created by {}", user.username);
@@ -177,7 +178,7 @@ async fn update_pool(
     Path(id): Path<String>,
     Json(body): Json<PoolBody>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     let existing = state.db.get_pool(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such pool"))?;
     let v = save(&state, &id, body, Some(existing))?;
     crate::dispatch::poke(&state);
@@ -190,7 +191,7 @@ async fn delete_pool(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     if !state.db.delete_pool(&id) {
         return Err(api_err(StatusCode::NOT_FOUND, "no such pool"));
     }

@@ -29,6 +29,16 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
+    id: "2026-11-14",
+    date: "2026-11-14",
+    title: "Roles: just the access each person needs",
+    highlights: [
+      "Admins can make their own roles from a list of permissions: a \"Printer admin\" who looks after printers without seeing accounts, or a group \"Approver\" who approves the group's prints and sees its library. Site roles are given on the Users page, group roles on a group's Members tab, and nobody can give a permission they don't hold.",
+      "Accounts can be suspended instead of deleted: they can't sign in and their API keys stop working, with their history kept, until someone reinstates them.",
+      "A new Audit log page shows who changed accounts, roles, groups and site settings, and what they changed.",
+    ],
+  },
+  {
     id: "2026-11-13e",
     date: "2026-11-13",
     title: "AI agents can run the farm",

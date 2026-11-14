@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::permissions::Cap;
 use crate::auth::{self, CurrentUser};
 use crate::camera::{CameraKind, CameraSource, Frame};
 use crate::db::{Printer, User};
@@ -32,7 +33,7 @@ fn not_found() -> ApiError {
 }
 
 fn view(state: &AppState, p: &Printer, user: &User) -> Value {
-    let admin = auth::is_admin(user);
+    let admin = auth::can(user, Cap::PrintersManage);
     json!({
         "id": p.id,
         "name": p.name,
@@ -111,7 +112,7 @@ async fn create_printer(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<CreatePrinter>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     let name = body.name.trim();
     if name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "name is required"}))));
@@ -155,7 +156,7 @@ async fn update_printer(
     Path(id): Path<String>,
     Json(body): Json<UpdatePrinter>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     if body.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
         return Err((StatusCode::BAD_REQUEST, Json(json!({"error": "name can't be empty"}))));
     }
@@ -187,7 +188,7 @@ async fn delete_printer(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     if !state.db.delete_printer(&id) {
         return Err(not_found());
     }
@@ -234,7 +235,7 @@ async fn raw_report(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::PrintersManage)?;
     state.db.get_printer(&id).ok_or_else(not_found)?;
     Ok(Json(state.printers.report(&id).unwrap_or(Value::Null)))
 }

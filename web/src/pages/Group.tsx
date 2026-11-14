@@ -3,6 +3,8 @@ import PrintRulesEditor from "../components/PrintRulesEditor";
 import { describeRules, UPLOAD_POLICIES, type UploadPolicy } from "../printers";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiJson, useAuth } from "../auth";
+import type { GroupCap } from "../auth";
+import { assignableGroupRoles, roleName, useRoles } from "../roles";
 import { errorText, localDate, useJson } from "../api";
 import { QuotaRulesEditor, UsageLines } from "../components/Quota";
 import GroupTable from "../components/GroupTable";
@@ -28,6 +30,7 @@ export default function GroupPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const { user, refresh } = useAuth();
+  const roles = useRoles().data?.roles;
   const [rev, setRev] = useState(0);
   const [tab, setTab] = useState<Tab>("library");
   const [error, setError] = useState("");
@@ -49,12 +52,13 @@ export default function GroupPage() {
 
   const active = g.my_status === "active";
   const pending = g.my_status === "pending";
+  const has = (cap: GroupCap) => g.my_caps.includes(cap);
   const tabs: [Tab, string, boolean][] = [
     ["library", "Library", true],
-    ["members", "Members", g.can_manage || active],
+    ["members", "Members", has("members") || active],
     ["subgroups", "Subgroups", g.can_manage],
-    ["links", "Join links", g.can_manage],
-    ["settings", "Settings", g.can_manage],
+    ["links", "Join links", has("links")],
+    ["settings", "Settings", has("settings")],
     ["quotas", "Quotas", true],
   ];
 
@@ -82,7 +86,9 @@ export default function GroupPage() {
       </p>
       <h2>
         {g.name}
-        {g.my_role === "manager" && <span className="status-badge role-badge">manager</span>}
+        {g.my_role && g.my_role !== "member" && (
+          <span className="status-badge role-badge">{roleName(roles, g.my_role).toLowerCase()}</span>
+        )}
         {pending && <span className="status-badge status-queued">waiting for approval</span>}
       </h2>
       {g.description && <p className="group-description">{g.description}</p>}
@@ -127,7 +133,7 @@ function LibraryTab({ group, rev }: { group: GroupDetail; rev: number }) {
   if (!lib.data) return <p className="hint">Loading…</p>;
   return (
     <>
-      {!group.effective.shared_library && !group.can_manage && (
+      {!group.effective.shared_library && !group.my_caps.includes("library.view") && (
         <p className="hint">This group's library isn't shared: you see only your own jobs here.</p>
       )}
       <SeasonLibrary library={lib.data} groupId={group.id} />
@@ -141,7 +147,12 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
   const [rev, setRev] = useState(0);
   const members = useJson<Member[]>(`/api/groups/${group.id}/members`, rev);
   const [username, setUsername] = useState("");
-  const [role, setRole] = useState<"member" | "manager">("member");
+  const [role, setRole] = useState("member");
+  const roles = useRoles().data?.roles;
+  const givable = assignableGroupRoles(roles, group.my_caps);
+  const managesMembers = group.my_caps.includes("members");
+  /** A member's role can be changed only by someone who could give it. */
+  const changeable = (r: string) => givable.some((x) => x.id === r);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<Rule[]>([]);
@@ -170,7 +181,7 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
   return (
     <>
       {members.error && <p className="login-error">{members.error}</p>}
-      {group.can_manage && pending.length > 0 && (
+      {managesMembers && pending.length > 0 && (
         <p className="hint">
           {pending.length} waiting for approval (join policy: {group.effective.join_policy}).
         </p>
@@ -183,7 +194,7 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
             <th>Status</th>
             <th>Joined</th>
             <th>Limits</th>
-            {group.can_manage && <th></th>}
+            {managesMembers && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -194,23 +205,26 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
                 {m.kind === "guest" && <span className="source-badge"> guest</span>}
               </td>
               <td>
-                {group.can_manage ? (
+                {managesMembers && changeable(m.role) ? (
                   <select
                     value={m.role}
                     onChange={(e) =>
                       act(() => apiJson(`/api/groups/${group.id}/members/${m.user_id}`, "PUT", { role: e.target.value }))
                     }
                   >
-                    <option value="member">member</option>
-                    <option value="manager">manager</option>
+                    {givable.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name.toLowerCase()}
+                      </option>
+                    ))}
                   </select>
                 ) : (
-                  m.role
+                  roleName(roles, m.role).toLowerCase()
                 )}
               </td>
               <td>
                 {m.status === "pending" ? (
-                  group.can_manage ? (
+                  managesMembers && changeable(m.role) ? (
                     <button
                       className="btn-sm"
                       onClick={() =>
@@ -277,8 +291,9 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
                   </>
                 )}
               </td>
-              {group.can_manage && (
+              {managesMembers && (
                 <td>
+                  {changeable(m.role) && (
                   <button
                     className="btn-sm btn-danger"
                     onClick={() => {
@@ -288,13 +303,14 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
                   >
                     Remove
                   </button>
+                  )}
                 </td>
               )}
             </tr>
           ))}
         </tbody>
       </table>
-      {group.can_manage && (
+      {managesMembers && (
         <>
           <h3>Add a member</h3>
           <form className="printer-form inline-form" onSubmit={add}>
@@ -304,9 +320,12 @@ function MembersTab({ group, onChange }: { group: GroupDetail; onChange: () => v
             </label>
             <label>
               Role
-              <select value={role} onChange={(e) => setRole(e.target.value as "member" | "manager")}>
-                <option value="member">member</option>
-                <option value="manager">manager</option>
+              <select value={role} onChange={(e) => setRole(e.target.value)}>
+                {givable.map((r) => (
+                  <option key={r.id} value={r.id} title={r.description}>
+                    {r.name.toLowerCase()}
+                  </option>
+                ))}
               </select>
             </label>
             <button className="btn-primary" type="submit">
@@ -570,7 +589,7 @@ function LogoSetting({ group }: { group: GroupDetail }) {
                 : "None. PNG or JPEG; it's shrunk to 256 px."}
             {overlay?.label && <> Label: <strong>{overlay.label}</strong>.</>}
           </p>
-          {group.can_manage && (
+          {group.my_caps.includes("settings") && (
             <span className="logo-actions">
               <label className="btn-sm file-button">
                 {own ? "Replace…" : "Upload…"}
@@ -603,7 +622,7 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
   const [parent, setParent] = useState(group.parent_id ?? "");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const allGroups = useJson<GroupSummary[]>(group.is_admin ? "/api/groups" : null);
+  const allGroups = useJson<GroupSummary[]>(group.manage_all ? "/api/groups" : null);
 
   const sourceName = (key: string) => {
     const src = group.effective.sources[key];
@@ -635,7 +654,7 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
     setSaved(false);
     try {
       const body: Record<string, unknown> = { name, description, settings: s };
-      if (group.is_admin && (parent || null) !== group.parent_id) body.parent_id = parent || null;
+      if (group.manage_all && (parent || null) !== group.parent_id) body.parent_id = parent || null;
       await apiJson(`/api/groups/${group.id}`, "PUT", body);
       setSaved(true);
       onSaved();
@@ -665,7 +684,7 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
         Description
         <input value={description} onChange={(e) => setDescription(e.target.value)} />
       </label>
-      {group.is_admin && (
+      {group.manage_all && (
         <label>
           Parent group
           <select value={parent} onChange={(e) => setParent(e.target.value)}>
@@ -783,7 +802,7 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
       </div>
 
       <h3>This group only</h3>
-      {group.is_admin && (
+      {group.manage_all && (
         <label className="checkbox-label">
           <input type="checkbox" checked={!!s.listed} onChange={(e) => setS({ ...s, listed: e.target.checked || undefined })} />
           Offer “Join {name}” on the sign-in page

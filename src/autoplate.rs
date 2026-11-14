@@ -21,6 +21,7 @@ use axum::{Extension, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::permissions::Cap;
 use crate::auth::CurrentUser;
 use crate::db::{Job, JobItem, Project, User};
 use crate::groups_api;
@@ -343,7 +344,7 @@ async fn plate_farm(
     let gap = spacing(&body)?;
     let (_, viewer) = groups_api::context(&state, &user);
     let operator = !state.db.operated_printers(&user.id).is_empty();
-    if !viewer.admin && !operator {
+    if !viewer.can(Cap::PrintersOperate) && !operator {
         return Err(api_err(StatusCode::FORBIDDEN, "only admins and operators plate the farm's projects"));
     }
     let mixing = match body.pool_id.as_deref().and_then(|p| state.db.get_pool(p)) {

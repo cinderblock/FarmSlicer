@@ -24,6 +24,7 @@ use axum::{Extension, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::permissions::{Cap, GroupCap};
 use crate::auth::{self, CurrentUser, KeyScope};
 use crate::db::{PrintRecord, Project};
 use crate::groups::{Tree, Viewer};
@@ -117,9 +118,9 @@ fn scope_of(key: &crate::db::ApiKey) -> Option<Scope> {
 
 /// Admins see every key; managers the keys of groups they manage.
 fn can_manage_key(tree: &Tree, viewer: &Viewer, scope: &Scope, owner: &str) -> bool {
-    viewer.admin
+    viewer.can(Cap::IntegrationsManage)
         || owner == viewer.user.id
-        || scope.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+        || scope.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::Integrations))
 }
 
 fn key_json(state: &AppState, tree: &Tree, key: &crate::db::ApiKey) -> Value {
@@ -186,9 +187,9 @@ async fn create_key(
     }
     let group = body.group_id.filter(|g| !g.is_empty());
     match &group {
-        None if !viewer.admin => return Err(api_err(StatusCode::BAD_REQUEST, "name the group the key is for")),
+        None if !viewer.can(Cap::IntegrationsManage) => return Err(api_err(StatusCode::BAD_REQUEST, "name the group the key is for")),
         Some(g) if tree.get(g).is_none() => return Err(api_err(StatusCode::BAD_REQUEST, "no such group")),
-        Some(g) if !viewer.can_manage(&tree, g) => {
+        Some(g) if !viewer.can(Cap::IntegrationsManage) && !viewer.can_in(&tree, g, GroupCap::Integrations) => {
             return Err(api_err(StatusCode::FORBIDDEN, "only admins and the group's managers make its keys"));
         }
         _ => {}
@@ -231,7 +232,7 @@ async fn set_remote(
     if caller.is_some() {
         return Err(api_err(StatusCode::FORBIDDEN, "integration keys can't change keys"));
     }
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::IntegrationsManage)?;
     let key = state.db.get_api_key(&id).filter(|k| k.scope.is_some()).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such key"))?;
     state.db.set_api_key_remote(&id, body.allowed);
     println!("Integration key {} ({}): {} by {}", key.id, key.name, if body.allowed { "allowed from outside" } else { "local network only" }, user.username);
@@ -357,7 +358,7 @@ async fn usage(
             }
             client = Some(c.clone());
         }
-    } else if !viewer.admin && !group.as_deref().is_some_and(|g| viewer.can_manage(&tree, g)) {
+    } else if !viewer.can(Cap::IntegrationsManage) && !group.as_deref().is_some_and(|g| viewer.can_in(&tree, g, GroupCap::Integrations)) {
         return Err(api_err(StatusCode::FORBIDDEN, "admins see all usage; managers name a group they manage (group=)"));
     }
     let bound = |v: Option<String>, field: &str| -> Result<Option<String>, ApiError> {

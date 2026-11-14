@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useJson } from "../api";
-import type { NAV_SECTIONS } from "../nav";
+import type { NavSection } from "../nav";
 import type { ThemeChoice } from "../theme";
 import Icon, { type IconName } from "./Icon";
 import { matchScore } from "../search";
@@ -38,7 +38,7 @@ export default function CommandPalette({
   onTheme,
   onLogout,
 }: {
-  sections: typeof NAV_SECTIONS;
+  sections: NavSection[];
   onClose: () => void;
   onFeedback: () => void;
   onWhatsNew: () => void;

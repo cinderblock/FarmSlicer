@@ -8,7 +8,7 @@ import FeedbackDialog from "./FeedbackDialog";
 import InstallApp from "./InstallApp";
 import CommandPalette from "./CommandPalette";
 import Icon, { BrandMark } from "./Icon";
-import { NAV_SECTIONS, pageTitle } from "../nav";
+import { pageTitle, visibleSections } from "../nav";
 import { nextTheme, useTheme } from "../theme";
 import UpdateBanner from "./UpdateBanner";
 import WhatsNewDialog from "./WhatsNewDialog";
@@ -22,13 +22,14 @@ import { localDay, markSeen, seenId, unseenEntries } from "../whatsNew";
 const FEEDBACK_POLL_MS = 60_000;
 
 export default function Layout() {
-  const { user, isAdmin, status, logout } = useAuth();
+  const { user, can, status, logout } = useAuth();
+  const triages = can("feedback.triage");
   const location = useLocation();
-  const sections = NAV_SECTIONS.filter((section) => !section.admin || isAdmin);
+  const sections = visibleSections(can);
   const [feedback, setFeedback] = useState<FeedbackPrefill | null>(null);
   const [poll, setPoll] = useState(0);
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!triages) return;
     const reload = () => setPoll((p) => p + 1);
     const id = setInterval(reload, FEEDBACK_POLL_MS);
     window.addEventListener(FEEDBACK_CHANGED, reload);
@@ -36,8 +37,8 @@ export default function Layout() {
       clearInterval(id);
       window.removeEventListener(FEEDBACK_CHANGED, reload);
     };
-  }, [isAdmin]);
-  const fresh = newCount(useJson<Counts>(isAdmin ? "/api/feedback/counts" : null, poll).data);
+  }, [triages]);
+  const fresh = newCount(useJson<Counts>(triages ? "/api/feedback/counts" : null, poll).data);
 
   // What's new: opens by itself with what this browser hasn't seen, unless
   // the page was reloaded for an update nobody was watching (then the
@@ -194,7 +195,7 @@ export default function Layout() {
               <Icon name="feedback" />
               Send feedback
             </button>
-            {!isAdmin && (
+            {!triages && (
               <NavLink to="/feedback" className="sidebar-action">
                 <Icon name="list" />
                 My feedback
@@ -222,7 +223,7 @@ export default function Layout() {
                 <span className="avatar">{(user?.username ?? "?").slice(0, 1).toUpperCase()}</span>
                 <span className="sidebar-who-text">
                   <span className="sidebar-who-name">{user?.username ?? "account"}</span>
-                  <span className="sidebar-who-role">{user?.kind === "guest" ? "guest" : user?.role}</span>
+                  <span className="sidebar-who-role">{user?.kind === "guest" ? "guest" : (user?.role_name ?? user?.role)}</span>
                 </span>
               </NavLink>
             )}

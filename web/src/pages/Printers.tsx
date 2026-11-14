@@ -117,7 +117,8 @@ function defaultNozzle(m: MachineModel | undefined): string {
 }
 
 export default function PrintersPage() {
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const managesPrinters = can("printers.manage");
   const [rev, setRev] = useState(0);
   const printersQuery = useJson<Printer[]>("/api/printers", rev);
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
@@ -126,7 +127,7 @@ export default function PrintersPage() {
   const models = useMemo(() => modelsData ?? [], [modelsData]);
   const statuses = usePrinterStatuses();
   const activePrints = useActivePrints();
-  const reports = useJson<OpenReport[]>(isAdmin ? "/api/printer-reports?open=1" : null, rev).data;
+  const reports = useJson<OpenReport[]>(managesPrinters ? "/api/printer-reports?open=1" : null, rev).data;
   const openReports = (id: string) => (reports ?? []).filter((r) => r.printer_id === id).length;
   // Cards by area (as entered), unnamed last.
   const areas = [...new Set(printers.map((p) => p.area))].sort((a, b) =>
@@ -298,7 +299,7 @@ export default function PrintersPage() {
         title="Printers"
         icon="printer"
         actions={
-          isAdmin && (
+          managesPrinters && (
             <button
               className={draft ? "btn-sm" : "btn-primary btn-inline"}
               onClick={() => {
@@ -487,7 +488,7 @@ export default function PrintersPage() {
         </div>
       )}
 
-      {isAdmin && (reports?.length ?? 0) > 0 && (
+      {managesPrinters && (reports?.length ?? 0) > 0 && (
         <div className="card reports-panel">
           <h3>Problem reports</h3>
           {reports!.map((r) => (
@@ -512,7 +513,7 @@ export default function PrintersPage() {
         </div>
       )}
 
-      {isAdmin && moved.length > 0 && (
+      {managesPrinters && moved.length > 0 && (
         <div className="discovered-section">
           <h3>Address Changed</h3>
           <div className="card-grid">
@@ -531,7 +532,7 @@ export default function PrintersPage() {
         </div>
       )}
 
-      {isAdmin && newDiscovered.length > 0 && (
+      {managesPrinters && newDiscovered.length > 0 && (
         <div className="discovered-section">
           <h3>Detected on Network</h3>
           <div className="card-grid">
@@ -559,12 +560,12 @@ export default function PrintersPage() {
 
       {!printersQuery.data && !printersQuery.error ? (
         <Skeleton kind="cards" />
-      ) : printersQuery.data && printers.length === 0 && (!isAdmin || newDiscovered.length === 0) ? (
+      ) : printersQuery.data && printers.length === 0 && (!managesPrinters || newDiscovered.length === 0) ? (
         <EmptyState
           icon="printer"
           title="No printers yet"
           action={
-            isAdmin &&
+            managesPrinters &&
             !draft && (
               <button className="btn-primary btn-inline" onClick={() => setDraft({ ...EMPTY })}>
                 <Icon name="plus" /> Add a printer
@@ -572,7 +573,7 @@ export default function PrintersPage() {
             )
           }
         >
-          {isAdmin
+          {managesPrinters
             ? "Add one by hand, or wait a moment: printers on this network show up here by themselves."
             : "An admin adds the farm's printers; they will show up here."}
         </EmptyState>
@@ -590,10 +591,10 @@ export default function PrintersPage() {
                     printer={printer}
                     status={statuses[printer.id]}
                     print={activePrints[printer.id]}
-                    isAdmin={isAdmin}
+                    managesPrinters={managesPrinters}
                     openReports={openReports(printer.id)}
                     actions={
-                      isAdmin && (
+                      managesPrinters && (
                         <>
                           <button className="btn-sm btn-ghost btn-icon" onClick={() => startEdit(printer)} title={`Edit ${printer.name}`} aria-label={`Edit ${printer.name}`}>
                             <Icon name="edit" />

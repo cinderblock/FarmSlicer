@@ -8,6 +8,7 @@ import { UsageLines } from "../components/Quota";
 import type { QuotaLine } from "../groups";
 import { browserSupportsWebAuthn, defaultKeyName, registerPasskey } from "../passkeys";
 import PageHeader from "../components/PageHeader";
+import { roleName, useRoles } from "../roles";
 import Icon from "../components/Icon";
 import { useTheme } from "../theme";
 import { modelContext } from "../webmcp";
@@ -42,6 +43,7 @@ interface MyUsage {
 export default function AccountPage() {
   const [theme, setTheme] = useTheme();
   const { user, isGuest, refresh } = useAuth();
+  const roles = useRoles().data?.roles;
   const [rev, setRev] = useState(0);
   const passkeys = useJson<PasskeyInfo[]>("/api/me/passkeys", rev).data ?? [];
   const keys = useJson<ApiKey[]>(isGuest ? null : "/api/me/api-keys", rev).data ?? [];
@@ -119,7 +121,7 @@ export default function AccountPage() {
   return (
     <div className="page page-narrow">
       <PageHeader title="Account" icon="user">
-        Signed in as <strong>{user?.username}</strong> ({isGuest ? "guest" : user?.role}).
+        Signed in as <strong>{user?.username}</strong> ({isGuest ? "guest" : (user?.role_name ?? user?.role)}).
       </PageHeader>
       {!isGuest && (
         <p className="hint">
@@ -175,7 +177,7 @@ export default function AccountPage() {
             <li key={g.group_id}>
               <Link to={`/groups/${g.group_id}`}>{g.path}</Link>{" "}
               <span className="hint">
-                {g.role}
+                {roleName(roles, g.role).toLowerCase()}
                 {g.status === "pending" ? " · waiting for approval" : ""}
               </span>
             </li>

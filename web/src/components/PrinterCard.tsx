@@ -85,7 +85,7 @@ export default function PrinterCard({
   printer,
   status,
   print,
-  isAdmin,
+  managesPrinters,
   openReports,
   actions,
 }: {
@@ -93,7 +93,7 @@ export default function PrinterCard({
   status: PrinterStatus | undefined;
   /** The FarmSlicer print using this printer, if any. */
   print?: PrintRecord;
-  isAdmin?: boolean;
+  managesPrinters?: boolean;
   /** Open problem reports (admins). */
   openReports?: number;
   /** Admin buttons. */
@@ -242,7 +242,7 @@ export default function PrinterCard({
                 (print?.can_control ? (
                   <PrintControls print={print} capabilities={caps} status={status} />
                 ) : (
-                  isAdmin && (
+                  managesPrinters && (
                     <PrintControls url={`/api/printers/${printer.id}/control`} capabilities={caps} status={status} />
                   )
                 ))}
@@ -338,7 +338,7 @@ export default function PrinterCard({
         </label>
       )}
       {note && <p className="hint">{note}</p>}
-      {isAdmin && !!openReports && (
+      {managesPrinters && !!openReports && (
         <p className="printer-error">
           <Icon name="alert" size={14} /> {openReports} open problem report{openReports === 1 ? "" : "s"}
         </p>

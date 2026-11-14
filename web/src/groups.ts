@@ -1,3 +1,4 @@
+import type { GroupCap } from "./auth";
 // Types shared by the group, join, account and admin pages (see
 // src/groups.rs, src/quota.rs and src/join_api.rs on the server).
 
@@ -10,9 +11,13 @@ export interface GroupSummary {
   description: string;
   self_key: string | null;
   member_count: number;
-  my_role: "member" | "manager" | null;
+  /** The viewer's group role here: "member" | "manager" | a custom role's id. */
+  my_role: string | null;
   my_status: "active" | "pending" | null;
+  /** Holds any group permission here (through this group or an ancestor). */
   can_manage: boolean;
+  /** The viewer's permissions here (src/permissions.rs GroupCap ids). */
+  my_caps: GroupCap[];
   created_at: string;
 }
 
@@ -72,7 +77,8 @@ export interface GroupDetail extends GroupSummary {
   effective: EffectiveSettings;
   quotas: GroupQuotas;
   can_govern: boolean;
-  is_admin: boolean;
+  /** Manages every group: may move it and list it on the sign-in page. */
+  manage_all: boolean;
   ancestors: { id: string; name: string }[];
   children: GroupSummary[];
 }

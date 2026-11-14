@@ -80,7 +80,8 @@ export default function SendDialog({
     layer_inspect: false,
   });
   const [force, setForce] = useState(false);
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const reviewsGcode = can("prints.approve_safety");
   const [acknowledged, setAcknowledged] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -117,7 +118,7 @@ export default function SendDialog({
   const blocked = (data?.blocked.length ?? 0) > 0 || !!data?.uploads_denied;
   // Admins acknowledge a G-code review themselves; anyone else's request
   // waits for one.
-  const adminReview = review.length > 0 && !isAdmin;
+  const adminReview = review.length > 0 && !reviewsGcode;
   // A request that needs approval can name a busy printer: it's sent when approved.
   const waits = (data?.needs_approval.length ?? 0) > 0 || adminReview;
   const usable = targets.filter((t) => !t.incompatible && (waits || !t.busy));
@@ -176,7 +177,7 @@ export default function SendDialog({
         ams_mapping: mapsFilaments ? mapping : undefined,
         options,
         ignore_mapping_problems: force,
-        acknowledge_review: isAdmin && acknowledged,
+        acknowledge_review: reviewsGcode && acknowledged,
       });
       onSent(print);
     } catch (e) {
@@ -391,7 +392,7 @@ export default function SendDialog({
                     <li key={r}>{r}</li>
                   ))}
                 </ul>
-                {isAdmin ? (
+                {reviewsGcode ? (
                   <label>
                     <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />{" "}
                     I've reviewed these and want to print it anyway (recorded on the print)
@@ -423,7 +424,7 @@ export default function SendDialog({
                   !selected ||
                   !!selected.incompatible ||
                   blocked ||
-                  (review.length > 0 && isAdmin && !acknowledged) ||
+                  (review.length > 0 && reviewsGcode && !acknowledged) ||
                   (!!selected.busy && !waits) ||
                   sending ||
                   (problems.length > 0 && !force && !waits)

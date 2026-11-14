@@ -26,6 +26,7 @@ use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::permissions::Cap;
 use crate::auth::{self, CurrentUser};
 use crate::db::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded, User};
 use crate::feedback::{self as policy, Limit};
@@ -264,7 +265,7 @@ async fn list(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Query(q): Query<ListQuery>,
 ) -> Json<Value> {
-    let admin = auth::is_admin(&user);
+    let admin = auth::can(&user, Cap::FeedbackTriage);
     let own = !admin || q.mine.unwrap_or(false);
     let filter = FeedbackFilter {
         automatic: q.automatic,
@@ -286,7 +287,7 @@ async fn counts(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
 ) -> Json<Value> {
-    let own = (!auth::is_admin(&user)).then_some(user.id.as_str());
+    let own = (!auth::can(&user, Cap::FeedbackTriage)).then_some(user.id.as_str());
     let mut out = json!({"manual": {}, "automatic": {}});
     for status in policy::STATUSES {
         out["manual"][status] = json!(0);
@@ -303,7 +304,7 @@ async fn counts(
 fn readable(state: &AppState, user: &User, id: &str) -> Result<Feedback, ApiError> {
     let not_found = || err(StatusCode::NOT_FOUND, "no such report");
     let mut f = state.db.get_feedback(id).ok_or_else(not_found)?;
-    if auth::is_admin(user) {
+    if auth::can(user, Cap::FeedbackTriage) {
         if f.automatic {
             f.occurrences = state.db.feedback_occurrences(id, None);
         }
@@ -338,7 +339,7 @@ async fn update(
     Path(id): Path<String>,
     Json(body): Json<Triage>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::FeedbackTriage)?;
     if let Some(s) = &body.status {
         if !policy::STATUSES.contains(&s.as_str()) {
             return Err(err(
@@ -362,7 +363,7 @@ async fn delete(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::FeedbackTriage)?;
     if state.db.delete_feedback(&id) {
         Ok(StatusCode::NO_CONTENT)
     } else {

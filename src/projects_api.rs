@@ -11,6 +11,7 @@ use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::permissions::{Cap, GroupCap};
 use crate::auth::{CurrentUser, KeyScope};
 use crate::integration::Scope;
 use crate::db::{NewProject, Project, ProjectFilter, User};
@@ -108,7 +109,7 @@ async fn list_projects(
     // Visibility is decided per project; fetch generously, then filter.
     let list: Vec<Value> = state
         .db
-        .list_projects(&filter, if viewer.admin { limit } else { 5000 })
+        .list_projects(&filter, if viewer.can(Cap::LibraryViewAll) { limit } else { 5000 })
         .into_iter()
         .filter(|p| projects::can_see(&tree, &viewer, p) && scope.as_ref().is_none_or(|s| s.covers(p)))
         .take(limit as usize)
@@ -163,7 +164,7 @@ struct CreateProject {
 fn check_group(tree: &Tree, viewer: &Viewer, group: Option<&str>) -> Result<(), ApiError> {
     match group {
         Some(g) if tree.get(g).is_none() => Err(bad("no such group")),
-        Some(g) if !viewer.admin && !viewer.can_charge(g) && !viewer.can_manage(tree, g) => {
+        Some(g) if !viewer.can(Cap::GroupsManageAll) && !viewer.can_charge(g) && !viewer.can_in(tree, g, GroupCap::LibraryEdit) => {
             Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"))
         }
         _ => Ok(()),

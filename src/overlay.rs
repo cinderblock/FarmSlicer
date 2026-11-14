@@ -17,6 +17,7 @@ use axum::routing::get;
 use axum::{Extension, Json, Router};
 use serde_json::{Value, json};
 
+use crate::permissions::GroupCap;
 use crate::auth::CurrentUser;
 use crate::db::Job;
 use crate::groups::Tree;
@@ -130,7 +131,7 @@ async fn put_logo(
     if tree.get(&id).is_none() {
         return Err(err(StatusCode::NOT_FOUND, "no such group"));
     }
-    if !viewer.can_manage(&tree, &id) {
+    if !viewer.can_in(&tree, &id, GroupCap::Settings) {
         return Err(err(StatusCode::FORBIDDEN, "only the group's managers can change its logo"));
     }
     let mut data = None;
@@ -167,7 +168,7 @@ async fn delete_logo(
     if tree.get(&id).is_none() {
         return Err(err(StatusCode::NOT_FOUND, "no such group"));
     }
-    if !viewer.can_manage(&tree, &id) {
+    if !viewer.can_in(&tree, &id, GroupCap::Settings) {
         return Err(err(StatusCode::FORBIDDEN, "only the group's managers can change its logo"));
     }
     std::fs::remove_file(logo_path(&state, &id)).ok();

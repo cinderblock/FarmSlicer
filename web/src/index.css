@@ -5884,3 +5884,79 @@ select.select-sm {
 .job-unsliced p {
   margin: 0;
 }
+
+/* ---- Roles and audit log (pages/Roles.tsx, pages/Audit.tsx) ---- */
+.roles-section {
+  margin-bottom: 2rem;
+}
+.roles-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.roles-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 0.75rem;
+}
+.role-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.role-card-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0.35rem;
+}
+.cap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+.cap-chip {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--tone-neutral);
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+.role-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  grid-column: 1 / -1;
+}
+.cap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 0.5rem 1rem;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.cap-option {
+  align-items: flex-start;
+}
+.cap-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.cap-option.is-disabled {
+  opacity: 0.55;
+}
+.role-editor-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.audit-detail {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}

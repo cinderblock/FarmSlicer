@@ -11,6 +11,9 @@ mod queue;
 mod webhooks;
 mod dispatch;
 mod notifications;
+mod roles;
+mod audit;
+pub use audit::{AuditFilter, NewAudit};
 pub use feedback::{ErrorOccurrence, Feedback, FeedbackFilter, NewFeedback, Recorded};
 pub use projects::{Item, JobItem, NewProject, Progress, Project, ProjectFilter};
 pub use pools::Pool;
@@ -256,7 +259,8 @@ pub struct SliceRecord {
 pub struct User {
     pub id: String,
     pub username: String,
-    /// "owner" | "admin" | "user"
+    /// Site role: "owner" | "admin" | "user" | a custom role's id
+    /// (src/permissions.rs).
     pub role: String,
     pub created_at: String,
     pub last_login: Option<String>,
@@ -269,6 +273,12 @@ pub struct User {
     /// Approved for access from outside the local network (passkey
     /// sessions only; see `auth::authenticate`).
     pub remote_access: bool,
+    /// Suspended accounts can't sign in or use their sessions and keys.
+    pub suspended_at: Option<String>,
+    /// The site role's capabilities, filled in for the signed-in account
+    /// by `auth::authenticate` (empty on accounts read for other reasons).
+    #[serde(skip)]
+    pub caps: crate::permissions::SiteCaps,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -588,6 +598,8 @@ impl Db {
         webhooks::migrate(&conn);
         dispatch::migrate(&conn);
         notifications::migrate(&conn);
+        roles::migrate(&conn);
+        audit::migrate(&conn);
         // Custom G-code that failed its check or a print (src/incidents.rs).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gcode_incidents (
@@ -699,6 +711,8 @@ impl Db {
             kind: row.get(5)?,
             quotas: row.get(6)?,
             remote_access: row.get(7)?,
+            suspended_at: row.get(8)?,
+            caps: Default::default(),
         })
     }
 
@@ -739,7 +753,7 @@ impl Db {
     pub fn list_users(&self) -> Vec<User> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users ORDER BY created_at")
+            .prepare("SELECT id, username, role, created_at, last_login, kind, quotas, remote_access, suspended_at FROM users ORDER BY created_at")
             .unwrap();
         stmt.query_map([], Self::user_from_row)
             .unwrap()
@@ -750,7 +764,7 @@ impl Db {
     pub fn get_user(&self, id: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users WHERE id = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access, suspended_at FROM users WHERE id = ?1",
             params![id],
             Self::user_from_row,
         )
@@ -760,7 +774,7 @@ impl Db {
     pub fn get_user_by_username(&self, username: &str) -> Option<User> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users WHERE username = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access, suspended_at FROM users WHERE username = ?1",
             params![username.trim()],
             Self::user_from_row,
         )
@@ -783,7 +797,7 @@ impl Db {
             }
         })?;
         conn.query_row(
-            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access FROM users WHERE id = ?1",
+            "SELECT id, username, role, created_at, last_login, kind, quotas, remote_access, suspended_at FROM users WHERE id = ?1",
             params![id],
             Self::user_from_row,
         )
@@ -901,7 +915,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT i.user_id, i.created_by, i.created_at, i.expires_at, i.used_at,
-                    u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access
+                    u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access, u.suspended_at
              FROM invites i JOIN users u ON u.id = i.user_id
              WHERE i.token_hash = ?1 AND i.used_at IS NULL AND i.expires_at > datetime('now')",
             params![token_hash],
@@ -923,6 +937,8 @@ impl Db {
                         kind: row.get(10)?,
                         quotas: row.get(11)?,
                         remote_access: row.get(12)?,
+                        suspended_at: row.get(13)?,
+                        caps: Default::default(),
                     },
                 ))
             },
@@ -1015,12 +1031,12 @@ impl Db {
     pub fn session_user(&self, token_hash: &str) -> Option<(User, Option<String>)> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access,
+            "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access, u.suspended_at,
                     s.method
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > datetime('now')",
             params![token_hash],
-            |row| Ok((Self::user_from_row(row)?, row.get(8)?)),
+            |row| Ok((Self::user_from_row(row)?, row.get(9)?)),
         )
         .ok()
     }
@@ -1145,7 +1161,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let user = conn
             .query_row(
-                "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access
+                "SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.kind, u.quotas, u.remote_access, u.suspended_at
                  FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?1",
                 params![key_hash],
                 Self::user_from_row,

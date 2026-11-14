@@ -2,14 +2,20 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { apiJson, useAuth } from "../auth";
 import type { User } from "../auth";
-import { useJson } from "../api";
+import { localDateTime, useJson } from "../api";
 import { QuotaRulesEditor } from "../components/Quota";
 import GcodeIncidents from "../components/GcodeIncidents";
 import type { Rule } from "../groups";
 import { ruleText } from "../groups";
 import PageHeader from "../components/PageHeader";
+import { assignableSiteRoles, roleName, useRoles } from "../roles";
 
 interface AdminUser extends User {
+  role_name: string;
+  /** The caller may change this account (holds every permission it has). */
+  manageable: boolean;
+  suspended_by?: string | null;
+  suspend_reason?: string;
   passkeys: number;
   invite_expires_at: string | null;
   /** Per-user limits; null = the site default for the account kind. */
@@ -20,9 +26,13 @@ interface AdminUser extends User {
   last_gcode_incident: string | null;
 }
 
-/** Admin page: accounts and invite links. Admins cannot touch the owner; nobody can delete it. */
+/** Accounts, their roles and invite links. Only accounts with no permission the viewer lacks can be changed; nobody but the owner changes the owner. */
 export default function UsersPage() {
-  const { user: me } = useAuth();
+  const { user: me, can } = useAuth();
+  const manages = can("users.manage");
+  const roles = useRoles().data?.roles;
+  const assignable = assignableSiteRoles(roles, me);
+  const [suspending, setSuspending] = useState<{ id: string; reason: string } | null>(null);
   const [rev, setRev] = useState(0);
   const users = useJson<AdminUser[]>("/api/users", rev).data ?? [];
   const load = async () => setRev((r) => r + 1);
@@ -31,7 +41,7 @@ export default function UsersPage() {
   const [draft, setDraft] = useState<Rule[]>([]);
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
-  const [role, setRole] = useState<"user" | "admin">("user");
+  const [role, setRole] = useState("user");
   const [remote, setRemote] = useState(false);
   const [busy, setBusy] = useState(false);
   const [inviteLink, setInviteLink] = useState<{
@@ -113,6 +123,17 @@ export default function UsersPage() {
     }
   };
 
+  const setSuspended = async (u: AdminUser, suspended: boolean, reason = "") => {
+    setError("");
+    try {
+      await apiJson(`/api/users/${u.id}`, "PUT", suspended ? { suspended, suspend_reason: reason } : { suspended });
+      setSuspending(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const remove = async (u: AdminUser) => {
     if (!window.confirm(`Delete account "${u.username}"? Their passkeys and API keys stop working.`)) return;
     setError("");
@@ -128,10 +149,13 @@ export default function UsersPage() {
     <div className="page">
       <PageHeader title="Users" icon="users">
         Sign-in is passkey-only. Adding a user gives you an invite link; send it to them and
-        they enrol their own passkey. Owner: the first account, fixed. Admins manage users and
-        printers. Users slice and manage their own passkeys and API keys. Guests joined through a
-        group's link without a passkey; they sign in with one-time codes and can't change printers,
-        profiles or API keys. People can also join on their own through{" "}
+        they enrol their own passkey. What each account may do comes from its{" "}
+        <Link to="/roles">role</Link>: the owner (the first account, fixed) and admins do
+        everything, users slice and print, and custom roles sit in between. You can change an
+        account only when you hold every permission it has. Suspended accounts can't sign in,
+        and their API keys stop working, until reinstated. Guests joined through a group's link
+        without a passkey; they sign in with one-time codes and can't change printers, profiles
+        or API keys. People can also join on their own through{" "}
         <Link to="/groups">group join links</Link>.
       </PageHeader>
       <p className="hint">
@@ -177,21 +201,37 @@ export default function UsersPage() {
         </thead>
         <tbody>
           {users.map((u) => {
-            const locked = u.role === "owner" && u.id !== me?.id;
+            const locked = !u.manageable;
+            const options = assignable.some((r) => r.id === u.role)
+              ? assignable
+              : [{ id: u.role, name: u.role_name }, ...assignable];
             return (
               <tr key={u.id}>
                 <td className="cell-title">
                   {u.username}
                   {u.id === me?.id && <span className="hint"> (you)</span>}
                   {u.kind === "guest" && <span className="source-badge"> guest</span>}
+                  {u.suspended_at && (
+                    <div>
+                      <span className="status-badge status-failed">suspended</span>{" "}
+                      <span className="hint">
+                        {localDateTime(u.suspended_at)}
+                        {u.suspended_by ? ` by ${u.suspended_by}` : ""}
+                        {u.suspend_reason ? `: ${u.suspend_reason}` : ""}
+                      </span>
+                    </div>
+                  )}
                 </td>
                 <td data-label="Role">
-                  {u.role === "owner" ? (
-                    <span className="status-badge">owner</span>
+                  {u.role === "owner" || locked || !manages ? (
+                    <span className="status-badge">{u.role_name}</span>
                   ) : (
                     <select value={u.role} onChange={(e) => setUserRole(u, e.target.value)}>
-                      <option value="user">user</option>
-                      <option value="admin">admin</option>
+                      {options.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
                     </select>
                   )}
                 </td>
@@ -227,7 +267,7 @@ export default function UsersPage() {
                         <span key={g.group_id}>
                           {i > 0 && ", "}
                           <Link to={`/groups/${g.group_id}`}>{g.path}</Link>
-                          {g.role === "manager" ? " (manager)" : ""}
+                          {g.role !== "member" ? ` (${roleName(roles, g.role).toLowerCase()})` : ""}
                           {g.status === "pending" ? " (pending)" : ""}
                         </span>
                       ))}
@@ -273,13 +313,53 @@ export default function UsersPage() {
                   )}
                 </td>
                 <td className="cell-actions">
-                  <button className="btn-sm" onClick={() => reissue(u)} disabled={locked}>
-                    New invite link
-                  </button>{" "}
-                  {u.role !== "owner" && u.id !== me?.id && (
-                    <button className="btn-sm btn-danger" onClick={() => remove(u)}>
-                      Delete
-                    </button>
+                  {suspending?.id === u.id ? (
+                    <form
+                      className="inline-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        setSuspended(u, true, suspending.reason);
+                      }}
+                    >
+                      <input
+                        type="text"
+                        placeholder="Why (shown to admins)"
+                        value={suspending.reason}
+                        maxLength={500}
+                        autoFocus
+                        onChange={(e) => setSuspending({ id: u.id, reason: e.target.value })}
+                      />{" "}
+                      <button className="btn-sm btn-danger" type="submit">
+                        Suspend
+                      </button>{" "}
+                      <button className="btn-sm" type="button" onClick={() => setSuspending(null)}>
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
+                    !locked && (
+                      <>
+                        <button className="btn-sm" onClick={() => reissue(u)}>
+                          New invite link
+                        </button>{" "}
+                        {u.role !== "owner" && u.id !== me?.id && (
+                          <>
+                            {u.suspended_at ? (
+                              <button className="btn-sm" onClick={() => setSuspended(u, false)}>
+                                Reinstate
+                              </button>
+                            ) : (
+                              <button className="btn-sm" onClick={() => setSuspending({ id: u.id, reason: "" })}>
+                                Suspend
+                              </button>
+                            )}{" "}
+                            <button className="btn-sm btn-danger" onClick={() => remove(u)}>
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )
                   )}
                 </td>
               </tr>
@@ -290,6 +370,8 @@ export default function UsersPage() {
 
       <GcodeIncidents user={incidentsOf} onClear={() => setIncidentsOf(null)} rev={rev} />
 
+      {manages && (
+        <>
       <h3>Add user</h3>
       <form className="printer-form" onSubmit={create}>
         <label>
@@ -304,9 +386,12 @@ export default function UsersPage() {
         </label>
         <label>
           Role
-          <select value={role} onChange={(e) => setRole(e.target.value as "user" | "admin")}>
-            <option value="user">user</option>
-            <option value="admin">admin</option>
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            {assignable.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
           </select>
         </label>
         <label className="checkbox-label">
@@ -317,6 +402,8 @@ export default function UsersPage() {
           {busy ? "Creating…" : "Create account and invite link"}
         </button>
       </form>
+        </>
+      )}
       {error && <p className="login-error">{error}</p>}
     </div>
   );

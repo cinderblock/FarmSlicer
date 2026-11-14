@@ -37,6 +37,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::permissions::{Cap, GroupCap};
 use crate::auth::CurrentUser;
 use crate::db::{Db, PrintRecord, PushSubscription};
 use crate::groups::{Tree, Viewer};
@@ -100,12 +101,14 @@ pub fn relations(db: &Db, tree: &Tree, viewer: &Viewer, print: &PrintRecord, job
     if print.printer_id.as_ref().is_some_and(|p| db.operated_printers(me).contains(p)) {
         r.push("operated");
     }
-    // As a manager, not as an admin (that's `all`).
-    let member = Viewer { user: viewer.user.clone(), admin: false, memberships: viewer.memberships.clone() };
-    if print.group_id.as_deref().is_some_and(|g| member.can_manage(tree, g)) {
+    // Through a group role, not a site-wide one (that's `all`).
+    if print.group_id.as_deref().is_some_and(|g| {
+        let held = viewer.held_in(tree, g);
+        held.has(GroupCap::PrintsApprove) || held.has(GroupCap::PrintsControl)
+    }) {
         r.push("managed");
     }
-    if viewer.admin {
+    if sees_all(viewer) {
         r.push("all");
     }
     r
@@ -452,6 +455,11 @@ fn api_err(code: StatusCode, msg: impl Into<String>) -> ApiError {
     (code, Json(json!({"error": msg.into()})))
 }
 
+/// Every print is theirs to follow: they see or run them all.
+fn sees_all(viewer: &Viewer) -> bool {
+    viewer.can(Cap::LibraryViewAll) || viewer.can(Cap::PrintersOperate)
+}
+
 /// The relations that can apply to `viewer` (the Account page offers only
 /// those).
 fn relations_for(state: &AppState, viewer: &Viewer) -> Vec<&'static str> {
@@ -459,10 +467,10 @@ fn relations_for(state: &AppState, viewer: &Viewer) -> Vec<&'static str> {
     if !state.db.operated_printers(&viewer.user.id).is_empty() {
         r.push("operated");
     }
-    if viewer.memberships.iter().any(|m| m.status == "active" && m.role == "manager") {
+    if viewer.holds_anywhere(GroupCap::PrintsApprove) || viewer.holds_anywhere(GroupCap::PrintsControl) {
         r.push("managed");
     }
-    if viewer.admin {
+    if sees_all(viewer) {
         r.push("all");
     }
     r

@@ -1,4 +1,5 @@
 import { StrictMode, useEffect } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import Layout from "./components/Layout";
@@ -27,6 +28,8 @@ import JoinPage from "./pages/Join";
 import SettingsPage from "./pages/Settings";
 import FeedbackPage from "./pages/Feedback";
 import ReportsPage from "./pages/Reports";
+import RolesPage from "./pages/Roles";
+import AuditPage from "./pages/Audit";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth";
 import { installErrorReporting, setSignedIn } from "./errorReporting";
@@ -55,7 +58,8 @@ function Splash({ text }: { text: string }) {
 
 /** Everything except the invite, recovery and join pages: setup → login → the app. */
 function Gate() {
-  const { status, offline, isAdmin } = useAuth();
+  const { status, offline, can } = useAuth();
+  const only = (allowed: boolean, page: ReactNode) => (allowed ? page : <Navigate to="/" replace />);
 
   if (offline) return <Splash text="Cannot reach the server. Retrying…" />;
   if (!status) return <Splash text="Loading…" />;
@@ -82,10 +86,12 @@ function Gate() {
         <Route path="account" element={<AccountPage />} />
         <Route path="groups" element={<GroupsPage />} />
         <Route path="groups/:id" element={<GroupPage />} />
-        <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
-        <Route path="settings" element={isAdmin ? <SettingsPage /> : <Navigate to="/" replace />} />
+        <Route path="users" element={only(can("users.view"), <UsersPage />)} />
+        <Route path="roles" element={only(can("roles.manage") || can("users.manage"), <RolesPage />)} />
+        <Route path="audit" element={only(can("audit.view"), <AuditPage />)} />
+        <Route path="settings" element={only(can("settings.manage"), <SettingsPage />)} />
         <Route path="feedback" element={<FeedbackPage />} />
-        <Route path="reports" element={isAdmin ? <ReportsPage /> : <Navigate to="/" replace />} />
+        <Route path="reports" element={only(can("reports.view"), <ReportsPage />)} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

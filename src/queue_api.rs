@@ -10,6 +10,7 @@ use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::permissions::{Cap, GroupCap};
 use crate::auth::CurrentUser;
 use crate::db::{Job, QueueEntry, User};
 use crate::groups::{Tree, Viewer};
@@ -34,7 +35,7 @@ fn entry_job(state: &AppState, e: &QueueEntry) -> Option<Job> {
 /// Who sees an entry in full: whoever sees its job, admins, and the
 /// operators of a printer it could go to.
 fn can_see_entry(state: &AppState, tree: &Tree, viewer: &Viewer, e: &QueueEntry) -> bool {
-    viewer.admin
+    viewer.can(Cap::PrintersOperate)
         || entry_job(state, e).is_some_and(|j| viewer.can_see_job(tree, &j))
         || crate::pools::operates_entry(state, viewer, e)
 }
@@ -42,10 +43,10 @@ fn can_see_entry(state: &AppState, tree: &Tree, viewer: &Viewer, e: &QueueEntry)
 /// Who changes or removes it: whoever queued it, the job's creator, the
 /// job's group's managers, admins, operators.
 fn can_manage_entry(state: &AppState, tree: &Tree, viewer: &Viewer, e: &QueueEntry) -> bool {
-    viewer.admin
+    viewer.can(Cap::PrintersOperate)
         || e.created_by.as_deref() == Some(viewer.user.id.as_str())
         || e.job_user_id.as_deref() == Some(viewer.user.id.as_str())
-        || e.job_group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+        || e.job_group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::PrintsControl))
         || crate::pools::operates_entry(state, viewer, e)
 }
 
@@ -145,7 +146,7 @@ async fn list_queue(
                 "name": p.name,
                 "busy": crate::prints_api::busy_reason(&state, p),
                 "next": next,
-                "operates": viewer.admin || crate::pools::operates(&state, &viewer, Some(&p.id)),
+                "operates": viewer.can(Cap::PrintersOperate) || crate::pools::operates(&state, &viewer, Some(&p.id)),
                 "send_mode": crate::dispatch::send_mode(&state, p),
                 "dispatch": crate::dispatch::view(&state, &p.id),
             })
@@ -437,7 +438,7 @@ async fn send_one(
 /// operators may send to their pools' printers.
 fn may_send_to(state: &AppState, tree: &Tree, viewer: &Viewer, e: &QueueEntry, printer_id: &str) -> Result<(), ApiError> {
     let sees_job = entry_job(state, e).is_some_and(|j| viewer.can_see_job(tree, &j));
-    if viewer.admin || sees_job || crate::pools::operates(state, viewer, Some(printer_id)) {
+    if viewer.can(Cap::PrintersOperate) || sees_job || crate::pools::operates(state, viewer, Some(printer_id)) {
         Ok(())
     } else {
         Err(api_err(StatusCode::FORBIDDEN, "only the printer's operators, admins and whoever can see the job send it"))
@@ -455,7 +456,7 @@ async fn send_next(
     let body = body.map(|b| b.0).unwrap_or_default();
     let (tree, viewer) = groups_api::context(&state, &user);
     let printer = state.db.get_printer(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such printer"))?;
-    if !viewer.admin && !crate::pools::operates(&state, &viewer, Some(&id)) {
+    if !viewer.can(Cap::PrintersOperate) && !crate::pools::operates(&state, &viewer, Some(&id)) {
         return Err(api_err(StatusCode::FORBIDDEN, "only the printer's operators and admins send the queue to it"));
     }
     if let Some(why) = crate::prints_api::busy_reason(&state, &printer) {

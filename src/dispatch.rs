@@ -29,6 +29,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
+use crate::permissions::Cap;
 use crate::auth::CurrentUser;
 use crate::db::{Dispatch, Printer};
 use crate::groups_api;
@@ -104,7 +105,7 @@ async fn tick(state: &Arc<AppState>) {
         // Sends go out as whoever set the mode, while they may.
         let Some(user) = d.set_by.as_deref().and_then(|u| state.db.get_user(u)) else { continue };
         let (tree, viewer) = groups_api::context(state, &user);
-        if !viewer.admin && !crate::pools::operates(state, &viewer, Some(&printer.id)) {
+        if !viewer.can(Cap::PrintersOperate) && !crate::pools::operates(state, &viewer, Some(&printer.id)) {
             continue;
         }
         let now = Instant::now();
@@ -247,7 +248,7 @@ async fn set_mode(
 ) -> Result<Json<Value>, ApiError> {
     let (_, viewer) = groups_api::context(&state, &user);
     let printer = state.db.get_printer(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such printer"))?;
-    if !viewer.admin && !crate::pools::operates(&state, &viewer, Some(&id)) {
+    if !viewer.can(Cap::PrintersOperate) && !crate::pools::operates(&state, &viewer, Some(&id)) {
         return Err(api_err(StatusCode::FORBIDDEN, "only admins and the printer's operators choose how it takes the queue"));
     }
     if !MODES.contains(&body.mode.as_str()) {
@@ -289,7 +290,7 @@ async fn bed_clear(
         .into_iter()
         .next()
         .is_some_and(|p| p.user_id.as_deref() == Some(user.id.as_str()));
-    if !viewer.admin && !crate::pools::operates(&state, &viewer, Some(&id)) && !last_sender {
+    if !viewer.can(Cap::PrintersOperate) && !crate::pools::operates(&state, &viewer, Some(&id)) && !last_sender {
         return Err(api_err(StatusCode::FORBIDDEN, "only admins, the printer's operators and whoever printed last can"));
     }
     state.db.set_bed_clear(&id, true);

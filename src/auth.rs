@@ -45,6 +45,7 @@ use url::Url;
 use webauthn_rs::prelude::*;
 
 use crate::db::User;
+use crate::permissions::{self, Cap, Capability};
 use crate::server::AppState;
 
 pub const SESSION_COOKIE: &str = "fs_session";
@@ -241,8 +242,10 @@ pub fn sha256_hex(input: &str) -> String {
     hex::encode(Sha256::digest(input.as_bytes()))
 }
 
-pub fn is_admin(user: &User) -> bool {
-    matches!(user.role.as_str(), "owner" | "admin")
+/// Does the signed-in account hold this site capability? (`user.caps` is
+/// filled in by [`authenticate`].)
+pub fn can(user: &User, cap: Cap) -> bool {
+    user.caps.has(cap)
 }
 
 pub fn valid_username(name: &str) -> bool {
@@ -398,11 +401,22 @@ pub enum Refusal {
     Unauthenticated,
     /// Valid credentials, but not usable from the internet.
     Remote(&'static str),
+    /// The account is suspended.
+    Suspended,
 }
 
 /// Who is making this request: session cookie first, then API key. From the
 /// internet, only a passkey session of an approved account counts.
 pub fn authenticate(state: &AppState, req: &Request) -> Result<User, Refusal> {
+    let mut user = identify(state, req)?;
+    if user.suspended_at.is_some() {
+        return Err(Refusal::Suspended);
+    }
+    user.caps = permissions::site_caps(&state.db, &user.role);
+    Ok(user)
+}
+
+fn identify(state: &AppState, req: &Request) -> Result<User, Refusal> {
     let remote = is_remote(req.headers());
     if auth_disabled() {
         return if remote {
@@ -446,6 +460,8 @@ fn dev_user() -> User {
         kind: "full".to_string(),
         quotas: None,
         remote_access: false,
+        suspended_at: None,
+        caps: permissions::SiteCaps::all(),
     }
 }
 
@@ -472,6 +488,7 @@ pub async fn require_auth(
             next.run(req).await
         }
         Err(Refusal::Remote(msg)) => remote_refusal(msg),
+        Err(Refusal::Suspended) => suspended_refusal(),
         Err(Refusal::Unauthenticated) => {
             let body = if setup_required(&state.db) {
                 r#"{"error":"setup required","setup_required":true}"#
@@ -518,13 +535,30 @@ pub fn require_full(user: &User) -> Result<(), (StatusCode, axum::Json<serde_jso
     }
 }
 
-pub fn require_admin(user: &User) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
-    if is_admin(user) {
+/// Refuses unless the signed-in account holds `cap`.
+pub fn require(user: &User, cap: Cap) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
+    if can(user, cap) {
         Ok(())
     } else {
-        Err((
-            StatusCode::FORBIDDEN,
-            axum::Json(serde_json::json!({"error": "admin role required"})),
-        ))
+        Err(missing(cap))
     }
+}
+
+/// The refusal for a missing site capability, naming it.
+pub fn missing(cap: Cap) -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({
+            "error": format!("you need the \"{}\" permission for that", cap.label()),
+            "missing_capability": cap.id(),
+        })),
+    )
+}
+
+pub fn suspended_refusal() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({"error": "this account is suspended", "suspended": true})),
+    )
+        .into_response()
 }

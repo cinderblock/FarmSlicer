@@ -13,9 +13,11 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::audit::{self, Target};
 use crate::auth::{self, CurrentUser};
 use crate::db::{Group, JobFilter, JoinLink, Membership};
 use crate::groups::{self, GroupSettings, Tree, Viewer};
+use crate::permissions::{Cap, Capability, GroupCap};
 use crate::quota::{self, GroupQuotas, Rule};
 use crate::server::AppState;
 
@@ -39,7 +41,24 @@ pub fn context(state: &AppState, user: &crate::db::User) -> (Tree, Viewer) {
 
 /// May the viewer look at this group at all?
 fn can_view(tree: &Tree, viewer: &Viewer, id: &str) -> bool {
-    viewer.membership(id).is_some() || viewer.can_manage(tree, id)
+    viewer.membership(id).is_some() || viewer.manages(tree, id)
+}
+
+fn group_target(g: &Group) -> Target<'_> {
+    Target { kind: "group", id: &g.id, name: &g.name }
+}
+
+/// Refuses unless the viewer holds `cap` in the group (404 when they can't
+/// see the group at all).
+fn require_in(tree: &Tree, viewer: &Viewer, id: &str, cap: GroupCap) -> Result<(), ApiError> {
+    if tree.get(id).is_none() || !can_view(tree, viewer, id) {
+        return Err(not_found());
+    }
+    if viewer.can_in(tree, id, cap) {
+        Ok(())
+    } else {
+        Err(forbidden(&format!("you need the \"{}\" permission in this group", cap.label())))
+    }
 }
 
 pub fn group_summary(tree: &Tree, viewer: &Viewer, g: &Group, counts: &HashMap<String, i64>) -> Value {
@@ -54,7 +73,9 @@ pub fn group_summary(tree: &Tree, viewer: &Viewer, g: &Group, counts: &HashMap<S
         "member_count": counts.get(&g.id).copied().unwrap_or(0),
         "my_role": mine.map(|m| m.role.clone()),
         "my_status": mine.map(|m| m.status.clone()),
-        "can_manage": viewer.can_manage(tree, &g.id),
+        "can_manage": viewer.manages(tree, &g.id),
+        // What the viewer may do here (src/permissions.rs GroupCap ids).
+        "my_caps": viewer.caps_in(tree, &g.id).ids(),
         "created_at": g.created_at,
     })
 }
@@ -138,17 +159,19 @@ async fn create_group(
     let (tree, viewer) = context(&state, &user);
     valid_name(&body.name)?;
     match &body.parent_id {
-        None if !viewer.admin => return Err(forbidden("only admins create top-level groups")),
+        None if !viewer.can(Cap::GroupsManageAll) => {
+            return Err(forbidden("only those who manage every group create top-level groups"));
+        }
         Some(p) if tree.get(p).is_none() => return Err(not_found()),
-        Some(p) if !viewer.can_manage(&tree, p) => {
-            return Err(forbidden("you don't manage the parent group"));
+        Some(p) if !viewer.can_in(&tree, p, GroupCap::Subgroups) => {
+            return Err(forbidden("you can't create subgroups there"));
         }
         _ => {}
     }
     let settings = body.settings.unwrap_or_default();
     settings.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
-    if settings.listed.is_some() && !viewer.admin {
-        return Err(forbidden("only admins list groups on the sign-in page"));
+    if settings.listed.is_some() && !viewer.can(Cap::GroupsManageAll) {
+        return Err(forbidden("only those who manage every group list groups on the sign-in page"));
     }
     let group = state
         .db
@@ -161,6 +184,7 @@ async fn create_group(
             Some(&user.id),
         )
         .map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+    audit::record(&state.db, &user, "group.create", group_target(&group), json!({"parent_id": group.parent_id}));
     let (tree, viewer) = context(&state, &user);
     Ok((
         StatusCode::CREATED,
@@ -179,14 +203,15 @@ async fn get_group(
         return Err(not_found());
     }
     let counts = state.db.member_counts();
-    let manage = viewer.can_manage(&tree, &id);
+    let manage = viewer.manages(&tree, &id);
     let mut v = group_summary(&tree, &viewer, g, &counts);
     let obj = v.as_object_mut().unwrap();
     obj.insert("settings".into(), json!(tree.settings(&id)));
     obj.insert("effective".into(), json!(tree.effective(&id)));
     obj.insert("quotas".into(), json!(GroupQuotas::parse(&g.quotas)));
     obj.insert("can_govern".into(), json!(viewer.can_govern(&tree, &id)));
-    obj.insert("is_admin".into(), json!(viewer.admin));
+    // Manages every group: may move it and list it on the sign-in page.
+    obj.insert("manage_all".into(), json!(viewer.can(Cap::GroupsManageAll)));
     obj.insert(
         "ancestors".into(),
         json!(tree
@@ -241,8 +266,14 @@ async fn update_group(
 ) -> Result<Json<Value>, ApiError> {
     let (tree, viewer) = context(&state, &user);
     let Some(g) = tree.get(&id).cloned() else { return Err(not_found()) };
-    if !viewer.can_manage(&tree, &id) {
+    if !viewer.manages(&tree, &id) {
         return Err(if can_view(&tree, &viewer, &id) { forbidden("you don't manage this group") } else { not_found() });
+    }
+    let edits_settings = body.name.as_ref().is_some_and(|n| *n != g.name)
+        || body.description.as_ref().is_some_and(|d| *d != g.description)
+        || body.settings.as_ref().is_some_and(|s| *s != tree.settings(&id));
+    if edits_settings {
+        require_in(&tree, &viewer, &id, GroupCap::Settings)?;
     }
     let name = body.name.unwrap_or(g.name.clone());
     valid_name(&name)?;
@@ -251,8 +282,8 @@ async fn update_group(
     let settings_json = match body.settings {
         Some(settings) => {
             settings.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
-            if settings.listed != tree.settings(&id).listed && !viewer.admin {
-                return Err(forbidden("only admins list groups on the sign-in page"));
+            if settings.listed != tree.settings(&id).listed && !viewer.can(Cap::GroupsManageAll) {
+                return Err(forbidden("only those who manage every group list groups on the sign-in page"));
             }
             serde_json::to_string(&settings).unwrap()
         }
@@ -270,8 +301,8 @@ async fn update_group(
     };
     let parent_id = match body.parent_id {
         Some(new_parent) => {
-            if !viewer.admin {
-                return Err(forbidden("only admins move groups"));
+            if !viewer.can(Cap::GroupsManageAll) {
+                return Err(forbidden("only those who manage every group move groups"));
             }
             if let Some(p) = &new_parent {
                 if tree.get(p).is_none() {
@@ -288,6 +319,26 @@ async fn update_group(
     state
         .db
         .update_group(&id, parent_id.as_deref(), &name, &description, &settings_json, &quotas_json);
+    let parsed = |s: &str| serde_json::from_str::<Value>(s).ok();
+    let mut changed = serde_json::Map::new();
+    if name != g.name {
+        changed.insert("name".into(), json!({"from": g.name, "to": name}));
+    }
+    if description != g.description {
+        changed.insert("description".into(), json!({"to": description}));
+    }
+    if settings_json != g.settings {
+        changed.insert("settings".into(), json!({"from": parsed(&g.settings), "to": parsed(&settings_json)}));
+    }
+    if quotas_json != g.quotas {
+        changed.insert("quotas".into(), json!({"from": parsed(&g.quotas), "to": parsed(&quotas_json)}));
+    }
+    if parent_id != g.parent_id {
+        changed.insert("parent_id".into(), json!({"from": g.parent_id, "to": parent_id}));
+    }
+    if !changed.is_empty() {
+        audit::record(&state.db, &user, "group.update", group_target(&g), Value::Object(changed));
+    }
     get_group(State(state), Extension(CurrentUser(user)), Path(id)).await
 }
 
@@ -306,10 +357,12 @@ async fn delete_group(
     if !tree.children(&id).is_empty() {
         return Err(err(StatusCode::CONFLICT, "delete or move its subgroups first"));
     }
+    let g = tree.get(&id).cloned().unwrap();
     state
         .db
         .delete_group(&id)
         .map_err(|e| err(StatusCode::CONFLICT, e))?;
+    audit::record(&state.db, &user, "group.delete", group_target(&g), json!({"parent_id": g.parent_id}));
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -324,7 +377,7 @@ async fn list_members(
     if tree.get(&id).is_none() || !can_view(&tree, &viewer, &id) {
         return Err(not_found());
     }
-    if !viewer.can_manage(&tree, &id) && !viewer.is_active_member(&id) {
+    if !viewer.can_in(&tree, &id, GroupCap::Members) && !viewer.is_active_member(&id) {
         return Err(forbidden("your membership is waiting for approval"));
     }
     let members: Vec<Value> = state.db.group_members(&id).iter().map(member_json).collect();
@@ -338,12 +391,24 @@ struct AddMember {
     role: Option<String>,
 }
 
-fn valid_role(role: &str) -> Result<(), ApiError> {
-    if matches!(role, "member" | "manager") {
+/// A group role the viewer may give here.
+fn givable_role(tree: &Tree, viewer: &Viewer, id: &str, role: &str) -> Result<(), ApiError> {
+    if viewer.can_give_group_role(tree, id, role) {
         Ok(())
     } else {
-        Err(err(StatusCode::BAD_REQUEST, "role must be member or manager"))
+        Err(err(
+            StatusCode::FORBIDDEN,
+            format!("you can't give the role '{role}' here (no such group role, or it has permissions you don't have here)"),
+        ))
     }
+}
+
+fn member_detail(username: &str, extra: Value) -> Value {
+    let mut v = json!({"user": username});
+    if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
+        o.extend(e.clone());
+    }
+    v
 }
 
 async fn add_member(
@@ -353,15 +418,23 @@ async fn add_member(
     Json(body): Json<AddMember>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (tree, viewer) = context(&state, &user);
-    if tree.get(&id).is_none() || !viewer.can_manage(&tree, &id) {
-        return Err(not_found());
-    }
-    let role = body.role.as_deref().unwrap_or("member");
-    valid_role(role)?;
+    require_in(&tree, &viewer, &id, GroupCap::Members)?;
+    let role = body.role.as_deref().unwrap_or(crate::permissions::MEMBER);
+    givable_role(&tree, &viewer, &id, role)?;
     let Some(target) = state.db.get_user_by_username(&body.username) else {
         return Err(err(StatusCode::NOT_FOUND, "no such user"));
     };
+    if let Some(old) = state.db.get_membership(&id, &target.id) {
+        givable_role(&tree, &viewer, &id, &old.role)?;
+    }
     state.db.upsert_membership(&id, &target.id, role, "active");
+    audit::record(
+        &state.db,
+        &user,
+        "group.member.add",
+        group_target(tree.get(&id).unwrap()),
+        member_detail(&target.username, json!({"role": role})),
+    );
     let m = state.db.get_membership(&id, &target.id).unwrap();
     Ok((StatusCode::CREATED, Json(member_json(&m))))
 }
@@ -385,14 +458,15 @@ async fn update_member(
     Json(body): Json<UpdateMember>,
 ) -> Result<Json<Value>, ApiError> {
     let (tree, viewer) = context(&state, &user);
-    if tree.get(&id).is_none() || !viewer.can_manage(&tree, &id) {
-        return Err(not_found());
-    }
+    require_in(&tree, &viewer, &id, GroupCap::Members)?;
     let Some(m) = state.db.get_membership(&id, &user_id) else {
         return Err(err(StatusCode::NOT_FOUND, "not a member"));
     };
+    // Changing someone means being able to give the role they have.
+    givable_role(&tree, &viewer, &id, &m.role)?;
     let role = body.role.unwrap_or(m.role.clone());
-    valid_role(&role)?;
+    givable_role(&tree, &viewer, &id, &role)?;
+    let group = tree.get(&id).unwrap();
     let status = body.status.unwrap_or(m.status.clone());
     if !matches!(status.as_str(), "active" | "pending") {
         return Err(err(StatusCode::BAD_REQUEST, "status must be active or pending"));
@@ -406,8 +480,17 @@ async fn update_member(
         }
         let json = q.as_ref().map(|r| serde_json::to_string(r).unwrap());
         state.db.set_membership_quotas(&id, &user_id, json.as_deref());
+        audit::record(&state.db, &user, "group.member.quotas", group_target(group), member_detail(&m.username, json!({"to": q})));
     }
     state.db.upsert_membership(&id, &user_id, &role, &status);
+    if role != m.role {
+        let detail = member_detail(&m.username, json!({"from": m.role, "to": role}));
+        audit::record(&state.db, &user, "group.member.role", group_target(group), detail);
+    }
+    if status != m.status {
+        let action = if status == "active" { "group.member.approve" } else { "group.member.unapprove" };
+        audit::record(&state.db, &user, action, group_target(group), member_detail(&m.username, json!({})));
+    }
     Ok(Json(member_json(&state.db.get_membership(&id, &user_id).unwrap())))
 }
 
@@ -421,10 +504,17 @@ async fn remove_member(
     if tree.get(&id).is_none() || !can_view(&tree, &viewer, &id) {
         return Err(not_found());
     }
-    if user_id != user.id && !viewer.can_manage(&tree, &id) {
-        return Err(forbidden("you don't manage this group"));
+    let m = state.db.get_membership(&id, &user_id);
+    if user_id != user.id {
+        require_in(&tree, &viewer, &id, GroupCap::Members)?;
+        if let Some(m) = &m {
+            givable_role(&tree, &viewer, &id, &m.role)?;
+        }
     }
     if state.db.delete_membership(&id, &user_id) {
+        let name = m.map(|m| m.username).unwrap_or_default();
+        let action = if user_id == user.id { "group.member.leave" } else { "group.member.remove" };
+        audit::record(&state.db, &user, action, group_target(tree.get(&id).unwrap()), member_detail(&name, json!({})));
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(err(StatusCode::NOT_FOUND, "not a member"))
@@ -506,7 +596,7 @@ async fn group_usage(
     let lines = quota::group_lines(&state.db, &tree, &user, &id);
     // Managers also get each member's usage of the per-member rules that
     // apply here (this group's and its ancestors').
-    let members: Vec<Value> = if viewer.can_manage(&tree, &id) {
+    let members: Vec<Value> = if viewer.can_in(&tree, &id, GroupCap::Members) {
         state
             .db
             .group_members(&id)
@@ -534,9 +624,7 @@ async fn list_links(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let (tree, viewer) = context(&state, &user);
-    if tree.get(&id).is_none() || !viewer.can_manage(&tree, &id) {
-        return Err(not_found());
-    }
+    require_in(&tree, &viewer, &id, GroupCap::Links)?;
     let links: Vec<Value> = state.db.list_join_links(&id).iter().map(|l| link_json(&state, l)).collect();
     Ok(Json(json!(links)))
 }
@@ -575,9 +663,7 @@ async fn create_link(
     Json(body): Json<CreateLink>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let (tree, viewer) = context(&state, &user);
-    if tree.get(&id).is_none() || !viewer.can_manage(&tree, &id) {
-        return Err(not_found());
-    }
+    require_in(&tree, &viewer, &id, GroupCap::Links)?;
     let code = if body.public {
         let code = body.code.as_deref().unwrap_or("").trim().to_lowercase();
         if !valid_public_code(&code) {
@@ -614,7 +700,7 @@ struct UpdateLink {
 fn managed_link(state: &AppState, user: &crate::db::User, id: &str, link_id: &str) -> Result<JoinLink, ApiError> {
     let (tree, viewer) = context(state, user);
     match state.db.get_join_link(link_id) {
-        Some(l) if l.group_id == id && viewer.can_manage(&tree, id) => Ok(l),
+        Some(l) if l.group_id == id && viewer.can_in(&tree, id, GroupCap::Links) => Ok(l),
         _ => Err(err(StatusCode::NOT_FOUND, "link not found")),
     }
 }
@@ -675,7 +761,7 @@ async fn get_settings(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::SettingsManage)?;
     Ok(Json(settings_json(&state)))
 }
 
@@ -722,7 +808,8 @@ async fn update_settings(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(body): Json<UpdateSettings>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::SettingsManage)?;
+    let before = settings_json(&state);
     if let Some(s) = &body.season_start {
         if groups::parse_month_day(s).is_none() {
             return Err(err(StatusCode::BAD_REQUEST, "season_start must be MM-DD"));
@@ -787,7 +874,19 @@ async fn update_settings(
             crate::safety::spawn_recheck(state.clone());
         }
     }
-    Ok(Json(settings_json(&state)))
+    let after = settings_json(&state);
+    // Only what changed, old and new.
+    let changed: serde_json::Map<String, Value> = after
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, v)| before.get(k.as_str()) != Some(*v))
+        .map(|(k, v)| (k.clone(), json!({"from": before.get(k.as_str()), "to": v})))
+        .collect();
+    if !changed.is_empty() {
+        audit::record(&state.db, &user, "settings.update", Target { kind: "site", id: "", name: "settings" }, Value::Object(changed));
+    }
+    Ok(Json(after))
 }
 
 /// `GET /api/guide`: what the Guide page shows besides its fixed text.

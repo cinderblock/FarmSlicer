@@ -20,10 +20,11 @@ type Tab = "manual" | "automatic";
 /** Admins: every report and error, to triage. Everyone else: what they
  *  sent, the errors their browser reported, and what became of them. */
 export default function FeedbackPage() {
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const triages = can("feedback.triage");
   const [tab, setTab] = useState<Tab>("manual");
   const [kind, setKind] = useState("");
-  const [status, setStatus] = useState(isAdmin ? "open" : "");
+  const [status, setStatus] = useState(triages ? "open" : "");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [rev, setRev] = useState(0);
 
@@ -42,7 +43,7 @@ export default function FeedbackPage() {
   const changed = feedbackChanged;
 
   const tabLabel = (t: Tab) => {
-    const base = t === "manual" ? (isAdmin ? "Reports" : "My reports") : isAdmin ? "Errors" : "Errors from my browser";
+    const base = t === "manual" ? (triages ? "Reports" : "My reports") : triages ? "Errors" : "Errors from my browser";
     const fresh = counts?.[t].new ?? 0;
     return (
       <>
@@ -54,8 +55,8 @@ export default function FeedbackPage() {
 
   return (
     <div className="page feedback-page">
-      <PageHeader title={isAdmin ? "Feedback" : "My feedback"} icon="feedback">
-        {isAdmin
+      <PageHeader title={triages ? "Feedback" : "My feedback"} icon="feedback">
+        {triages
           ? "What people reported with the Feedback button, and errors reported automatically by browsers and the server (one entry per distinct error, with a count). Reporters see the status and your note."
           : "What you sent with the Feedback button, and errors your browser reported automatically. The admins set the status and may leave a note."}
       </PageHeader>
@@ -113,7 +114,7 @@ export default function FeedbackPage() {
           <FeedbackRow
             key={item.id}
             item={item}
-            admin={isAdmin}
+            admin={triages}
             open={expanded === item.id}
             onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
             rev={rev}

@@ -14,6 +14,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::permissions::Cap;
 use crate::auth::{self, CurrentUser};
 use crate::server::{AppState, JobInputs};
 
@@ -199,7 +200,7 @@ async fn defaults_report(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Query(q): Query<ReportQuery>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::ReportsView)?;
     let days = q.days.unwrap_or(90);
     let jobs = state.db.jobs_with_proposals(days);
     let mut report = Report::default();

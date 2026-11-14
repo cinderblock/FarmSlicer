@@ -199,9 +199,32 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 1. ~~Survey what exists~~ (2026-11-14).
 2. ~~Scope questions~~ (answered 2026-11-14).
 3. ~~Design review~~ (approved 2026-11-14).
-4. **← current** Slice 1, then slices 2–6.
+4. ~~Slice 1~~ (2026-11-14).
+5. **← current** Slice 2: printer access rules, certifications, approval
+   routing. Then slices 3–6.
 
 ## Findings / gotchas
+
+- Slice 1 as built (2026-11-14): `src/permissions.rs` (17 site caps, 11
+  group caps, built-in roles in code), `src/db/roles.rs` (custom roles,
+  suspension columns), `src/audit.rs` + `src/db/audit.rs`,
+  `src/roles_api.rs`; `User.caps` filled by `auth::authenticate`;
+  `Viewer::{can, caps_in, can_in, held_in, can_govern, can_edit_job,
+  unrestricted, can_give_group_role}`. Group role ids live in
+  `group_members.role` like `manager`/`member` did, so nothing migrated.
+- Suspending deletes the account's sessions (they get 401, not a
+  "suspended" message); API keys get 403 `{suspended: true}`, and sign-in
+  attempts too (`auth_api::start_session` is every way in).
+- `shared_library` defaults to on, so "members can't see the group's jobs"
+  needs it set off explicitly (the e2e test does).
+- `tests/printers-e2e.mjs` fails on master already (ISSUES.md, group-logo
+  EPIPE); every other suite passes with slice 1.
+- Shared working tree: other threads stage whole files (`git add file`),
+  which can sweep this thread's hunks into their commits; check
+  `git diff --cached` before they commit, and build from HEAD + this
+  thread's diff in a temporary worktree (scratchpad `snap.sh`).
+- Bash heredocs with Rust lifetimes (`'_`, `'de`) break the tool's quoting:
+  edit scripts go through files.
 
 - About 80 admin checks across 19 files (`viewer.admin`,
   `require_admin`, `auth::is_admin`); slice 1 must convert every one, or
@@ -218,7 +241,9 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 - [x] Surveyed what exists (2026-11-14)
 - [x] Scope agreed (2026-11-14)
 - [x] Design reviewed (approved 2026-11-14)
-- [ ] Slice 1: permissions core, suspend, audit log
+- [x] Slice 1: permissions core, suspend, audit log (unit + e2e pass;
+      `tests/permissions-e2e.mjs`; web Roles, Audit log, Users, group
+      Members)
 - [ ] Slice 2: printer access, certifications, approvals
 - [ ] Slice 3: labels
 - [ ] Slice 4: folders

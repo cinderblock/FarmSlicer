@@ -8,7 +8,8 @@ import PageHeader from "../components/PageHeader";
 
 /** /groups — the caller's groups (admins: every group), joining, creating top-level groups. */
 export default function GroupsPage() {
-  const { status, isAdmin, isGuest } = useAuth();
+  const { status, can, isGuest } = useAuth();
+  const managesAll = can("groups.manage_all");
   const navigate = useNavigate();
   const [rev, setRev] = useState(0);
   const groups = useJson<GroupSummary[]>("/api/groups", rev);
@@ -61,7 +62,7 @@ export default function GroupsPage() {
 
       {others.length > 0 && (
         <>
-          <h3>{isAdmin ? "All other groups" : "Groups you manage"}</h3>
+          <h3>{managesAll ? "All other groups" : "Groups you manage"}</h3>
           <GroupTable groups={others} />
         </>
       )}
@@ -87,7 +88,7 @@ export default function GroupsPage() {
         </button>
       </form>
 
-      {isAdmin && !isGuest && (
+      {managesAll && !isGuest && (
         <>
           <h3>New top-level group</h3>
           <form className="printer-form inline-form" onSubmit={create}>

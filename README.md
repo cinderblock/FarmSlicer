@@ -262,8 +262,19 @@ There are no passwords and no secrets to configure.
   security key). Do that promptly after deploying.
 - **Adding users**: the owner or an admin creates the account on the Users
   page and gets a single-use **invite link** (valid 72 h); the invitee opens it
-  and enrols their own passkey. Roles: `owner` (fixed), `admin` (manage users
-  and printers), `user` (slice, view, manage own passkeys and API keys).
+  and enrols their own passkey.
+- **Roles** (Roles page): what an account may do is a set of permissions
+  from its site role, plus a role in each group it belongs to. Built in:
+  `owner` (fixed, everything), `admin` (everything but the owner), `user`
+  (slice, print, own passkeys and API keys); in groups `manager`
+  (everything there and below) and `member`. Admins make custom roles from
+  the fixed permission list (`src/permissions.rs`), such as a "Printer
+  admin" or a group "Approver". Nobody gives a permission they don't hold,
+  or changes an account that has one they lack.
+- **Suspending** an account (Users page) ends its sessions and stops its
+  API keys until it's reinstated; its history stays.
+- **Audit log** (`/audit`): who changed accounts, roles, groups and site
+  settings, and what changed.
 - **Signing in**: "Sign in with a passkey" (any passkey for this site), or by
   username to narrow it to that account's passkeys. Sessions are 30-day
   cookies.
@@ -329,9 +340,10 @@ Remote sign-ins are logged with the proxy's `X-Forwarded-For`.
 All of this is configured at runtime in the web UI (Groups and Settings
 pages); nothing is set through environment variables.
 
-- **Groups** form a tree; a user can be in any number of them, as `member`
-  or `manager`. Managers run their group and everything below it (members,
-  join links, settings, subgroups); admins run everything.
+- **Groups** form a tree; a user can be in any number of them, each with a
+  group role (`member`, `manager`, or a custom one). A role's permissions
+  hold in its group and everything below it: managers run all of it
+  (members, join links, settings, subgroups); admins run everything.
 - **Jobs belong to a group** when the slicer picks one (the Slice page offers
   the groups you're an active member of), otherwise they are personal.
   A job is visible to its creator, to the group's members when the group's
@@ -524,7 +536,9 @@ summary prints the `pin.json` to paste there.
 | `GET /api/status` | server load + whether a browser engine is deployed |
 | `GET /api/auth/status`, `POST /api/auth/{setup,login,recover}/{start,finish}`, `GET /api/auth/invite/{token}`, `POST /api/auth/invite/{token}/{start,finish}`, `POST /api/auth/logout` | passkey ceremonies and sessions (see Accounts) |
 | `GET /api/me`, `GET/POST /api/me/passkeys…`, `GET/POST/DELETE /api/me/api-keys…`, `POST /api/me/recovery-code` | own account |
-| `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/invite` | user admin |
+| `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `POST /api/users/{id}/invite` | accounts (`users.view`; changes `users.manage`, only for accounts with no permission you lack): `{role, quotas, remote_access, suspended, suspend_reason}` |
+| `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}` | roles and the permission lists (`{roles, capabilities: {site, group}}`, anyone signed in); custom roles `{name, scope: site\|group, description, caps}` (`roles.manage`; group roles need `groups.manage_all`); a role someone holds can't be deleted |
+| `GET /api/audit?actor=&action=<prefix>&target_kind=&target=&before=&limit=` | the audit log, newest first, `next_before` for the next page (`audit.view`) |
 | `GET /api/profiles/machine-models`, `/machines`, `/processes?machine=`, `/filaments?machine=` | OrcaSlicer profile catalogue; a machine's filaments say what each is (`material`, `support`, `soluble`, `tray_material` as printers name it, `price_per_kg`) |
 | `GET /api/profiles/resolve?machine=&process=&filament=` | merged config JSON (what the engines slice with) |
 | `GET /api/profiles/resolve-single?name=` | one profile with inheritance resolved |

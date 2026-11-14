@@ -19,6 +19,7 @@ use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::permissions::{Cap, GroupCap};
 use crate::auth::{self, CurrentUser};
 use crate::package::{self, Package};
 use crate::db::{Job, PrintRecord, Printer, User};
@@ -112,12 +113,12 @@ pub(crate) async fn store_upload(
     let (tree, viewer) = groups_api::context(state, user);
     if let Some(g) = &group_id {
         let keys_own = scope.is_some_and(|s| s.group_id.as_deref() == Some(g.as_str()))
-            && (viewer.admin || viewer.can_manage(&tree, g));
+            && (viewer.can(Cap::IntegrationsManage) || viewer.can_in(&tree, g, GroupCap::Integrations));
         if tree.get(g).is_none() || (!viewer.can_charge(g) && !keys_own) {
             return Err(api_err(StatusCode::FORBIDDEN, "you are not an active member of that group"));
         }
     }
-    let exempt = viewer.admin || group_id.as_deref().is_some_and(|g| viewer.can_manage(&tree, g));
+    let exempt = viewer.unrestricted(&tree, group_id.as_deref());
     if upload_policy(&tree, group_id.as_deref()) == "deny" && !exempt {
         return Err(api_err(
             StatusCode::FORBIDDEN,
@@ -211,7 +212,7 @@ async fn job_thumbnail(
 /// The rules a job is held to, unless the viewer is exempt (admins, and the
 /// managers of the job's group).
 fn rules_for(tree: &Tree, viewer: &Viewer, job: &Job) -> Option<PrintRules> {
-    if viewer.admin || job.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)) {
+    if viewer.unrestricted(tree, job.group_id.as_deref()) {
         return None;
     }
     Some(match job.group_id.as_deref() {
@@ -231,7 +232,7 @@ fn upload_policy(tree: &Tree, group: Option<&str>) -> String {
 /// Why an uploaded job's prints need approval, or can't be sent, under the
 /// upload policy (admins and the group's managers are exempt).
 fn upload_hold(tree: &Tree, viewer: &Viewer, job: &Job) -> Result<Option<String>, ApiError> {
-    if job.source != "upload" || viewer.admin || job.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)) {
+    if job.source != "upload" || viewer.unrestricted(tree, job.group_id.as_deref()) {
         return Ok(None);
     }
     match upload_policy(tree, job.group_id.as_deref()).as_str() {
@@ -448,7 +449,7 @@ async fn send_plate_now(
             Json(json!({"error": format!("this plate can't be sent: {}", blocked.join("; ")), "blocked": blocked})),
         ));
     }
-    if viewer.admin && !review.is_empty() && !body.acknowledge_review {
+    if viewer.can(Cap::PrintsApproveSafety) && !review.is_empty() && !body.acknowledge_review {
         return Err((
             StatusCode::CONFLICT,
             Json(json!({
@@ -470,7 +471,7 @@ async fn send_plate_now(
     }
     let safety_review = !review.is_empty();
     // An admin who acknowledged the review sends it now, on the record.
-    let decided_by = (viewer.admin && safety_review).then(|| user.username.clone());
+    let decided_by = (viewer.can(Cap::PrintsApproveSafety) && safety_review).then(|| user.username.clone());
     let reason = (!reasons.is_empty()).then(|| reasons.join("; "));
     let waits = reason.is_some() && decided_by.is_none();
 
@@ -547,7 +548,8 @@ async fn send_plate_now(
 // -- Prints ----------------------------------------------------------------------
 
 fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
-    viewer.admin
+    viewer.can(Cap::LibraryViewAll)
+        || viewer.can(Cap::PrintersOperate)
         || print.user_id.as_deref() == Some(viewer.user.id.as_str())
         || print
             .job_id
@@ -560,15 +562,18 @@ fn can_see_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRe
 /// Admins and the managers of the print's group approve requests; only
 /// admins approve G-code that needs review (it's the farm's hardware).
 pub(crate) fn can_approve_print(tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
-    viewer.admin || (!print.safety_review && print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g)))
+    if print.safety_review {
+        return viewer.can(Cap::PrintsApproveSafety);
+    }
+    viewer.can(Cap::PrintsApprove) || print.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::PrintsApprove))
 }
 
 /// Whoever sent it, the group's managers, admins, and the operators of its
 /// printer (src/pools.rs).
 fn can_control_print(state: &AppState, tree: &Tree, viewer: &Viewer, print: &PrintRecord) -> bool {
-    viewer.admin
+    viewer.can(Cap::PrintersOperate)
         || print.user_id.as_deref() == Some(viewer.user.id.as_str())
-        || print.group_id.as_deref().is_some_and(|g| viewer.can_manage(tree, g))
+        || print.group_id.as_deref().is_some_and(|g| viewer.can_in(tree, g, GroupCap::PrintsControl))
         || crate::pools::operates(state, viewer, print.printer_id.as_deref())
 }
 
@@ -794,7 +799,7 @@ async fn approve_print(
     if !blocked.is_empty() {
         return Err(api_err(StatusCode::CONFLICT, format!("this plate can't be sent: {}", blocked.join("; "))));
     }
-    if !review.is_empty() && !viewer.admin {
+    if !review.is_empty() && !viewer.can(Cap::PrintsApproveSafety) {
         return Err(api_err(
             StatusCode::FORBIDDEN,
             format!("the G-code now needs an admin's review: {}", review.join("; ")),
@@ -933,7 +938,7 @@ async fn control_print(
     // Don't act on someone else's job if the printer moved on.
     if let Some(s) = state.printers.status(&printer_id) {
         if printing::transition(&print, &s).is_some_and(|(st, _, _)| st == "failed")
-            && !viewer.admin
+            && !viewer.can(Cap::PrintersOperate)
         {
             return Err(api_err(StatusCode::CONFLICT, "the printer is running something else now"));
         }
@@ -961,7 +966,7 @@ async fn list_gcode_incidents(
     Extension(CurrentUser(user)): Extension<CurrentUser>,
     Query(q): Query<IncidentQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    auth::require_admin(&user)?;
+    auth::require(&user, Cap::UsersView)?;
     let list = state
         .db
         .list_gcode_incidents(q.user.as_deref().filter(|u| !u.is_empty()), q.limit.unwrap_or(200).clamp(1, 2000));
@@ -975,7 +980,7 @@ async fn control_printer(
     Json(body): Json<ControlRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let (_, viewer) = groups_api::context(&state, &user);
-    if !viewer.admin && !crate::pools::operates(&state, &viewer, Some(&id)) {
+    if !viewer.can(Cap::PrintersOperate) && !crate::pools::operates(&state, &viewer, Some(&id)) {
         return Err(api_err(StatusCode::FORBIDDEN, "only admins and the printer's operators can"));
     }
     state.db.get_printer(&id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no such printer"))?;

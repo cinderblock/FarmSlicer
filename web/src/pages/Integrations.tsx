@@ -71,8 +71,9 @@ const PERMISSIONS: [string, string][] = [
 ];
 
 export default function IntegrationsPage() {
-  const { isAdmin } = useAuth();
-  const groups = (useJson<GroupSummary[]>("/api/groups").data ?? []).filter((g) => isAdmin || g.can_manage);
+  const { can } = useAuth();
+  const managesIntegrations = can("integrations.manage");
+  const groups = (useJson<GroupSummary[]>("/api/groups").data ?? []).filter((g) => managesIntegrations || g.my_caps?.includes("integrations"));
   return (
     <div className="page">
       <PageHeader title="Integrations" icon="integrations">
@@ -80,20 +81,20 @@ export default function IntegrationsPage() {
         other tool's client and order references. The API is described in the README (API section).
       </PageHeader>
       <h3>Keys for ordering software</h3>
-      <KeysSection groups={groups} isAdmin={isAdmin} />
-      {isAdmin && (
+      <KeysSection groups={groups} managesIntegrations={managesIntegrations} />
+      {managesIntegrations && (
         <>
           <h3>Webhooks</h3>
           <WebhooksSection groups={groups} />
         </>
       )}
       <h3>Usage</h3>
-      <UsageSection groups={groups} isAdmin={isAdmin} />
+      <UsageSection groups={groups} managesIntegrations={managesIntegrations} />
     </div>
   );
 }
 
-function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boolean }) {
+function KeysSection({ groups, managesIntegrations }: { groups: GroupSummary[]; managesIntegrations: boolean }) {
   const [rev, setRev] = useState(0);
   const keys = useJson<IntegrationKey[]>("/api/integrations/keys", rev).data;
   const [form, setForm] = useState({ name: "", group_id: "", client_ref: "", permissions: ["projects:write"] });
@@ -167,7 +168,7 @@ function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boo
                 <td data-label="May">{k.permissions.join(", ")}</td>
                 <td data-label="Last used">{localDateTime(k.last_used)}</td>
                 <td data-label="From outside">
-                  {isAdmin ? (
+                  {managesIntegrations ? (
                     <label className="checkbox-label">
                       <input
                         type="checkbox"
@@ -210,7 +211,7 @@ function KeysSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boo
         <label>
           Group
           <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })}>
-            {isAdmin ? <option value="">Every group</option> : <option value="">Choose…</option>}
+            {managesIntegrations ? <option value="">Every group</option> : <option value="">Choose…</option>}
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.path}
@@ -411,20 +412,20 @@ function Deliveries({ webhookId }: { webhookId: string }) {
   );
 }
 
-function UsageSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: boolean }) {
+function UsageSection({ groups, managesIntegrations }: { groups: GroupSummary[]; managesIntegrations: boolean }) {
   const today = new Date();
   const first = new Date(today.getFullYear(), today.getMonth(), 1);
   const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const [from, setFrom] = useState(iso(first));
   const [to, setTo] = useState("");
-  const [group, setGroup] = useState(isAdmin ? "" : (groups[0]?.id ?? ""));
+  const [group, setGroup] = useState(managesIntegrations ? "" : (groups[0]?.id ?? ""));
   const [client, setClient] = useState("");
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (group) params.set("group", group);
   if (client.trim()) params.set("client_ref", client.trim());
-  const report = useJson<UsageReport>(isAdmin || group ? `/api/usage/prints?${params}` : null);
+  const report = useJson<UsageReport>(managesIntegrations || group ? `/api/usage/prints?${params}` : null);
   const grams = (g: Record<string, number>) =>
     Object.entries(g)
       .map(([m, v]) => `${v} g ${m}`)
@@ -458,7 +459,7 @@ function UsageSection({ groups, isAdmin }: { groups: GroupSummary[]; isAdmin: bo
           before <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
         <select value={group} onChange={(e) => setGroup(e.target.value)} aria-label="Group">
-          {isAdmin && <option value="">Every group</option>}
+          {managesIntegrations && <option value="">Every group</option>}
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.path}
