@@ -527,7 +527,7 @@ export function addConnectors(
       // The slot runs out of the upper half at both ends: it slides on.
       const reach = section ? Math.max(...sectionAxes(section, plane).extent(long).map(Math.abs)) : 500;
       upperVolumes.push(
-        makeVolume(trapezoidPrism(4 * reach + 10, spec.size + 2 * spec.gap, top + 2 * spec.gap, -0.01, spec.depth + spec.gap), {
+        makeVolume(trapezoidPrism(2 * (reach + Math.abs(mid)) + 2, spec.size + 2 * spec.gap, top + 2 * spec.gap, -0.01, spec.depth + spec.gap), {
           name: `Dovetail ${i + 1} slot`,
           type: "negative",
           matrix: at(centre, frame),
