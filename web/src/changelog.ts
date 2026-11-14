@@ -23,9 +23,10 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     id: "2026-11-14b",
     date: "2026-11-14",
-    title: "Agents in your browser",
+    title: "Agents in your browser, groups from your slicer",
     highlights: [
       "An AI agent built into your browser can use FarmSlicer while you're signed in, with no API key: the same tools as connected agents, acting as you. It needs a browser with WebMCP (Chrome has it as a trial).",
+      "Sending from OrcaSlicer, PrusaSlicer or SuperSlicer: type a group's name as the folder in the upload dialog, and the job is that group's.",
     ],
   },
   {

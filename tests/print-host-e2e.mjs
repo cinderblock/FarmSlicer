@@ -72,7 +72,7 @@ r = await owner.get(`/api/jobs/${job1}`);
 check(r.status === 200 && r.json.status === "done" && r.json.source === "upload" && r.json.model_name === "Brackets.gcode.3mf", "it's an uploaded job", json(r));
 
 s = await upload(key, bracketsProject(), "Brackets again.gcode.3mf", { path: "some/folder" });
-check(s.status === 201 && s.body.files.local.name === "Brackets again.gcode.3mf", "the dialog's folder doesn't change the name", JSON.stringify(s));
+check(s.status === 400 && /no group "some\/folder" you can charge/.test(s.body), "a folder that names no group is refused, readably", JSON.stringify(s));
 
 // ---- Upload and print --------------------------------------------------------------------------
 s = await upload(key, bracketsProject(), "Brackets.gcode.3mf", { print: "true", plateindex: "2" });
@@ -95,6 +95,18 @@ check(s.status === 400 && s.body === "no file", "no file", JSON.stringify(s));
 // ---- integration keys --------------------------------------------------------------------------
 r = await owner.post("/api/groups", { name: "Shop" });
 const shop = r.json.id;
+
+// ---- the dialog's folder picks the group --------------------------------------------------------
+s = await upload(key, bracketsProject(), "Shop part.gcode.3mf", { path: "Shop" });
+check(s.status === 400, "not a member: not a group the owner can charge", JSON.stringify(s));
+r = await owner.post(`/api/groups/${shop}/members`, { username: "owner", role: "member" });
+check(r.status < 300, "the owner joins the shop", json(r));
+s = await upload(key, bracketsProject(), "Shop part.gcode.3mf", { path: "shop/" });
+check(s.status === 201, "a group's name as the folder", JSON.stringify(s));
+r = await owner.get(`/api/jobs/${s.body.farmslicer.job_id}`);
+check(r.json.group_id === shop && r.json.model_name === "Shop part.gcode.3mf", "charges the job to that group", json(r));
+s = await upload(key, bracketsProject(), "Mine.gcode.3mf", { path: "Nowhere" });
+check(s.status === 400 && /one of: Shop/.test(s.body), "an unknown folder lists the groups there are", JSON.stringify(s));
 r = await owner.post("/api/integrations/keys", { name: "Shop slicer", group_id: shop, permissions: ["projects:write"] });
 check(r.status === 201, "an integration key for the shop", json(r));
 const shopKey = r.json.key;
@@ -106,7 +118,9 @@ s = await upload(readKey, bracketsProject(), "Brackets.gcode.3mf");
 check(s.status === 403, "a read-only key can't upload", JSON.stringify(s));
 s = await upload(shopKey, bracketsProject(), "Brackets.gcode.3mf", { print: "true" });
 check(s.status === 403 && /Upload and print/.test(s.body), "an integration key can't queue", JSON.stringify(s));
-s = await upload(shopKey, bracketsProject(), "Shop brackets.gcode.3mf");
+s = await upload(shopKey, bracketsProject(), "Shop brackets.gcode.3mf", { path: "Elsewhere" });
+check(s.status === 400, "an integration key's folder can only be its group", JSON.stringify(s));
+s = await upload(shopKey, bracketsProject(), "Shop brackets.gcode.3mf", { path: "Shop" });
 check(s.status === 201, "but it uploads", JSON.stringify(s));
 r = await owner.get(`/api/jobs/${s.body.farmslicer.job_id}`);
 check(r.json.group_id === shop, "into its group", json(r));

@@ -8,7 +8,8 @@
 //!   `api`, and `text` starting with "OctoPrint". OrcaSlicer asks before
 //!   every upload too.
 //! - `POST /api/octoprint/api/files/local`: multipart `file`, `print`
-//!   ("true" for "Upload and print"), `path` (the dialog's folder, unused),
+//!   ("true" for "Upload and print"), `path` (the dialog's folder: a group
+//!   the uploader can charge, by path or name, or empty for a personal job),
 //!   `plateindex` (OrcaSlicer, 1-based, with "Use 3MF instead of G-code").
 //!   The file becomes a job as `POST /api/uploads` makes one
 //!   (`prints_api::store_upload`); with `print`, its plate also goes into
@@ -69,6 +70,44 @@ fn plates_to_queue(available: &[u32], named: Option<u32>) -> Vec<i64> {
     }
 }
 
+/// The group the upload dialog's folder names, out of `groups` (id,
+/// display path "A / B"): the whole path, else a group's own name when only
+/// one has it, any case, `/` or `\` between levels. Empty: none.
+fn group_for_folder(folder: &str, groups: &[(String, String)]) -> Result<Option<String>, String> {
+    let segments: Vec<&str> = folder.split(['/', '\\']).map(str::trim).filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return Ok(None);
+    }
+    let wanted = segments.join(" / ").to_lowercase();
+    if let Some((id, _)) = groups.iter().find(|(_, path)| path.to_lowercase() == wanted) {
+        return Ok(Some(id.clone()));
+    }
+    let by_name: Vec<&(String, String)> = groups
+        .iter()
+        .filter(|(_, path)| path.rsplit(" / ").next().unwrap_or(path).to_lowercase() == wanted)
+        .collect();
+    match by_name.as_slice() {
+        [(id, _)] => Ok(Some(id.clone())),
+        [] => {
+            let names: Vec<&str> = groups.iter().map(|(_, p)| p.as_str()).collect();
+            Err(if names.is_empty() {
+                format!("no group \"{}\" you can charge: leave the folder empty for a personal job", segments.join("/"))
+            } else {
+                format!(
+                    "no group \"{}\" you can charge: leave the folder empty for a personal job, or use one of: {}",
+                    segments.join("/"),
+                    names.join(", ").replace(" / ", "/")
+                )
+            })
+        }
+        several => Err(format!(
+            "\"{}\" names several groups: use the whole path ({})",
+            segments.join("/"),
+            several.iter().map(|(_, p)| p.replace(" / ", "/")).collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
 /// `POST /api/octoprint/api/files/local`.
 async fn upload(
     State(state): State<Arc<AppState>>,
@@ -79,6 +118,7 @@ async fn upload(
     let mut file: Option<(String, axum::body::Bytes)> = None;
     let mut print = false;
     let mut plate_index: Option<u32> = None;
+    let mut folder = String::new();
     loop {
         let field = match multipart.next_field().await {
             Ok(Some(f)) => f,
@@ -94,6 +134,7 @@ async fn upload(
                 }
             }
             "print" => print = truthy(&field.text().await.unwrap_or_default()),
+            "path" => folder = field.text().await.unwrap_or_default(),
             "plateindex" => plate_index = field.text().await.ok().and_then(|v| v.trim().parse().ok()),
             _ => {}
         }
@@ -101,7 +142,7 @@ async fn upload(
     let Some((name, data)) = file else {
         return text_err(StatusCode::BAD_REQUEST, "no file");
     };
-    // The folder from the slicer's dialog would be a path inside the name.
+    // A folder inside the file's name too: only the name is kept.
     let name = name.rsplit(['/', '\\']).next().unwrap_or(&name).to_string();
     if print && scope.is_some() {
         return text_err(
@@ -110,7 +151,21 @@ async fn upload(
         );
     }
 
-    let job = match crate::prints_api::store_upload(&state, &user, scope.as_ref(), &name, data, None).await {
+    // The dialog's folder picks the group the job is charged to; an
+    // integration key can name only its own group.
+    let groups: Vec<(String, String)> = {
+        let (tree, viewer) = crate::groups_api::context(&state, &user);
+        match scope.as_ref().and_then(|s| s.group_id.as_deref()) {
+            Some(g) => vec![(g.to_string(), tree.display_path(g))],
+            None => viewer.chargeable(&tree),
+        }
+    };
+    let group = match group_for_folder(&folder, &groups) {
+        Ok(g) => g,
+        Err(msg) => return text_err(StatusCode::BAD_REQUEST, msg),
+    };
+
+    let job = match crate::prints_api::store_upload(&state, &user, scope.as_ref(), &name, data, group).await {
         Ok(job) => job,
         Err(e) => return plain(e),
     };
@@ -163,5 +218,25 @@ mod tests {
         assert_eq!(plates_to_queue(&[1, 2], Some(5)), vec![1, 2], "a plate it doesn't have: every plate");
         assert_eq!(plates_to_queue(&[3], Some(1)), vec![3], "a one-plate export keeps its own number");
         assert!(truthy("true") && truthy(" True ") && !truthy("false") && !truthy(""));
+    }
+
+    #[test]
+    fn the_folder_names_a_group() {
+        let groups = vec![
+            ("a".to_string(), "Shop".to_string()),
+            ("b".to_string(), "Club / Alpha".to_string()),
+            ("c".to_string(), "Club / Beta".to_string()),
+            ("d".to_string(), "Other / Alpha".to_string()),
+        ];
+        assert_eq!(group_for_folder("", &groups), Ok(None));
+        assert_eq!(group_for_folder(" / ", &groups), Ok(None));
+        assert_eq!(group_for_folder("shop", &groups), Ok(Some("a".into())));
+        assert_eq!(group_for_folder("Club/Beta", &groups), Ok(Some("c".into())));
+        assert_eq!(group_for_folder("\\club\\alpha\\", &groups), Ok(Some("b".into())));
+        assert_eq!(group_for_folder("Beta", &groups), Ok(Some("c".into())), "a name only one group has");
+        assert!(group_for_folder("Alpha", &groups).unwrap_err().contains("Club/Alpha, Other/Alpha"));
+        let e = group_for_folder("Nope", &groups).unwrap_err();
+        assert!(e.contains("no group \"Nope\"") && e.contains("Shop, Club/Alpha"), "{e}");
+        assert!(!group_for_folder("x", &[]).unwrap_err().contains("one of"));
     }
 }

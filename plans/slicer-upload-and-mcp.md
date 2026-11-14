@@ -69,8 +69,12 @@ with no export and manual upload. Then let AI agents do the same, and more.
 9. [x] WebMCP: the signed-in page registers the MCP tools with the
    browser (`web/src/webmcp.ts`), calls run on the server with the session
    (`GET /api/mcp/tools`, `POST /api/mcp/call`).
-10. [ ] **(current)** Folder → group: the slicer dialog's folder picks the
-    group a job is charged to (the user said yes, 2026-11-14).
+10. [x] Folder → group: the slicer dialog's folder picks the group a job
+    is charged to (the user said yes, 2026-11-14): `print_host::
+    group_for_folder`, out of `Viewer::chargeable` (active memberships; an
+    integration key: its own group). Whole path or a name only one group
+    has, any case, `/` or `\`; unknown = 400 listing the groups; empty =
+    personal.
 11. [ ] MCP tools for slicing and uploads, if agents need them (not asked for).
 
 ## MCP design (step 8)
@@ -162,6 +166,10 @@ with no export and manual upload. Then let AI agents do the same, and more.
   buildhost with print-host and integration, `cargo test` 189; checked on a
   clean `HEAD` copy because another thread's uncommitted permissions work
   doesn't build yet). Account page, README, CLAUDE.md, changelog.
+- 2026-11-14: folder → group done (`src/print_host.rs`, unit test,
+  `tests/print-host-e2e.mjs`), Account page, README, changelog. A group's
+  creator who isn't a member can't charge it, so its name as the folder
+  is refused for them, as the Slice page's group picker would.
 - [ ] Try WebMCP in a browser that has it (manual).
 - [ ] Try the adapter from a real OrcaSlicer against the dev instance (manual).
 - [ ] Try the MCP server from a real Claude Code against the dev instance

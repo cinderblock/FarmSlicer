@@ -368,6 +368,10 @@ export default function AccountPage() {
               Turn on <strong>Use 3rd-party print host</strong> and <strong>Use 3MF instead of G-code</strong>.
             </li>
           </ol>
+          <p className="hint">
+            The folder in the slicer's upload dialog picks the group the job is for: type a group's name (or its
+            whole path, like <code>Parent/Group</code>). Leave it empty for a job of your own.
+          </p>
 
           <h3>Connect an AI agent</h3>
           <p className="hint">
