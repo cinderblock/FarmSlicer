@@ -141,6 +141,16 @@ export interface GcodeInfo {
   meta: Record<string, string>;
 }
 
+/**
+ * Where a view's camera is: its position and what it orbits around, in the
+ * scene's coordinates (bed centre at the origin). The live view hands its
+ * pose to the finished preview, so the swap doesn't move the view.
+ */
+export interface CameraPose {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
 export interface ParsedGcode {
   info: GcodeInfo;
   layers: Layers;

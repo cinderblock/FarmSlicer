@@ -13,7 +13,7 @@ import { changeSummary, inputsDiff, type SliceEntry } from "../sliceHistory";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
 import { GcodeChip } from "./GcodeCheck";
 import GcodePreview, { GcodeLoading } from "./preview/GcodePreview";
-import LiveSlicePreview from "./preview/LiveSlicePreview";
+import SliceView from "./preview/SliceView";
 import type { LiveSlice } from "./preview/liveSlice";
 import { useServerLiveSlice } from "./preview/useLiveSlice";
 import SliceCompare from "./preview/SliceCompare";
@@ -105,6 +105,8 @@ export default function SliceResult({
   // The slice taking shape: the browser's own frames, else the server's.
   const serverLive = useServerLiveSlice(jobId, busy && !local && job?.source !== "browser");
   const [cancelling, setCancelling] = useState(false);
+  // The slicer's warnings, over the view (null: open when supports are needed).
+  const [warningsChoice, setWarningsOpen] = useState<boolean | null>(null);
   const cancel = () => {
     if (local) local.onCancel();
     else {
@@ -153,35 +155,7 @@ export default function SliceResult({
   );
   const partner = compareWith ? entries.find((e) => e.jobId === compareWith) : undefined;
 
-  if (!job || busy) {
-    const queued = !local && job?.status === "queued";
-    return (
-      <div className="slice-result">
-        <div className="slice-result-bar">
-          <button className="btn-sm" onClick={onBack}>
-            ← Plate
-          </button>
-          <span className="slice-result-actions">
-            <button className="btn-sm btn-danger" onClick={cancel} disabled={cancelling || !job}>
-              {cancelling ? "Cancelling…" : "Cancel"}
-            </button>
-          </span>
-        </div>
-        {historyPanel}
-        <div className="slice-result-preview">
-          <LiveSlicePreview
-            live={local?.live ?? serverLive.live}
-            bed={bed}
-            percent={local ? local.percent : (serverLive.progress?.percent ?? job?.progress ?? 0)}
-            message={local ? local.message : (serverLive.progress?.message ?? job?.progress_message ?? null)}
-            title={queued ? "Waiting for the slicer…" : local ? "Slicing in this browser…" : "Slicing…"}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (job.status !== "done") {
+  if (job && !busy && job.status !== "done") {
     return (
       <div className="slice-result slice-result-waiting">
         <p className="login-error">
@@ -195,67 +169,98 @@ export default function SliceResult({
     );
   }
 
-  const { support, other } = sortWarnings(parseWarnings(job.warnings));
+  // Slicing, then done: one tree, so the view (SliceView) stays put while
+  // the finished preview takes over from the live one. Nothing above the
+  // view changes height when the slice is done (the bar keeps its height;
+  // warnings and plate tabs are in it), so the view doesn't move either.
+  const done = !!job && !busy;
+  const queued = !local && job?.status === "queued";
+  const { support, other } = done ? sortWarnings(parseWarnings(job.warnings)) : { support: [], other: [] };
+  const warnings = support.length + other.length;
+  const warningsOpen = warnings > 0 && (warningsChoice ?? support.length > 0);
   return (
     <div className="slice-result">
       <div className="slice-result-bar">
         <button className="btn-sm" onClick={onBack}>
           ← Plate
         </button>
-        <span className="slice-result-stats">
-          {plates.length > 1 && `${plates.length} plates: `}
-          {formatDuration(job.print_time_sec)} · {(job.filament_used_g ?? 0).toFixed(1)} g ·{" "}
-          {formatCost(job.estimated_cost, currency)}
-        </span>
-        {job.package_json && <GcodeChip {...packageVerdict(job.package_json)} />}
-        <span className="slice-result-actions">
-          <Link className="btn-sm" to={`/jobs/${jobId}`}>
-            Job page
-          </Link>
-          {job.package_json && (
-            <button className="btn-primary btn-inline" onClick={() => setSending(true)}>
-              Send to printer…
+        {done ? (
+          <>
+            <span className="slice-result-stats">
+              {plates.length > 1 && `${plates.length} plates: `}
+              {formatDuration(job.print_time_sec)} · {(job.filament_used_g ?? 0).toFixed(1)} g ·{" "}
+              {formatCost(job.estimated_cost, currency)}
+            </span>
+            {job.package_json && <GcodeChip {...packageVerdict(job.package_json)} />}
+            {warnings > 0 && (
+              <button
+                className={`btn-sm slice-result-warnings-chip${support.length ? " bad" : ""}`}
+                aria-expanded={warningsOpen}
+                onClick={() => setWarningsOpen(!warningsOpen)}
+              >
+                {support.length ? "Needs supports" : `${other.length} slicer warning${other.length === 1 ? "" : "s"}`}
+              </button>
+            )}
+            {plate && (
+              <span className="job-plates" role="tablist" aria-label="Plates">
+                {plates.map((p) => (
+                  <button
+                    key={p.index}
+                    role="tab"
+                    aria-selected={p.index === plate.index}
+                    className={p.index === plate.index ? "active" : ""}
+                    onClick={() => setPlateChoice(p.index)}
+                    title={`${formatDuration(p.print_time_sec)} · ${(p.weight_g ?? 0).toFixed(1)} g`}
+                  >
+                    Plate {p.index}
+                  </button>
+                ))}
+              </span>
+            )}
+            <span className="slice-result-actions">
+              <Link className="btn-sm" to={`/jobs/${jobId}`}>
+                Job page
+              </Link>
+              {job.package_json && (
+                <button className="btn-primary btn-inline" onClick={() => setSending(true)}>
+                  Send to printer…
+                </button>
+              )}
+            </span>
+          </>
+        ) : (
+          <span className="slice-result-actions">
+            <button className="btn-sm btn-danger" onClick={cancel} disabled={cancelling || !job}>
+              {cancelling ? "Cancelling…" : "Cancel"}
             </button>
-          )}
-        </span>
+          </span>
+        )}
       </div>
       {historyPanel}
-      {support.length > 0 && (
-        <div className="slice-result-warning bad">
-          {support.map((w) => (
-            <p key={w}>{w}</p>
-          ))}
-          <p className="hint">Turn supports on or turn the part, then slice again.</p>
-        </div>
-      )}
-      {other.length > 0 && (
-        <details className="slice-result-warning">
-          <summary>
-            {other.length} slicer warning{other.length === 1 ? "" : "s"}
-          </summary>
-          {other.map((w) => (
-            <p key={w}>{w}</p>
-          ))}
-        </details>
-      )}
-      {plate && (
-        <div className="job-plates" role="tablist" aria-label="Plates">
-          {plates.map((p) => (
-            <button
-              key={p.index}
-              role="tab"
-              aria-selected={p.index === plate.index}
-              className={p.index === plate.index ? "active" : ""}
-              onClick={() => setPlateChoice(p.index)}
-              title={`${formatDuration(p.print_time_sec)} · ${(p.weight_g ?? 0).toFixed(1)} g`}
-            >
-              Plate {p.index}
-            </button>
-          ))}
-        </div>
-      )}
       <div className="slice-result-preview">
-        {compareWith ? (
+        {warningsOpen && (
+          <div className="slice-result-warnings" role="dialog" aria-label="Slicer warnings">
+            <button className="btn-sm btn-ghost btn-icon slice-result-warnings-close" aria-label="Close" onClick={() => setWarningsOpen(false)}>
+              ×
+            </button>
+            {support.length > 0 && (
+              <div className="slice-result-warning bad">
+                {support.map((w) => (
+                  <p key={w}>{w}</p>
+                ))}
+                <p className="hint">Turn supports on or turn the part, then slice again.</p>
+              </div>
+            )}
+            {other.length > 0 && (
+              <div className="slice-result-warning">
+                {other.map((w) => (
+                  <p key={w}>{w}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {done && compareWith ? (
           <SliceCompare
             key={`${compareWith}:${plateIndex}`}
             a={{ jobId, label: entry ? sliceTime(entry.createdAt) : "on screen", fresh: gcode }}
@@ -273,13 +278,29 @@ export default function SliceResult({
             }}
             onClose={() => onCompare(null)}
           />
-        ) : gcodeSource ? (
-          <GcodePreview key={plateIndex} source={gcodeSource.source} cacheKey={gcodeSource.cacheKey} onBytes={gcodeSource.onBytes} bed={bed} />
+        ) : job || local ? (
+          <SliceView
+            slicing={!done}
+            live={{
+              live: local?.live ?? serverLive.live,
+              bed,
+              percent: local ? local.percent : (serverLive.progress?.percent ?? job?.progress ?? 0),
+              message: local ? local.message : (serverLive.progress?.message ?? job?.progress_message ?? null),
+              title: queued ? "Waiting for the slicer…" : local ? "Slicing in this browser…" : "Slicing…",
+            }}
+            finished={
+              gcodeSource ? (
+                <GcodePreview key={plateIndex} source={gcodeSource.source} cacheKey={gcodeSource.cacheKey} onBytes={gcodeSource.onBytes} bed={bed} />
+              ) : (
+                <GcodeLoading load={{ status: "loading", progress: null }} />
+              )
+            }
+          />
         ) : (
           <GcodeLoading load={{ status: "loading", progress: null }} />
         )}
       </div>
-      {sending && (
+      {done && sending && (
         <SendDialog
           jobId={jobId}
           jobName={job.model_name}

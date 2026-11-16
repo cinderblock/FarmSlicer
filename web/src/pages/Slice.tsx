@@ -1179,8 +1179,10 @@ export default function SlicePage() {
     if (!res.ok) throw new Error(job.error ?? `HTTP ${res.status}`);
     if (job.project_id) setProjectChoice(job.project_id);
     setBrowserJobId(job.id);
-    // Watch it take shape.
+    // Watch it take shape. Remembered now, as server slices are, so the
+    // recent slices list doesn't grow over the view when it's done.
     resetLive();
+    void rememberSlice(key, inputs, job.id, job.project_id, "browser", null);
     setSliced({ jobId: job.id, browser: true });
     setView("preview");
 
@@ -1230,9 +1232,7 @@ export default function SlicePage() {
         }, est. ${formatDuration(out.report.stats.printTimeSec)}, ${out.report.stats.filamentG.toFixed(1)} g`,
       });
       const stats = { printTimeSec: out.report.stats.printTimeSec, filamentG: out.report.stats.filamentG, plates: out.report.plates ?? 1 };
-      void rememberSlice(key, inputs, job.id, job.project_id, "browser", stats).then(() =>
-        putGcode(job.id, 1, new Blob([out.gcode], { type: "text/plain" })),
-      );
+      void updateSlice(key, { stats }).then(() => putGcode(job.id, 1, new Blob([out.gcode], { type: "text/plain" })));
       setSliced({ jobId: job.id, gcode: out.gcode, browser: true });
       setView("preview");
     } catch (err) {

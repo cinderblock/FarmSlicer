@@ -15,7 +15,7 @@ import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices, t
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
 import { positiveParam, printPath } from "../links";
 import { bedFromConfig, packagePlates, parseObject, plateColors } from "../jobConfig";
-import LiveSlicePreview from "../components/preview/LiveSlicePreview";
+import SliceView from "../components/preview/SliceView";
 import { useServerLiveSlice } from "../components/preview/useLiveSlice";
 
 interface Job {
@@ -292,17 +292,6 @@ export default function JobPage() {
         </p>
       )}
 
-      {showLive && (
-        <div className="job-preview">
-          <LiveSlicePreview
-            live={live.live}
-            bed={bed}
-            percent={live.progress?.percent ?? job.progress}
-            message={live.progress?.message ?? job.progress_message}
-            title={job.status === "queued" ? "Waiting for the slicer…" : "Slicing…"}
-          />
-        </div>
-      )}
       {active && !showLive && (
         <div className="job-progress">
           <div className="progress-bar">
@@ -312,36 +301,49 @@ export default function JobPage() {
         </div>
       )}
 
-      {done && (
-        <>
-          {plates.length > 1 && (
-            <div className="job-plates" role="tablist" aria-label="Plates">
-              {plates.map((p) => (
-                <button
-                  key={p.index}
-                  role="tab"
-                  aria-selected={p.index === plate?.index}
-                  className={p.index === plate?.index ? "active" : ""}
-                  onClick={() => choosePlate(p.index)}
-                >
-                  Plate {p.index}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="job-preview">
-            <GcodePreview
-              source={source}
-              initialLayer={initialLayer == null ? null : initialLayer - 1}
-              onLayer={onLayer}
-              bed={bed}
-              filamentColors={filamentColors}
-              showStats={new URLSearchParams(window.location.search).has("stats")}
-            />
-          </div>
-          {plate?.check && <GcodeCheckDetails check={plate.check} open={plate.check.findings.length > 0} />}
-        </>
+      {done && plates.length > 1 && (
+        <div className="job-plates" role="tablist" aria-label="Plates">
+          {plates.map((p) => (
+            <button
+              key={p.index}
+              role="tab"
+              aria-selected={p.index === plate?.index}
+              className={p.index === plate?.index ? "active" : ""}
+              onClick={() => choosePlate(p.index)}
+            >
+              Plate {p.index}
+            </button>
+          ))}
+        </div>
       )}
+      {/* Slicing, then done: one place, so the finished preview takes over
+          from the live view without a jump (SliceView). */}
+      {(showLive || done) && (
+        <div className="job-preview">
+          <SliceView
+            key={id}
+            slicing={showLive}
+            live={{
+              live: live.live,
+              bed,
+              percent: live.progress?.percent ?? job.progress,
+              message: live.progress?.message ?? job.progress_message,
+              title: job.status === "queued" ? "Waiting for the slicer…" : "Slicing…",
+            }}
+            finished={
+              <GcodePreview
+                source={source}
+                initialLayer={initialLayer == null ? null : initialLayer - 1}
+                onLayer={onLayer}
+                bed={bed}
+                filamentColors={filamentColors}
+                showStats={new URLSearchParams(window.location.search).has("stats")}
+              />
+            }
+          />
+        </div>
+      )}
+      {done && plate?.check && <GcodeCheckDetails check={plate.check} open={plate.check.findings.length > 0} />}
 
       {!active && !(done && job.package_json) && (
         <div className="job-unsliced">

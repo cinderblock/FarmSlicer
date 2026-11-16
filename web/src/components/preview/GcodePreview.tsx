@@ -11,12 +11,13 @@
 // Z up, origin at the bed centre, like the Slice page's viewer; the
 // toolpaths (absolute G-code coordinates) are shifted by the bed centre.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import Bed from "../viewer/Bed";
 import { DEFAULT_BED, sceneBed, type Bed as BedShape, type SceneBed } from "../viewer/part";
+import { HandoverContext } from "./handover";
 import LayerSlider from "./LayerSlider";
 import type { GcodeSource } from "./load";
 import { useGcode, type GcodeLoad } from "./useGcode";
@@ -25,7 +26,7 @@ import { COLOR_MODES, RANGE_COLORS, gradientRange, toolColors, type ColorMode } 
 import { featureColors, featureOrder } from "./features";
 import { formatMegabytes as mb, formatSeconds } from "./format";
 import { livePosition, type PrintProgress } from "./live";
-import { GAP, type GcodeInfo, type ParsedGcode } from "./types";
+import { GAP, type CameraPose, type GcodeInfo, type ParsedGcode } from "./types";
 
 export type { GcodeSource } from "./load";
 export type { GcodeInfo } from "./types";
@@ -67,12 +68,34 @@ export interface GcodePreviewProps {
   live?: PrintProgress | null;
 }
 
-export default function GcodePreview({ source, cacheKey, onBytes, bed, filamentColors, onLoaded, showStats, className, initialLayer, onLayer, live }: GcodePreviewProps) {
+export default function GcodePreview({
+  source,
+  cacheKey,
+  onBytes,
+  bed,
+  filamentColors,
+  onLoaded,
+  showStats,
+  className,
+  initialLayer,
+  onLayer,
+  live,
+}: GcodePreviewProps) {
+  // Taking over from the live view (SliceView): start at its camera, and
+  // say when drawn.
+  const handover = useContext(HandoverContext);
+  const initialCamera = handover?.initialCamera ?? null;
+  const onReady = handover?.onReady;
   const load = useGcode(source, { cacheKey, onBytes });
   const parsed = load.status === "ready" ? load.parsed : null;
   useEffect(() => {
     if (parsed) onLoaded?.(parsed.info);
   }, [parsed, onLoaded]);
+  // A file that can't be shown: nothing more to wait for.
+  const failed = load.status === "error";
+  useEffect(() => {
+    if (failed) onReady?.();
+  }, [failed, onReady]);
 
   if (load.status === "ready") {
     return (
@@ -87,6 +110,8 @@ export default function GcodePreview({ source, cacheKey, onBytes, bed, filamentC
         initialLayer={initialLayer}
         onLayer={onLayer}
         live={live}
+        initialCamera={initialCamera}
+        onReady={onReady}
       />
     );
   }
@@ -137,9 +162,11 @@ interface ViewProps {
   initialLayer?: number | null;
   onLayer?: (layer: number) => void;
   live?: PrintProgress | null;
+  initialCamera?: RefObject<CameraPose | null> | null;
+  onReady?: () => void;
 }
 
-function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, className, initialLayer, onLayer, live }: ViewProps) {
+function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, className, initialLayer, onLayer, live, initialCamera, onReady }: ViewProps) {
   const { info, layers, extrusions } = parsed;
   const last = Math.max(0, layers.count - 1);
   const [ownRange, setRange] = useState(() => ({
@@ -249,7 +276,16 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
     <div className={`gcode-preview ${className ?? ""}`}>
       <div className="gp-viewport" tabIndex={0} onKeyDown={key} aria-label="G-code preview: arrow keys change the layer and the move">
         <Canvas frameloop="demand" camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 0.5, far: 5000 }} dpr={[1, 2]}>
-          <PreviewScene toolpaths={toolpaths} parsed={parsed} bed={shape} colorMode={colorMode} tools={tools} mode={mode} />
+          <PreviewScene
+            toolpaths={toolpaths}
+            parsed={parsed}
+            bed={shape}
+            colorMode={colorMode}
+            tools={tools}
+            mode={mode}
+            initialCamera={initialCamera}
+            onReady={onReady}
+          />
           {showStats && <Stats />}
         </Canvas>
 
@@ -374,9 +410,11 @@ interface SceneProps {
   colorMode: ColorMode;
   tools: string[];
   mode: RenderMode;
+  initialCamera?: RefObject<CameraPose | null> | null;
+  onReady?: () => void;
 }
 
-function PreviewScene({ toolpaths, parsed, bed, colorMode, tools, mode }: SceneProps) {
+function PreviewScene({ toolpaths, parsed, bed, colorMode, tools, mode, initialCamera, onReady }: SceneProps) {
   const invalidate = useThree((s) => s.invalidate);
   const get = useThree((s) => s.get);
   const controls = useThree((s) => s.controls);
@@ -390,10 +428,34 @@ function PreviewScene({ toolpaths, parsed, bed, colorMode, tools, mode }: SceneP
   }, [toolpaths, mode, colorMode, tools, invalidate]);
   useEffect(() => toolpaths.drawnBy(invalidate), [toolpaths, invalidate]);
 
-  // Frame the print (not the purge lines at the bed's edge) from the front, above.
+  // The first frame drawn: tell whoever waits for it (after the browser
+  // paints it).
+  const readyTo = useRef(onReady);
+  useEffect(() => {
+    readyTo.current = onReady;
+  }, [onReady]);
+  const drawn = useRef(false);
+  useFrame(() => {
+    if (drawn.current) return;
+    drawn.current = true;
+    requestAnimationFrame(() => readyTo.current?.());
+  });
+
+  // Frame the print (not the purge lines at the bed's edge) from the front,
+  // above; or start where the caller says (the live view handing over).
   useEffect(() => {
     const { camera } = get();
     const cam = camera as THREE.PerspectiveCamera;
+    const orbit = controls as unknown as { target: THREE.Vector3; update(): void } | null;
+    const pose = initialCamera?.current;
+    if (pose) {
+      cam.position.set(...pose.position);
+      cam.lookAt(...pose.target);
+      orbit?.target.set(...pose.target);
+      orbit?.update();
+      invalidate();
+      return;
+    }
     const b = parsed.info.modelBounds;
     const box = b
       ? new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)).translate(new THREE.Vector3(-bed.center.x, -bed.center.y, 0))
@@ -405,11 +467,10 @@ function PreviewScene({ toolpaths, parsed, bed, colorMode, tools, mode }: SceneP
     const distance = radius / Math.sin(THREE.MathUtils.degToRad(cam.fov / 2));
     cam.position.copy(sphere.center).add(new THREE.Vector3(0, -0.78, 0.62).multiplyScalar(distance));
     cam.lookAt(sphere.center);
-    const orbit = controls as unknown as { target: THREE.Vector3; update(): void } | null;
     orbit?.target.copy(sphere.center);
     orbit?.update();
     invalidate();
-  }, [parsed, bed, get, controls, invalidate]);
+  }, [parsed, bed, get, controls, invalidate, initialCamera]);
 
   return (
     <>

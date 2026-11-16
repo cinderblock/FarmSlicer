@@ -1682,6 +1682,57 @@ a.card:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
+  /* As tall slicing (Cancel) as done (Send to printer…): the view below
+     mustn't move when the slice finishes. */
+  min-height: 2.4rem;
+}
+
+.slice-result-bar .job-plates {
+  margin-bottom: 0;
+}
+
+.slice-result-warnings-chip.bad {
+  border-color: var(--error);
+  color: var(--error);
+  background: var(--tone-error);
+}
+
+/* The slicer's warnings, over the top of the view (not above it: the view
+   keeps its place). */
+.slice-result-preview {
+  position: relative;
+}
+
+.slice-result-warnings {
+  position: absolute;
+  top: 2.6rem;
+  left: 0.5rem;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* Over the view only, not its side panel (.gcode-preview: 270px + a gap). */
+  width: min(32rem, calc(100% - 270px - 2rem));
+  max-height: 60%;
+  overflow-y: auto;
+  padding: 0.5rem 2.2rem 0.5rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.slice-result-warnings-close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+}
+
+/* The preview's panels stack under the view here (see .gcode-preview). */
+@media (max-width: 1000px) {
+  .slice-result-warnings {
+    width: calc(100% - 1rem);
+  }
 }
 
 .slice-result-stats {
@@ -4465,34 +4516,36 @@ a.btn-sm {
 }
 
 /* The slice taking shape while it slices (preview/LiveSlicePreview.tsx):
-   the view, what's been sliced (bottom left), the progress (bottom). */
-.live-slice {
+   laid out as the G-code preview (.gcode-preview: the view, a side panel)
+   so the finished preview takes over in place (preview/SliceView.tsx). */
+.slice-view {
+  position: relative;
   height: 100%;
-  min-height: 420px;
 }
 
-.live-slice-viewport {
+.slice-view-live {
   height: 100%;
+}
+
+/* The finished preview loads underneath until it has drawn. */
+.slice-view-over {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--bg);
 }
 
 .live-slice-steps {
-  position: absolute;
-  left: 0.5rem;
-  bottom: 3.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   margin: 0;
-  padding: 0.35rem 0.7rem;
+  padding: 0;
   list-style: none;
-  border-radius: 6px;
-  background: rgba(13, 17, 23, 0.8);
   color: var(--text-dim);
-  font-size: 0.85rem;
-  pointer-events: none;
 }
 
-.live-slice-steps li.done {
-  color: var(--text);
-}
-
+.live-slice-steps li.done,
 .live-slice-steps li.partial {
   color: var(--text);
 }
@@ -4508,23 +4561,13 @@ a.btn-sm {
 }
 
 .live-slice-progress {
-  position: absolute;
-  left: 0.5rem;
-  right: 0.5rem;
-  bottom: 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  background: rgba(13, 17, 23, 0.8);
-  pointer-events: none;
+  gap: 0.4rem;
 }
 
 .live-slice-progress .hint {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
 

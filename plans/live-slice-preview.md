@@ -138,6 +138,46 @@ once its walls are in.
       live view, tick Outlines/Walls/Infill/Supports, and hand over to the
       G-code preview; no console errors or warnings. Test container removed.
 
+- [x] 2026-11-15 ~5:18 PM PST (01:18Z): deployed. Cherry-picked onto
+      origin/master as `ae6441e` (local master holds other threads'
+      unpushed work: labels, sharing, sessions, printer access; only
+      `mod live;` conflicted). FarmSlicer CI green; ops `4bbaa205` pins
+      `sha256:0bdcf70c…`; Server Deploys green; production serves `ae6441e`,
+      health 200, `/live` 401 signed out. Buildhost: test container, image
+      and `~/farmslicer-liveslice-*` removed.
+
+- [x] 2026-11-15: server progress over the live stream (`1ccd784` local,
+      `debc246` on top of origin/master, not pushed). The page polled the
+      job (1.5 s / 2 s), so the bar and the export sweep moved ~1 Hz. Now
+      `slicer::slice_progress` also feeds `live::progress`; the stream sends
+      the latest in "FSP1" frames, at most every 50 ms per reader.
+      Measured on buildhost (torus, tree supports, X1C): 20.5 progress
+      updates/s during export (layer 4, 14, 28, ...), the longest gap 202 ms
+      inside support generation (libslic3r reports nothing there); the
+      Slice page's text changed every ~55 ms in headless Chromium. Rust
+      live tests 5/5, 26 e2e suites pass; web 15 live tests.
+- [x] 2026-11-15 ~6:55 PM PST (02:55Z): deployed. FarmSlicer `debc246` on
+      origin (CI green), ops `4b7ac472` pins `sha256:713e5115…`; Server
+      Deploys green; production serves `debc246`, health 200.
+
+- [x] 2026-11-15: the handover made seamless (the user saw the view
+      "refresh and reload" when the slice finished: the live view was
+      thrown away, the preview showed "Reading the G-code…", then a new
+      view framed the print in another layout). Now `preview/SliceView.tsx`
+      stays at one place in the tree from slicing to done; the live view
+      has the preview's layout (`.gcode-preview`, steps and progress in the
+      side panel); the finished preview loads under it, starts from its
+      camera (`preview/handover.ts` context: `initialCamera`, `onReady` on
+      its first drawn frame) and the live view goes then. Nothing above the
+      view changes height: SliceResult is one tree for slicing and done,
+      the bar has a min-height, warnings are a chip in the bar opening a
+      panel over the view (open by itself for support warnings), plate tabs
+      are in the bar, and browser slices are remembered (recent slices) when
+      they start, as server ones are. Checked in headless Chromium (vite dev
+      against the deployed image): the view's box stays at the same place
+      and size from the first live frame to the finished preview, server
+      and browser; the camera carries over (a dragged angle kept).
+
 ## Open questions for the user
 
 (none yet)
@@ -146,6 +186,12 @@ once its walls are in.
   slice was blank under headless swiftshader while the CPU was loaded; it
   drew on the first drag, and two later runs drew at once. Logged in
   ISSUES.md ("G-code preview sometimes blank until the first drag").
+
+- Inside a step (walls, infill, supports) nothing can be shown before the
+  step ends: libslic3r reports no per-layer progress there and its data is
+  being written in parallel. Only G-code export reports per layer.
+- During export the percent stays put (libslic3r says 80 for every
+  layer; slice_core maps it to one value), while the message counts layers.
 
 ## Things not to do
 

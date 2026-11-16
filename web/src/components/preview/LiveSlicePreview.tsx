@@ -3,7 +3,9 @@
 // finishes them (liveSlice.ts builds what to draw), on the printer's bed,
 // with the progress. While the G-code is written, the layers it has reached
 // show in full and the rest faintly. The finished slice's G-code preview
-// takes its place.
+// takes its place without a jump (SliceView.tsx): the same layout (the view,
+// and a side panel where the preview's legend goes), and the camera's pose
+// handed over (`onCamera`).
 //
 // Frames come from the browser engine (the page hands them in) or, for a
 // server slice, from `GET /api/jobs/{id}/live` (useLiveSlice.ts).
@@ -17,7 +19,7 @@ import { DEFAULT_BED, sceneBed, type Bed as BedShape, type SceneBed } from "../v
 import { toolColors } from "./colors";
 import { STEP_NAMES, exportLayer, messagePlate, type LiveSlice } from "./liveSlice";
 import { Toolpaths, type ViewRange } from "./scene";
-import type { ParsedGcode } from "./types";
+import type { CameraPose, ParsedGcode } from "./types";
 
 /** Rebuilds of the view at most this often while frames pour in (ms). */
 const REBUILD_MS = 250;
@@ -51,9 +53,11 @@ export interface LiveSlicePreviewProps {
   title: string;
   filamentColors?: string[];
   className?: string;
+  /** The camera's pose, whenever it moves (for the preview that takes over). */
+  onCamera?: (pose: CameraPose) => void;
 }
 
-export default function LiveSlicePreview({ live: latest, bed, percent, message, title, filamentColors, className }: LiveSlicePreviewProps) {
+export default function LiveSlicePreview({ live: latest, bed, percent, message, title, filamentColors, className, onCamera }: LiveSlicePreviewProps) {
   const live = useThrottled(latest, REBUILD_MS);
   const plates = useMemo(() => live.plates(), [live]);
   // The plate being sliced (its message says), else the last with frames.
@@ -65,41 +69,45 @@ export default function LiveSlicePreview({ live: latest, bed, percent, message, 
   const exporting = exportLayer(message);
 
   return (
-    <div className={`live-slice ${className ?? ""}`}>
-      <div className="gp-viewport live-slice-viewport">
+    <div className={`gcode-preview live-slice ${className ?? ""}`}>
+      <div className="gp-viewport">
         <Canvas frameloop="demand" camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 0.5, far: 5000 }} dpr={[1, 2]}>
-          <LiveScene parsed={parsed} bed={shape} exporting={exporting} filamentColors={filamentColors} />
+          <LiveScene parsed={parsed} bed={shape} exporting={exporting} filamentColors={filamentColors} onCamera={onCamera} />
         </Canvas>
         <div className="gp-readout">
           <strong>{title}</strong>
           {plates.length > 1 && <span>Plate {plate}</span>}
           {parsed && <span>{parsed.layers.count} layers</span>}
         </div>
-        <ul className="live-slice-steps" aria-label="What's been sliced">
-          {steps.map((s) => {
-            const done = objects > 0 && s.done >= objects;
-            const label = STEP_NAMES[s.step];
-            return (
-              <li key={s.step} className={done ? "done" : s.done > 0 ? "partial" : ""}>
-                <span className="live-slice-mark" aria-hidden>
-                  {done ? "✓" : s.done > 0 ? "…" : "·"}
-                </span>{" "}
-                {label}
-                {objects > 1 && s.done > 0 && !done && ` (${s.done}/${objects})`}
-                {s.skipped > 0 && <span className="hint"> too detailed to show live</span>}
-              </li>
-            );
-          })}
-        </ul>
-        <div className="live-slice-progress">
+      </div>
+      <aside className="gp-side">
+        <section className="live-slice-progress">
           <div className="progress-bar">
             <div className="progress-fill" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
           </div>
           <span className="hint">
             {Math.round(percent)}%{message ? ` · ${message}` : ""}
           </span>
-        </div>
-      </div>
+        </section>
+        <section>
+          <ul className="live-slice-steps" aria-label="What's been sliced">
+            {steps.map((s) => {
+              const done = objects > 0 && s.done >= objects;
+              const label = STEP_NAMES[s.step];
+              return (
+                <li key={s.step} className={done ? "done" : s.done > 0 ? "partial" : ""}>
+                  <span className="live-slice-mark" aria-hidden>
+                    {done ? "✓" : s.done > 0 ? "…" : "·"}
+                  </span>{" "}
+                  {label}
+                  {objects > 1 && s.done > 0 && !done && ` (${s.done}/${objects})`}
+                  {s.skipped > 0 && <span className="hint"> too detailed to show live</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      </aside>
     </div>
   );
 }
@@ -116,15 +124,31 @@ function LiveScene({
   bed,
   exporting,
   filamentColors,
+  onCamera,
 }: {
   parsed: ParsedGcode | null;
   bed: SceneBed;
   exporting: number | null;
   filamentColors?: string[];
+  onCamera?: (pose: CameraPose) => void;
 }) {
   const invalidate = useThree((s) => s.invalidate);
   const get = useThree((s) => s.get);
   const controls = useThree((s) => s.controls);
+  const cameraTo = useRef(onCamera);
+  useEffect(() => {
+    cameraTo.current = onCamera;
+  }, [onCamera]);
+  // Where the camera is, for the preview that takes over.
+  const report = useMemo(
+    () => () => {
+      const orbit = get().controls as unknown as { target: THREE.Vector3 } | null;
+      const { camera } = get();
+      if (!orbit) return;
+      cameraTo.current?.({ position: camera.position.toArray(), target: orbit.target.toArray() });
+    },
+    [get],
+  );
   const toolpaths = useMemo(() => (parsed && parsed.extrusions.count > 0 ? new Toolpaths(parsed) : null), [parsed]);
   useEffect(() => () => toolpaths?.dispose(), [toolpaths]);
 
@@ -174,7 +198,8 @@ function LiveScene({
     orbit?.target.copy(sphere.center);
     orbit?.update();
     invalidate();
-  }, [bounds, bed, get, controls, invalidate]);
+    report();
+  }, [bounds, bed, get, controls, invalidate, report]);
 
   return (
     <>
@@ -188,6 +213,7 @@ function LiveScene({
         enableDamping={false}
         zoomToCursor
         mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }}
+        onChange={report}
       />
     </>
   );
