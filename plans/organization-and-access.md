@@ -305,6 +305,11 @@ Replace the single admin bit with **capabilities** granted by **roles**.
       dialog on jobs, projects, folders, libraries; Shared with me; /s/)
 - [x] Slice 6: sessions and devices (`tests/sessions-e2e.mjs`; Account
       devices, Users "Devices and keys")
+- [x] 2026-11-15 ~10:46 PM PST (06:46Z): slices 2-6 were committed on
+      local master but never pushed; pushed (the user chose to, while
+      leveling master with origin) as part of `61fb9c6` (CI green, e2e
+      included), deployed by ops `f19bf2ee`; production serves `61fb9c6`,
+      health 200. The open questions below still stand.
 
 ## Open questions for the user
 

@@ -202,6 +202,9 @@ once its walls are in.
       origin's kept), pushed as `61fb9c6`, whose tree equals old local
       master's exactly; master moved with `reset --soft` (0/0). Web tsc
       and 146 tests pass; the 15 lint findings are all pre-existing.
+- [x] 2026-11-15 ~10:46 PM PST (06:46Z): `61fb9c6` CI green; ops
+      `f19bf2ee` pins it (`sha256:feac94df…`); production serves
+      `61fb9c6`, health 200. Ops worktree and the scratch worktrees removed.
 
 ## Open questions for the user
 
