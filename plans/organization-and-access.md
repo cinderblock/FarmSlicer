@@ -317,6 +317,8 @@ Replace the single admin bit with **capabilities** granted by **roles**.
       lint and 152 tests pass; on sentinel (stub build) `cargo test` 199
       pass and every e2e suite passes, `tests/sharing-e2e.mjs` extended
       (shared libraries in `/api/folders`, per-group public links).
+      `46db324` pushed (CI green), pinned by ops `68c3ac8e`; production
+      serves `46db324`, health 200 (2026-11-16 ~12:05 AM PST, 08:05Z).
   - `label:` in the command palette: `search.ts` `parseQuery`
     (`label:x`, `label:"two words"`; a last token still being typed is
     `typingLabel`), `labelsMatching` (exact, else prefix, else word
