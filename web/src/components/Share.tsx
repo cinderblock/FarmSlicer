@@ -177,6 +177,9 @@ function ShareDialog({
                 <option value="group">A group (and its subgroups)</option>
                 {data.public_links && <option value="link">Anyone with a link</option>}
               </select>
+              {!data.public_links && kind !== "library" && (
+                <span className="hint">Public links are off here (the group's settings, or the site's).</span>
+              )}
             </label>
             {withKind === "user" && (
               <label>

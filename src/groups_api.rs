@@ -285,6 +285,17 @@ async fn update_group(
             if settings.listed != tree.settings(&id).listed && !viewer.can(Cap::GroupsManageAll) {
                 return Err(forbidden("only those who manage every group list groups on the sign-in page"));
             }
+            // Public links: a group's managers may turn them off, but only
+            // site settings managers turn them on where they'd be off.
+            if settings.public_shares == Some(true) && tree.settings(&id).public_shares != Some(true) {
+                let inherited = match g.parent_id.as_deref() {
+                    Some(p) if tree.get(p).is_some() => tree.effective(p).public_shares,
+                    _ => tree.site_public_shares(),
+                };
+                if !inherited && !viewer.can(Cap::SettingsManage) {
+                    return Err(forbidden("only those who manage site settings turn public links on for a group"));
+                }
+            }
             serde_json::to_string(&settings).unwrap()
         }
         None => g.settings.clone(),

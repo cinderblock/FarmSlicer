@@ -537,10 +537,19 @@ type TriState = "inherit" | "on" | "off";
 const toTri = (v: boolean | undefined): TriState => (v === undefined ? "inherit" : v ? "on" : "off");
 const fromTri = (t: TriState): boolean | undefined => (t === "inherit" ? undefined : t === "on");
 
-const BOOL_SETTINGS: { key: "shared_library" | "allow_registration" | "allow_guests"; label: string; help: string }[] = [
+const BOOL_SETTINGS: {
+  key: "shared_library" | "allow_registration" | "allow_guests" | "public_shares";
+  label: string;
+  help: string;
+}[] = [
   { key: "shared_library", label: "Shared library", help: "Members see each other's jobs in this group." },
   { key: "allow_registration", label: "New accounts", help: "The join flow may create passkey accounts." },
   { key: "allow_guests", label: "Guest accounts", help: "The join flow may create guest accounts (no passkey; limited)." },
+  {
+    key: "public_shares",
+    label: "Public share links",
+    help: "Jobs, projects and folders charged here may be shared with anyone holding a link (names, facts and plate pictures). Off stops their links; turning it on where it would be off takes the site settings permission.",
+  },
 ];
 
 /** The group's thumbnail logo: upload, replace, remove (managers). */
@@ -615,6 +624,8 @@ function LogoSetting({ group }: { group: GroupDetail }) {
 }
 
 function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => void }) {
+  // Turning public links on where they'd be off takes the site settings permission.
+  const siteSettings = useAuth().can("settings.manage");
   const navigate = useNavigate();
   const [s, setS] = useState<GroupSettings>(group.settings);
   const [name, setName] = useState(group.name);
@@ -706,7 +717,9 @@ function SettingsTab({ group, onSaved }: { group: GroupDetail; onSaved: () => vo
           {label}
           <select value={toTri(s[key])} onChange={(e) => setS({ ...s, [key]: fromTri(e.target.value as TriState) })}>
             <option value="inherit">{inheritLabel(key, eff[key] ? "on" : "off")}</option>
-            <option value="on">On</option>
+            <option value="on" disabled={key === "public_shares" && !siteSettings && s[key] !== true && group.settings.public_shares === undefined && !eff[key]}>
+              On
+            </option>
             <option value="off">Off</option>
           </select>
           <span className="hint">{help}</span>

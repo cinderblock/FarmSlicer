@@ -313,12 +313,37 @@ Replace the single admin bit with **capabilities** granted by **roles**.
       included), deployed by ops `f19bf2ee`; production serves `61fb9c6`,
       health 200. The open questions below still stand.
 
+- [x] 2026-11-15: the three follow-ups (the user: "do all 3"). Web tsc,
+      lint and 152 tests pass; on sentinel (stub build) `cargo test` 199
+      pass and every e2e suite passes, `tests/sharing-e2e.mjs` extended
+      (shared libraries in `/api/folders`, per-group public links).
+  - `label:` in the command palette: `search.ts` `parseQuery`
+    (`label:x`, `label:"two words"`; a last token still being typed is
+    `typingLabel`), `labelsMatching` (exact, else prefix, else word
+    prefix), `completeLabel`; unit-tested. The palette filters printers,
+    jobs, projects and (new) groups by every `label:`, and offers labels
+    to complete the one being typed (choosing fills the query, the
+    palette stays open).
+  - Per-group public links: group setting `public_shares` (inherited;
+    default = the site setting, which also covers personal items).
+    `shares::public_links_for` (item → its group: job/project
+    `group_id`, folder its library's group) gates the share dialog's
+    option, creating links and every public open. A group's managers may
+    turn it off; `Some(true)` where the inherited value is off takes
+    `settings.manage` (groups_api update). Group Settings tab tri-state;
+    the Share dialog says why there's no link option.
+  - Shared folders/libraries in the Library's folder view: `Grants.folders`
+    (shared folder roots); `/api/folders` adds shared group libraries
+    (`shared: true`) and, for folders from libraries the caller doesn't
+    see, their library with `roots` (a shared folder inside another isn't
+    a root), plus those folders. `/api/shares/mine` gives a folder's
+    `library`. Library.tsx: "Shared with you" optgroup, `?lib=user:<id>`
+    for someone else's personal library, the tree starts at `roots`,
+    filing only where `can_manage`; "Shared with me" rows link into it.
+
 ## Open questions for the user
 
-1. Not built (small follow-ups, say if you want them): a `label:` filter
-   in the command palette; per-group override of the public-links site
-   setting; folders/libraries shared with you opening in the file
-   browser (they show in "Shared with me" and the flat view).
+(none)
 
 ## Things not to do
 

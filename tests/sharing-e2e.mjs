@@ -2,8 +2,10 @@
 // e2e-env: FARMSLICER_LAN_HEADER=X-FarmSlicer-LAN
 // End-to-end test of sharing (src/shares.rs): jobs, projects, folders and
 // group libraries shared with people and groups at view, use and edit,
-// what each level allows, who may share, dropping a share, and public
-// links (off by default, read only, reachable from the internet). Against
+// what each level allows, who may share, dropping a share, shared
+// folders and libraries in the Library (`/api/folders`), and public links
+// (off by default, read only, reachable from the internet, per group with
+// the site setting as the default). Against
 // a fresh server (first-run setup); a FARMSLICER_SKIP_CXX server is enough.
 //
 //   node tests/sharing-e2e.mjs http://localhost:9337
@@ -126,6 +128,16 @@ r = await bob.client.get(`/api/jobs/${j1}`);
 check(r.status === 200, "bob sees the job filed in it", json(r));
 r = await bob.client.get(`/api/projects/${project}`);
 check(r.status === 200, "and the project in its subfolder", json(r));
+r = await bob.client.get("/api/folders");
+const annsLib = r.json.libraries.find((l) => l.kind === "user" && l.id === ann.id);
+check(annsLib?.shared === true && annsLib.can_manage === false && JSON.stringify(annsLib.roots) === JSON.stringify([parts]) && annsLib.name === "ann's library", "bob's Library has ann's, from the shared folder", json(r));
+check(r.json.folders.some((f) => f.id === parts) && r.json.folders.some((f) => f.id === plans), "with the folder and the one below it", json(r));
+check(r.json.items.project?.[project] === plans && r.json.items.job?.[j1] === parts, "and where their contents are filed", json(r));
+r = await bob.client.get("/api/shares/mine");
+const folderShare = r.json.find((x) => x.target_id === parts);
+check(folderShare?.library?.kind === "user" && folderShare.library.id === ann.id, "'shared with me' says which library the folder is in", json(r));
+r = await ann.client.get("/api/folders");
+check(!r.json.libraries.some((l) => l.shared), "ann's own libraries aren't marked shared", json(r));
 r = await bob.client.get(`/api/jobs/${j1}/model`);
 check(r.status === 403, "at view level", json(r));
 await ann.client.put("/api/folders/items", { kind: "job", item_id: j1, folder_id: null });
@@ -141,6 +153,9 @@ r = await dee.client.get("/api/jobs");
 check(r.json.some((j) => j.id === clubJob), "dee sees Club's job in her list", json(r));
 r = await dee.client.get(`/api/jobs/${clubJob}/model`);
 check(r.status === 200, "and may use it", json(r));
+r = await dee.client.get("/api/folders");
+const clubLib = r.json.libraries.find((l) => l.kind === "group" && l.id === club);
+check(clubLib?.shared === true && !clubLib.roots && clubLib.name === "Club", "Club's whole library is in dee's Library", json(r));
 
 // ---- public links ----------------------------------------------------------------------------
 r = await share(ann.client, "job", j2, { kind: "link" });
@@ -176,6 +191,45 @@ r = await ann.client.del(`/api/shares/${link}`);
 check(r.status === 204, "ann removes the link", String(r.status));
 r = await internet.get(`/api/public/shares/${code}`);
 check(r.status === 404, "and it's dead", json(r));
+
+// ---- public links per group --------------------------------------------------------------------
+r = await share(bob.client, "job", clubJob, { kind: "link" });
+check(r.status === 201, "bob links Club's job (the site default: on)", json(r));
+const clubCode = r.json.code;
+r = await owner.put(`/api/groups/${club}`, { settings: { shared_library: false, public_shares: false } });
+check(r.status === 200, "the owner turns public links off for Club", json(r));
+r = await internet.get(`/api/public/shares/${clubCode}`);
+check(r.status === 404, "Club's links stop", json(r));
+r = await share(bob.client, "job", clubJob, { kind: "link" });
+check(r.status === 403, "and no new ones", json(r));
+r = await bob.client.get(`/api/shares?kind=job&id=${clubJob}`);
+check(r.json.public_links === false, "the share dialog isn't offered one", json(r));
+r = await owner.get(`/api/groups/${club}`);
+check(r.json.effective.public_shares === false, "Club's effective setting", json(r));
+
+await owner.put("/api/settings", { public_shares: false });
+r = await owner.post("/api/groups", { name: "Lab" });
+const lab = r.json.id;
+await owner.post(`/api/groups/${lab}/members`, { username: "dee", role: "manager" });
+r = await dee.client.put(`/api/groups/${lab}`, { settings: { public_shares: true } });
+check(r.status === 403, "a group's manager can't turn links on where the site has them off", json(r));
+r = await owner.put(`/api/groups/${lab}`, { settings: { public_shares: true } });
+check(r.status === 200, "the owner (site settings) can", json(r));
+const labJob = await job(dee, "lab.stl", lab);
+r = await share(dee.client, "job", labJob, { kind: "link" });
+check(r.status === 201, "so Lab's jobs get public links with the site's off", json(r));
+const labCode = r.json.code;
+r = await internet.get(`/api/public/shares/${labCode}`);
+check(r.status === 200 && r.json.name === "lab.stl", "that work", json(r));
+r = await share(ann.client, "job", j2, { kind: "link" });
+check(r.status === 403, "personal jobs follow the site: off", json(r));
+r = await dee.client.put(`/api/groups/${lab}`, { settings: { public_shares: false } });
+check(r.status === 200, "Lab's manager may turn them off", json(r));
+r = await internet.get(`/api/public/shares/${labCode}`);
+check(r.status === 404, "which stops Lab's link", json(r));
+r = await dee.client.put(`/api/groups/${lab}`, { settings: { public_shares: true } });
+check(r.status === 403, "and can't turn them back on", json(r));
+await owner.put("/api/settings", { public_shares: true });
 
 // ---- cleanup and audit --------------------------------------------------------------------------
 r = await ann.client.post(`/api/jobs/${j2}/cancel`);

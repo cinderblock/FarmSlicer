@@ -454,14 +454,19 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   needs `use`, `can_edit_job` `edit`, `owns_job` (delete, move group,
   share) none of that. Job lists add `JobFilter.shared_ids`. Public
   links: `public_routes` (`/api/public/shares/…`, in `open_to_remote`),
-  site setting `public_shares`, page `pages/SharedLink.tsx` (`/s/:code`,
-  outside the Gate); `components/Share.tsx` (button + dialog)
+  `public_links_for` (the item's group's inherited `public_shares`
+  setting, else the site setting `public_shares`; checked on every
+  open, so turning it off stops links; turning a group's on where it
+  would be off takes `settings.manage`), page `pages/SharedLink.tsx`
+  (`/s/:code`, outside the Gate); `components/Share.tsx` (button + dialog)
 - `src/folders.rs` — library folders (`folders`, `folder_items`; storage
   `src/db/folders.rs`): a library is `("user", creator)` for items with no
   group or `("group", id)` (`library_of`); a folder holds only its
   library's items; `GET /api/folders` returns folders, libraries and
   placements, joined in `web/src/pages/Library.tsx` (file browser, drag
-  to file). Changing a job's or project's group clears its placement;
+  to file), shared ones too (`shared`; a library only partly shared
+  lists its shared folders as `roots`, browsed from those;
+  `Grants.folders`). Changing a job's or project's group clears its placement;
   deleting a folder moves its contents to its parent
 - `src/labels.rs` — labels (`labels`, `label_links`; storage
   `src/db/labels.rs`): scope user | group | site, `can_see` /

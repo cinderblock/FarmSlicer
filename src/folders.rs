@@ -19,7 +19,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use crate::audit::{self, Target};
@@ -94,16 +94,34 @@ fn item(state: &AppState, tree: &Tree, viewer: &Viewer, kind: &str, id: &str) ->
     }
 }
 
+/// Shared folders, each with every folder below it.
+fn shared_folders(all: &[Folder], viewer: &Viewer) -> HashSet<String> {
+    let mut within: Vec<String> = viewer.grants.folders.keys().filter(|id| all.iter().any(|f| &f.id == *id)).cloned().collect();
+    let mut i = 0;
+    while i < within.len() {
+        let id = within[i].clone();
+        within.extend(all.iter().filter(|f| f.parent_id.as_deref() == Some(id.as_str())).map(|f| f.id.clone()));
+        i += 1;
+    }
+    within.into_iter().collect()
+}
+
 /// `GET /api/folders`: the folders of every library the caller sees, the
 /// libraries they may file into, and where the items they see are filed:
 /// `{folders, libraries, items: {job: {id: folder}, project: {...}}}`.
+/// Libraries and folders shared with the caller are there too
+/// (`shared: true`); a library of which only some folders are shared
+/// says which (`roots`), and is browsed from those.
 async fn list(State(state): State<Arc<AppState>>, Extension(CurrentUser(user)): Extension<CurrentUser>) -> Json<Value> {
     let (tree, viewer) = groups_api::context(&state, &user);
-    let folders: Vec<Folder> = state
-        .db
-        .list_folders()
-        .into_iter()
-        .filter(|f| can_see_library(&tree, &viewer, &f.library_kind, &f.library_id))
+    let all = state.db.list_folders();
+    let shared = shared_folders(&all, &viewer);
+    let whole_library_shared =
+        |f: &Folder| f.library_kind == "group" && viewer.shared_library(&tree, &f.library_id).is_some();
+    let folders: Vec<Folder> = all
+        .iter()
+        .filter(|f| can_see_library(&tree, &viewer, &f.library_kind, &f.library_id) || shared.contains(&f.id) || whole_library_shared(f))
+        .cloned()
         .collect();
     let by_id: std::collections::HashMap<&str, &Folder> = folders.iter().map(|f| (f.id.as_str(), f)).collect();
     let mut items: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
@@ -127,6 +145,53 @@ async fn list(State(state): State<Arc<AppState>>, Extension(CurrentUser(user)): 
     libraries.extend(groups.into_iter().map(|(id, path)| {
         json!({"kind": "group", "id": id, "name": path, "can_manage": can_manage_library(&tree, &viewer, "group", &id)})
     }));
+    let listed = |libraries: &Vec<Value>, kind: &str, id: &str| libraries.iter().any(|l| l["kind"] == kind && l["id"] == id);
+    // Whole group libraries shared with the caller.
+    let mut whole: Vec<(String, String)> = viewer
+        .grants
+        .libraries
+        .keys()
+        .filter(|id| tree.get(id).is_some() && !listed(&libraries, "group", id))
+        .map(|id| (id.clone(), tree.display_path(id)))
+        .collect();
+    whole.sort_by(|a, b| crate::groups::natural_cmp(&a.1, &b.1));
+    for (id, path) in whole {
+        libraries.push(json!({
+            "kind": "group", "id": id, "name": path, "shared": true,
+            "can_manage": can_manage_library(&tree, &viewer, "group", &id),
+        }));
+    }
+    // Folders shared from libraries the caller doesn't see whole: their
+    // library, browsed from them (a shared folder inside another isn't a root).
+    let mut partial: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for root in viewer.grants.folders.keys() {
+        let Some(f) = all.iter().find(|f| &f.id == root) else { continue };
+        if listed(&libraries, &f.library_kind, &f.library_id) {
+            continue;
+        }
+        let inside_another = {
+            let mut at = f.parent_id.clone();
+            let mut found = false;
+            while let Some(p) = at {
+                if viewer.grants.folders.contains_key(&p) {
+                    found = true;
+                    break;
+                }
+                at = all.iter().find(|x| x.id == p).and_then(|x| x.parent_id.clone());
+            }
+            found
+        };
+        if !inside_another {
+            partial.entry((f.library_kind.clone(), f.library_id.clone())).or_default().push(f.id.clone());
+        }
+    }
+    for ((kind, id), roots) in partial {
+        let name = match kind.as_str() {
+            "group" => tree.display_path(&id),
+            _ => state.db.get_user(&id).map(|u| format!("{}'s library", u.username)).unwrap_or_else(|| "Someone's library".into()),
+        };
+        libraries.push(json!({"kind": kind, "id": id, "name": name, "shared": true, "can_manage": false, "roots": roots}));
+    }
     Json(json!({
         "folders": folders.iter().map(|f| folder_json(&tree, &viewer, f)).collect::<Vec<_>>(),
         "libraries": libraries,

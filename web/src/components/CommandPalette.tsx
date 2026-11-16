@@ -4,11 +4,14 @@ import { useJson } from "../api";
 import type { NavSection } from "../nav";
 import type { ThemeChoice } from "../theme";
 import Icon, { type IconName } from "./Icon";
-import { matchScore } from "../search";
+import { completeLabel, labelsMatching, matchScore, parseQuery } from "../search";
+import { scopeText, useLabels, type LabelKind } from "../labels";
 
 // Ctrl+K: go anywhere or do something by typing. Pages, a few actions, and
-// the printers, jobs and projects this account can see, matched by every
-// word typed (in any order) against each entry's name and keywords.
+// the printers, jobs, projects and groups this account can see, matched by
+// every word typed (in any order) against each entry's name and keywords.
+// `label:name` (or `label:"two words"`) keeps only what carries that label;
+// typing one offers the labels to complete it.
 
 interface Entry {
   id: string;
@@ -17,6 +20,10 @@ interface Entry {
   group: string;
   icon: IconName;
   keywords?: string;
+  /** Labels on it (printers, jobs, projects, groups). */
+  labelIds?: string[];
+  /** Choosing it fills the query with this instead of running. */
+  complete?: string;
   run: () => void;
 }
 
@@ -26,6 +33,7 @@ interface Named {
   model_name?: string;
   machine_profile?: string;
   status?: string;
+  path?: string;
 }
 
 const LIMIT_PER_GROUP = 6;
@@ -53,6 +61,8 @@ export default function CommandPalette({
   const printers = useJson<Named[]>("/api/printers").data;
   const jobs = useJson<Named[]>("/api/jobs").data;
   const projects = useJson<Named[]>("/api/projects").data;
+  const groups = useJson<Named[]>("/api/groups").data;
+  const labels = useLabels();
 
   useEffect(() => {
     input.current?.focus();
@@ -84,38 +94,61 @@ export default function CommandPalette({
       { id: "act:system", label: "System theme", group: "Actions", icon: "monitor", keywords: "appearance colour color mode auto", run: () => onTheme("system") },
     );
     if (onLogout) out.push({ id: "act:logout", label: "Log out", group: "Actions", icon: "logout", keywords: "sign out", run: onLogout });
+    const on = (kind: LabelKind, id: string) => labels?.links[kind]?.[id] ?? [];
     for (const p of printers ?? []) {
-      out.push({ id: `printer:${p.id}`, label: p.name ?? "Printer", hint: p.machine_profile, group: "Printers", icon: "printer", keywords: p.machine_profile, run: go("/") });
+      out.push({ id: `printer:${p.id}`, label: p.name ?? "Printer", hint: p.machine_profile, group: "Printers", icon: "printer", keywords: p.machine_profile, labelIds: on("printer", p.id), run: go("/") });
     }
     for (const j of jobs ?? []) {
-      out.push({ id: `job:${j.id}`, label: j.model_name ?? "Job", hint: j.status, group: "Jobs", icon: "jobs", run: go(`/jobs/${j.id}`) });
+      out.push({ id: `job:${j.id}`, label: j.model_name ?? "Job", hint: j.status, group: "Jobs", icon: "jobs", labelIds: on("job", j.id), run: go(`/jobs/${j.id}`) });
     }
     for (const p of projects ?? []) {
-      out.push({ id: `project:${p.id}`, label: p.name ?? "Project", hint: p.status, group: "Projects", icon: "projects", run: go(`/projects/${p.id}`) });
+      out.push({ id: `project:${p.id}`, label: p.name ?? "Project", hint: p.status, group: "Projects", icon: "projects", labelIds: on("project", p.id), run: go(`/projects/${p.id}`) });
+    }
+    for (const g of groups ?? []) {
+      out.push({ id: `group:${g.id}`, label: g.name ?? "Group", hint: g.path !== g.name ? g.path : undefined, group: "Groups", icon: "groups", keywords: g.path, labelIds: on("group", g.id), run: go(`/groups/${g.id}`) });
     }
     return out;
-  }, [sections, printers, jobs, projects, navigate, onFeedback, onWhatsNew, onTheme, onLogout]);
+  }, [sections, printers, jobs, projects, groups, labels, navigate, onFeedback, onWhatsNew, onTheme, onLogout]);
 
   const results = useMemo(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const { words, labels: filters, typingLabel } = parseQuery(query);
+    const all = labels?.labels ?? [];
+    // Each label: filter, as the label ids it means; an item needs one of each.
+    const wanted = filters.map((f) => new Set(labelsMatching(f, all).map((l) => l.id)));
+    const filtering = wanted.length > 0;
     const scored = entries
+      .filter((e) => !filtering || (e.labelIds && wanted.every((w) => e.labelIds!.some((id) => w.has(id)))))
       .map((e, i) => ({ e, s: matchScore(words, e.label, e.keywords), i }))
       .filter((x) => x.s > 0)
       // Without a query: pages and actions only, in their order.
-      .filter((x) => words.length > 0 || x.e.group === "Pages" || x.e.group === "Actions")
+      .filter((x) => words.length > 0 || filtering || x.e.group === "Pages" || x.e.group === "Actions")
       .sort((a, b) => b.s - a.s || a.i - b.i);
     const perGroup = new Map<string, number>();
     const kept: Entry[] = [];
+    // A label being typed: the labels it could be, to complete it.
+    if (typingLabel !== null) {
+      for (const l of typingLabel ? labelsMatching(typingLabel, all) : all) {
+        kept.push({
+          id: `label:${l.id}`,
+          label: l.name,
+          hint: scopeText(l),
+          group: "Labels",
+          icon: "tag",
+          complete: completeLabel(query, l.name),
+          run: () => {},
+        });
+      }
+    }
     for (const { e } of scored) {
       const n = perGroup.get(e.group) ?? 0;
-      if (words.length > 0 && n >= LIMIT_PER_GROUP) continue;
+      if ((words.length > 0 || filtering) && n >= LIMIT_PER_GROUP) continue;
       perGroup.set(e.group, n + 1);
       kept.push(e);
     }
     // Grouped in the order each group's best entry came.
     const order = [...new Set(kept.map((e) => e.group))];
     return order.flatMap((g) => kept.filter((e) => e.group === g));
-  }, [entries, query]);
+  }, [entries, query, labels]);
 
   const index = Math.min(active, Math.max(0, results.length - 1));
 
@@ -125,6 +158,12 @@ export default function CommandPalette({
 
   const choose = (e: Entry | undefined) => {
     if (!e) return;
+    if (e.complete !== undefined) {
+      setQuery(e.complete);
+      setActive(0);
+      input.current?.focus();
+      return;
+    }
     onClose();
     e.run();
   };
@@ -158,7 +197,7 @@ export default function CommandPalette({
               setQuery(e.target.value);
               setActive(0);
             }}
-            placeholder="Go to a page, printer, job or project…"
+            placeholder="Go to a page, printer, job or project… (label:name filters)"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"

@@ -315,22 +315,28 @@ There are no passwords and no secrets to configure.
   revoke them, within the same rank rule.
 - **Audit log** (`/audit`): who changed accounts, roles, groups, site
   settings and printer access, and what changed.
-- **Folders** (the Library page, `?lib=me|<group>|all&folder=`): each
+- **Folders** (the Library page, `?lib=me|<group>|user:<id>|shared|all&folder=`): each
   library (yours: what's charged to no group; a group's: what's charged
   to it) has a tree of folders. A folder holds only its own library's
   jobs and projects; moving an item to another group takes it out.
   Group folders are arranged by holders of the group's `folders`
   capability; anyone who can change an item files it. Deleting a folder
-  moves its contents up a level.
+  moves its contents up a level. Libraries and folders shared with you
+  open there too, under "Shared with you" (a folder from a library you
+  don't otherwise see starts at that folder).
 - **Sharing**: a job, project, folder (with everything below it) or a
   group's whole library, shared with a person, a group (its subgroups'
-  members too) or, when the site setting `public_shares` allows, anyone
-  with a link. Levels: `view`, `use` (print, queue, download the model,
+  members too) or, where public links are on, anyone with a link (the
+  group setting "Public share links", inherited; the site setting
+  `public_shares` is the default and covers personal jobs; a group's
+  managers may turn them off, turning them on where they'd be off takes
+  site settings rights). Levels: `view`, `use` (print, queue, download the model,
   re-slice) and `edit` (label, file); deleting, moving between groups and
   sharing stay with the owners. Public links (`/s/<code>`, reachable from
   the internet) show names, facts and plate pictures only.
 - **Labels** (`/labels`, and the tag button in the Jobs, Projects,
-  Printers and Groups lists, which filter by them): personal labels (only
+  Printers and Groups lists, which filter by them; in the command
+  palette, `label:name` or `label:"two words"`): personal labels (only
   their owner sees them; they go on anything the owner can see), group
   labels (made by holders of the group's `labels` capability, seen by its
   members and its subgroups') and site labels (`labels.manage`, everyone).

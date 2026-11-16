@@ -1,8 +1,10 @@
 // /library: sliced jobs and projects as a file browser (src/folders.rs).
 // Each library (yours: jobs and projects charged to no group; a group's:
-// what's charged to it) has its own tree of folders. `?lib=me|<group>|all`
-// and `?folder=<id>` keep the place in the URL. Drag a row onto a folder,
-// or use its "Move to", to file it.
+// what's charged to it) has its own tree of folders. Libraries and
+// folders shared with you open the same way (read only unless you manage
+// them); a library of which only some folders are shared starts from those.
+// `?lib=me|<group>|user:<id>|shared|all` and `?folder=<id>` keep the place
+// in the URL. Drag a row onto a folder, or use its "Move to", to file it.
 import { ShareButton } from "../components/Share";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -44,6 +46,15 @@ interface Library {
   id: string;
   name: string;
   can_manage: boolean;
+  /** Shared with this account, not its own or its groups'. */
+  shared?: boolean;
+  /** Only these folders of it are shared: it's browsed from them. */
+  roots?: string[];
+}
+
+/** A library's `?lib=` value. */
+function libraryKey(l: { kind: "user" | "group"; id: string }, me: string | undefined): string {
+  return l.kind === "group" ? l.id : l.id === me ? "me" : `user:${l.id}`;
 }
 
 interface FoldersData {
@@ -63,10 +74,12 @@ interface SharedWithMe {
   by: string | null;
   expires_at: string | null;
   through_group: string | null;
+  /** A shared folder's library. */
+  library: { kind: "user" | "group"; id: string } | null;
 }
 
 /** What's been shared with this account, and from whom. */
-function SharedList({ list }: { list: SharedWithMe[] | undefined }) {
+function SharedList({ list, me }: { list: SharedWithMe[] | undefined; me: string | undefined }) {
   if (!list) return <p className="hint">Loading…</p>;
   if (list.length === 0) {
     return (
@@ -81,8 +94,10 @@ function SharedList({ list }: { list: SharedWithMe[] | undefined }) {
       : s.target_kind === "project"
         ? `/projects/${s.target_id}`
         : s.target_kind === "library"
-          ? `/library?lib=all`
-          : `/library?lib=all`;
+          ? `/library?lib=${encodeURIComponent(s.target_id)}`
+          : s.library
+            ? `/library?lib=${encodeURIComponent(libraryKey(s.library, me))}&folder=${encodeURIComponent(s.target_id)}`
+            : `/library?lib=all`;
   return (
     <table className="data-table cards">
       <thead>
@@ -134,19 +149,27 @@ export default function LibraryPage() {
   const sharedWithMe = useJson<SharedWithMe[]>(sharedView ? "/api/shares/mine" : null, rev).data;
   const lib: Library | undefined = flat
     ? undefined
-    : (folders?.libraries.find((l) => (libKey === "me" ? l.kind === "user" : l.kind === "group" && l.id === libKey)) ??
-      folders?.libraries[0]);
+    : (folders?.libraries.find((l) => libraryKey(l, user?.id) === libKey) ?? folders?.libraries[0]);
   const inLib = (groupId: string | null, userId: string | null) =>
-    !!lib && (lib.kind === "group" ? groupId === lib.id : groupId === null && userId === user?.id);
+    !!lib && (lib.kind === "group" ? groupId === lib.id : groupId === null && userId === lib.id);
+  // Filing (drag, Move to, new folders) is for those who manage the library.
+  const manages = !flat && !!lib?.can_manage;
 
   const libFolders = useMemo(
     () => (folders?.folders ?? []).filter((f) => lib && f.library_kind === lib.kind && f.library_id === lib.id),
     [folders, lib],
   );
   const current = libFolders.find((f) => f.id === folderId) ?? null;
-  const children = libFolders.filter((f) => f.parent_id === (current?.id ?? null));
+  const roots = lib?.roots;
+  const children = libFolders.filter((f) =>
+    current ? f.parent_id === current.id : roots ? roots.includes(f.id) : f.parent_id === null,
+  );
   const trail: Folder[] = [];
-  for (let f: Folder | null = current; f; f = libFolders.find((x) => x.id === f!.parent_id) ?? null) trail.unshift(f);
+  for (let f: Folder | null = current; f; f = libFolders.find((x) => x.id === f!.parent_id) ?? null) {
+    trail.unshift(f);
+    // A library shared by some of its folders: the trail starts at the shared one.
+    if (roots?.includes(f.id)) break;
+  }
   // Every folder of this library, by path, for "Move to".
   const paths = useMemo(() => {
     const path = (f: Folder): string => {
@@ -160,7 +183,10 @@ export default function LibraryPage() {
   const matches = (text: string) => words.every((w) => text.toLowerCase().includes(w));
   // Searching looks through the whole library, not just this folder.
   const here = (kind: "job" | "project", id: string) =>
-    words.length > 0 || labelFilter.length > 0 ? true : (folders?.items[kind]?.[id] ?? null) === (current?.id ?? null);
+    words.length > 0 || labelFilter.length > 0
+      ? true
+      : // Above the shared folders of a partly shared library: just those folders.
+        !(roots && !current) && (folders?.items[kind]?.[id] ?? null) === (current?.id ?? null);
   const shownSlices = (slices ?? []).filter(
     (s) =>
       (flat || (inLib(s.group_id, s.user_id) && here("job", s.job_id))) &&
@@ -229,16 +255,16 @@ export default function LibraryPage() {
     },
   });
   const dragProps = (item: Dragged) => ({
-    draggable: !flat,
+    draggable: manages,
     onDragStart: (e: React.DragEvent) => {
       e.dataTransfer.effectAllowed = "move";
       setDragged(item);
     },
     onDragEnd: () => setDragged(null),
   });
+  const canFile = manages && paths.length > 0;
   const moveSelect = (item: Dragged) =>
-    !flat &&
-    paths.length > 0 && (
+    canFile && (
       <select
         className="select-sm"
         value={folders?.items[item.kind]?.[item.id] ?? ""}
@@ -263,25 +289,38 @@ export default function LibraryPage() {
         title="Library"
         icon="library"
         actions={
-          lib?.can_manage &&
-          !flat && (
+          manages && (
             <button className="btn-primary btn-inline" onClick={newFolder}>
               <Icon name="plus" /> New folder
             </button>
           )
         }
       >
-        Your sliced jobs and projects, and your groups', in folders. Drag a row onto a folder (or use its Move to) to
-        file it; folders belong to one library, so a group's work goes in the group's folders.
+        Your sliced jobs and projects, your groups', and what's shared with you, in folders. Drag a row onto a folder
+        (or use its Move to) to file it; folders belong to one library, so a group's work goes in the group's folders.
       </PageHeader>
       <div className="list-toolbar">
         <label>
-          <select value={flat ? libKey : lib?.kind === "group" ? lib.id : "me"} onChange={(e) => go(e.target.value)} aria-label="Library">
-            {folders?.libraries.map((l) => (
-              <option key={`${l.kind}:${l.id}`} value={l.kind === "user" ? "me" : l.id}>
-                {l.name}
-              </option>
-            ))}
+          <select value={flat ? libKey : lib ? libraryKey(lib, user?.id) : "me"} onChange={(e) => go(e.target.value)} aria-label="Library">
+            {folders?.libraries
+              .filter((l) => !l.shared)
+              .map((l) => (
+                <option key={`${l.kind}:${l.id}`} value={libraryKey(l, user?.id)}>
+                  {l.name}
+                </option>
+              ))}
+            {folders?.libraries.some((l) => l.shared) && (
+              <optgroup label="Shared with you">
+                {folders.libraries
+                  .filter((l) => l.shared)
+                  .map((l) => (
+                    <option key={`${l.kind}:${l.id}`} value={libraryKey(l, user?.id)}>
+                      {l.name}
+                      {l.roots ? ` (${l.roots.length === 1 ? "a folder" : `${l.roots.length} folders`})` : ""}
+                    </option>
+                  ))}
+              </optgroup>
+            )}
             <option value="shared">Shared with me</option>
             <option value="all">Everything I can see</option>
           </select>
@@ -291,7 +330,7 @@ export default function LibraryPage() {
           <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find in this library…" aria-label="Search the library" />
         </label>
         <LabelFilter value={labelFilter} onChange={setLabelFilter} />
-        {lib?.kind === "group" && (
+        {lib?.kind === "group" && !lib.shared && (
           <>
             <Link to={`/groups/${lib.id}`} className="hint">
               The group's library by season
@@ -349,7 +388,7 @@ export default function LibraryPage() {
       )}
 
       {sharedView ? (
-        <SharedList list={sharedWithMe} />
+        <SharedList list={sharedWithMe} me={user?.id} />
       ) : loading ? (
         <p className="hint">Loading…</p>
       ) : empty ? (
@@ -375,7 +414,7 @@ export default function LibraryPage() {
                   <th>Project</th>
                   <th>Status</th>
                   <th>Created</th>
-                  {paths.length > 0 && <th>Folder</th>}
+                  {canFile && <th>Folder</th>}
                 </tr>
               </thead>
               <tbody>
@@ -387,7 +426,7 @@ export default function LibraryPage() {
                     </td>
                     <td data-label="Status">{STATUS_LABELS[p.status]}</td>
                     <td data-label="Created">{localDate(p.created_at)}</td>
-                    {paths.length > 0 && <td data-label="Folder">{moveSelect({ kind: "project", id: p.id })}</td>}
+                    {canFile && <td data-label="Folder">{moveSelect({ kind: "project", id: p.id })}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -404,7 +443,7 @@ export default function LibraryPage() {
                   <th>Print time</th>
                   <th>Filament</th>
                   <th>Size</th>
-                  {paths.length > 0 && <th>Folder</th>}
+                  {canFile && <th>Folder</th>}
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -425,7 +464,7 @@ export default function LibraryPage() {
                     <td data-label="Print time">{formatDuration(s.print_time_sec)}</td>
                     <td data-label="Filament">{s.filament_used_g.toFixed(1)}g</td>
                     <td data-label="Size">{formatSize(s.file_size)}</td>
-                    {paths.length > 0 && <td data-label="Folder">{moveSelect({ kind: "job", id: s.job_id })}</td>}
+                    {canFile && <td data-label="Folder">{moveSelect({ kind: "job", id: s.job_id })}</td>}
                     <td className="cell-actions">
                       <a className="btn-sm" href={`/api/slices/${s.id}/download`} download>
                         G-code

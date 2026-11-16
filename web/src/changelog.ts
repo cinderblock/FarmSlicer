@@ -21,6 +21,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-15b",
+    date: "2026-11-15",
+    title: "Find by label, and more say over sharing",
+    highlights: [
+      "In the search box (Ctrl+K or /), type label: and a label's name to see only the jobs, projects, printers and groups that carry it; it offers your labels as you type. Groups are in the search now too.",
+      "Folders and libraries shared with you open in the Library like your own, under \"Shared with you\": browse their folders, starting from the folder you were given.",
+      "Each group can turn public share links on or off for its own jobs, projects and folders (Settings tab), instead of one switch for the whole site.",
+    ],
+  },
+  {
     id: "2026-11-15",
     date: "2026-11-15",
     title: "Watch it slice",

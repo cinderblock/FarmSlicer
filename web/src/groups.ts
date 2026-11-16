@@ -43,6 +43,8 @@ export interface GroupSettings {
   join_policy?: "open" | "approval";
   /** Pre-sliced uploads; inherited. */
   uploads?: import("./printers").UploadPolicy;
+  /** Public share links for items charged here; inherited, the site setting by default. */
+  public_shares?: boolean;
   listed?: boolean;
   subgroups?: SubgroupPolicy;
 }
@@ -56,6 +58,7 @@ export interface EffectiveSettings {
   allow_registration: boolean;
   join_policy: "open" | "approval";
   uploads: import("./printers").UploadPolicy;
+  public_shares: boolean;
   /** Which group each value came from (null = site default). */
   sources: Record<string, string | null>;
 }

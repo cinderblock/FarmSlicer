@@ -14,10 +14,13 @@
 //! item (a job's or project's creator or library editors), managing the
 //! folder's library, or editing the group's library.
 //!
-//! Public links (site setting `public_shares`, off by default) show a
-//! job, project or folder to anyone with the link: names, facts and plate
-//! pictures, read only, no G-code or model. Their codes are kept in plain
-//! text so they can be copied again, like join links.
+//! Public links show a job, project or folder to anyone with the link:
+//! names, facts and plate pictures, read only, no G-code or model. Their
+//! codes are kept in plain text so they can be copied again, like join
+//! links. Whether they work is the group setting `public_shares` of the
+//! group the item is charged to (a folder: its library's group), inherited,
+//! with the site setting `public_shares` (off by default) as the default
+//! and for personal items. Turning a group's off stops its links working.
 
 use axum::{
     extract::{Path, Query, State},
@@ -65,8 +68,25 @@ fn err(code: StatusCode, msg: impl Into<String>) -> ApiError {
     (code, Json(json!({"error": msg.into()})))
 }
 
+/// The site setting: public links for personal items, and the default for groups.
 pub fn public_links_allowed(db: &Db) -> bool {
     db.get_setting("public_shares").as_deref() == Some("true")
+}
+
+/// Whether a job, project or folder may have working public links: its
+/// group's `public_shares` (inherited), else the site's. Libraries never do.
+pub fn public_links_for(db: &Db, tree: &Tree, kind: &str, id: &str) -> bool {
+    let group = match kind {
+        "job" => db.get_job(id).map(|j| j.group_id),
+        "project" => db.get_project(id).map(|p| p.group_id),
+        "folder" => db.get_folder(id).map(|f| (f.library_kind == "group").then_some(f.library_id)),
+        _ => return false,
+    };
+    match group {
+        None => false,
+        Some(Some(g)) if tree.get(&g).is_some() => tree.effective(&g).public_shares,
+        Some(_) => tree.site_public_shares(),
+    }
 }
 
 /// The target's name, if the viewer may share it (None: not found or not theirs to share).
@@ -132,7 +152,7 @@ async fn list_on(
     let (tree, viewer) = groups_api::context(&state, &user);
     shareable(&state, &tree, &viewer, &q.kind, &q.id)?;
     let shares: Vec<Value> = state.db.shares_on(&q.kind, &q.id).iter().map(|s| share_json(&state, &tree, s)).collect();
-    Ok(Json(json!({"shares": shares, "public_links": public_links_allowed(&state.db) && q.kind != "library"})))
+    Ok(Json(json!({"shares": shares, "public_links": public_links_for(&state.db, &tree, &q.kind, &q.id)})))
 }
 
 #[derive(Deserialize)]
@@ -186,11 +206,11 @@ async fn create(
             ("group", body.with.id.clone())
         }
         "link" => {
-            if !public_links_allowed(&state.db) {
-                return Err(err(StatusCode::FORBIDDEN, "public links are off on this server (site settings)"));
-            }
             if body.kind == "library" {
                 return Err(err(StatusCode::BAD_REQUEST, "whole libraries aren't shared by public link"));
+            }
+            if !public_links_for(&state.db, &tree, &body.kind, &body.target_id) {
+                return Err(err(StatusCode::FORBIDDEN, "public links are off for this (its group's settings, or the site's)"));
             }
             if level != "view" {
                 return Err(err(StatusCode::BAD_REQUEST, "public links are view only"));
@@ -274,10 +294,16 @@ async fn mine(State(state): State<Arc<AppState>>, Extension(CurrentUser(user)): 
                 _ => None,
             }?;
             let by = s.created_by.as_deref().and_then(|u| state.db.get_user(u)).map(|u| u.username);
+            // Where a shared folder is, to open it in the Library.
+            let library = (s.target_kind == "folder")
+                .then(|| state.db.get_folder(&s.target_id))
+                .flatten()
+                .map(|f| json!({"kind": f.library_kind, "id": f.library_id}));
             Some(json!({
                 "id": s.id, "target_kind": s.target_kind, "target_id": s.target_id, "name": name,
                 "level": s.level, "by": by, "expires_at": s.expires_at,
                 "through_group": (s.principal_kind == "group").then(|| tree.display_path(&s.principal_id)),
+                "library": library,
             }))
         })
         .collect();
@@ -335,10 +361,12 @@ fn shared_jobs(db: &Db, s: &Share) -> Vec<String> {
 }
 
 fn live_link(state: &AppState, code: &str) -> Result<Share, ApiError> {
-    if !public_links_allowed(&state.db) {
-        return Err(err(StatusCode::NOT_FOUND, "this link doesn't work any more"));
+    let gone = || err(StatusCode::NOT_FOUND, "this link doesn't work any more");
+    let s = state.db.share_by_code(code).ok_or_else(gone)?;
+    if !public_links_for(&state.db, &Tree::load(&state.db), &s.target_kind, &s.target_id) {
+        return Err(gone());
     }
-    state.db.share_by_code(code).ok_or_else(|| err(StatusCode::NOT_FOUND, "this link doesn't work any more"))
+    Ok(s)
 }
 
 /// `GET /api/public/shares/{code}`: what a public link shows.

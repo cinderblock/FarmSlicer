@@ -52,6 +52,11 @@ pub struct GroupSettings {
     /// Their G-code is checked either way (src/gcode/).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uploads: Option<String>,
+    /// Public links (anyone with the link) to jobs, projects and folders
+    /// charged here; the site setting `public_shares` is the default.
+    /// Turning them on takes `settings.manage` (src/groups_api.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_shares: Option<bool>,
     /// Not inherited. Offer this group on the sign-in page (admins only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listed: Option<bool>,
@@ -223,6 +228,7 @@ pub struct Effective {
     pub thumbnail_label: String,
     pub print_rules: PrintRules,
     pub uploads: String,
+    pub public_shares: bool,
     pub sources: HashMap<&'static str, Option<String>>,
 }
 
@@ -234,6 +240,7 @@ pub struct Tree {
     site_season_start: String,
     site_print_rules: PrintRules,
     site_uploads: String,
+    site_public_shares: bool,
 }
 
 impl Tree {
@@ -259,6 +266,7 @@ impl Tree {
             site_season_start,
             site_print_rules: PrintRules::site_default(db),
             site_uploads: site_uploads(db),
+            site_public_shares: crate::shares::public_links_allowed(db),
         }
     }
 
@@ -280,6 +288,10 @@ impl Tree {
 
     pub fn site_uploads(&self) -> &str {
         &self.site_uploads
+    }
+
+    pub fn site_public_shares(&self) -> bool {
+        self.site_public_shares
     }
 
     /// `id` first, then its parent, ... up to the root. Stops on a cycle.
@@ -364,6 +376,7 @@ impl Tree {
             thumbnail_label: inherit!(thumbnail_label, String::new()),
             print_rules: inherit!(print_rules, self.site_print_rules.clone()),
             uploads: inherit!(uploads, self.site_uploads.clone()),
+            public_shares: inherit!(public_shares, self.site_public_shares),
             sources,
         }
     }
@@ -429,6 +442,8 @@ pub struct Grants {
     pub jobs: HashMap<String, Level>,
     pub projects: HashMap<String, Level>,
     pub libraries: HashMap<String, Level>,
+    /// Folders shared (each with what's below it), by the shared folder.
+    pub folders: HashMap<String, Level>,
 }
 
 impl Grants {
@@ -468,6 +483,7 @@ impl Grants {
                 "project" => Self::add(&mut out.projects, &s.target_id, level),
                 "library" => Self::add(&mut out.libraries, &s.target_id, level),
                 "folder" => {
+                    Self::add(&mut out.folders, &s.target_id, level);
                     // The folder and every folder below it.
                     let mut within = vec![s.target_id.clone()];
                     let mut i = 0;
@@ -514,18 +530,18 @@ impl Viewer {
     /// through a folder, or through its group's library.
     pub fn shared_job(&self, tree: &Tree, job: &Job) -> Option<Level> {
         let direct = self.grants.jobs.get(&job.id).copied();
-        let library = job.group_id.as_deref().and_then(|g| self.library_share(tree, g));
+        let library = job.group_id.as_deref().and_then(|g| self.shared_library(tree, g));
         direct.max(library)
     }
 
     /// The level a project is shared at, if it is.
     pub fn shared_project(&self, tree: &Tree, project_id: &str, group_id: Option<&str>) -> Option<Level> {
         let direct = self.grants.projects.get(project_id).copied();
-        direct.max(group_id.and_then(|g| self.library_share(tree, g)))
+        direct.max(group_id.and_then(|g| self.shared_library(tree, g)))
     }
 
     /// A share of `group`'s library or an ancestor's.
-    fn library_share(&self, tree: &Tree, group: &str) -> Option<Level> {
+    pub fn shared_library(&self, tree: &Tree, group: &str) -> Option<Level> {
         self.grants
             .libraries
             .iter()

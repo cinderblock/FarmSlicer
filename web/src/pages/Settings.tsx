@@ -139,8 +139,9 @@ function SettingsForm({ initial, onSaved }: { initial: SiteSettings; onSaved: ()
         </label>
         <span className="hint">
           People may then share a job, project or folder with anyone holding a link, even from outside the local
-          network and without an account: names, facts and plate pictures only, no files. Turning this off stops every
-          link.
+          network and without an account: names, facts and plate pictures only, no files. Groups can set their own (a
+          group's Settings tab); this is the default, and the rule for personal jobs. Turning it off stops every link
+          that follows it.
         </span>
 
         <h3>Printer pools</h3>
