@@ -156,9 +156,27 @@ once its walls are in.
       inside support generation (libslic3r reports nothing there); the
       Slice page's text changed every ~55 ms in headless Chromium. Rust
       live tests 5/5, 26 e2e suites pass; web 15 live tests.
-- [x] 2026-11-15 ~6:05 PM PST (02:05Z): deployed. FarmSlicer `debc246` on
+- [x] 2026-11-15 ~6:55 PM PST (02:55Z): deployed. FarmSlicer `debc246` on
       origin (CI green), ops `4b7ac472` pins `sha256:713e5115…`; Server
       Deploys green; production serves `debc246`, health 200.
+
+- [x] 2026-11-15: the handover made seamless (the user saw the view
+      "refresh and reload" when the slice finished: the live view was
+      thrown away, the preview showed "Reading the G-code…", then a new
+      view framed the print in another layout). Now `preview/SliceView.tsx`
+      stays at one place in the tree from slicing to done; the live view
+      has the preview's layout (`.gcode-preview`, steps and progress in the
+      side panel); the finished preview loads under it, starts from its
+      camera (`preview/handover.ts` context: `initialCamera`, `onReady` on
+      its first drawn frame) and the live view goes then. Nothing above the
+      view changes height: SliceResult is one tree for slicing and done,
+      the bar has a min-height, warnings are a chip in the bar opening a
+      panel over the view (open by itself for support warnings), plate tabs
+      are in the bar, and browser slices are remembered (recent slices) when
+      they start, as server ones are. Checked in headless Chromium (vite dev
+      against the deployed image): the view's box stays at the same place
+      and size from the first live frame to the finished preview, server
+      and browser; the camera carries over (a dragged angle kept).
 
 ## Open questions for the user
 
