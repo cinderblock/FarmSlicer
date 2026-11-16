@@ -4464,6 +4464,70 @@ a.btn-sm {
   background: rgba(13, 17, 23, 0.8);
 }
 
+/* The slice taking shape while it slices (preview/LiveSlicePreview.tsx):
+   the view, what's been sliced (bottom left), the progress (bottom). */
+.live-slice {
+  height: 100%;
+  min-height: 420px;
+}
+
+.live-slice-viewport {
+  height: 100%;
+}
+
+.live-slice-steps {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 3.6rem;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  list-style: none;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.live-slice-steps li.done {
+  color: var(--text);
+}
+
+.live-slice-steps li.partial {
+  color: var(--text);
+}
+
+.live-slice-steps li.done .live-slice-mark {
+  color: var(--success);
+}
+
+.live-slice-mark {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+}
+
+.live-slice-progress {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+  pointer-events: none;
+}
+
+.live-slice-progress .hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Layer range slider: right edge of the viewport. */
 .gp-layer-slider {
   position: absolute;

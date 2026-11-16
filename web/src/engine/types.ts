@@ -107,10 +107,12 @@ export type WorkerRequest =
 export type WorkerResponse =
   | {
       type: "ready";
-      version: { engine: string; orca: string; threads: boolean; placement?: boolean; plate?: boolean; plates?: boolean };
+      version: { engine: string; orca: string; threads: boolean; placement?: boolean; plate?: boolean; plates?: boolean; live?: boolean };
       threadCount: number;
     }
   | { type: "init-error"; error: string }
   | { type: "progress"; id: number; percent: number; message: string }
+  /** A frame of the live view (cxx/live_geometry.hpp), from engines that make them. */
+  | { type: "live"; id: number; frame: ArrayBuffer }
   | { type: "done"; id: number; gcode: ArrayBuffer; package: ArrayBuffer | null; report: SliceReport; elapsedMs: number }
   | { type: "error"; id: number; error: string; report?: SliceReport };

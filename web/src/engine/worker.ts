@@ -81,6 +81,11 @@ async function init(variant: "st" | "mt", baseUrl: string, threads?: number) {
     mainScriptUrlOrBlob: jsUrl,
     fsProgress: (percent: number, message: string) =>
       post({ type: "progress", id: currentId, percent, message }),
+    // The live view's frames: each its own buffer, handed over as it is.
+    fsLive: (frame: Uint8Array) => {
+      const buffer = frame.buffer as ArrayBuffer;
+      post({ type: "live", id: currentId, frame: buffer }, [buffer]);
+    },
     print: (line: string) => console.info("[engine]", line),
     printErr: (line: string) => console.warn("[engine]", line),
   };

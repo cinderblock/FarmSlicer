@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-15",
+    date: "2026-11-15",
+    title: "Watch it slice",
+    highlights: [
+      "While a job slices, the Preview shows it taking shape on the bed: each part's outlines first, then its walls, infill and supports as the slicer finishes them, and the layers filling in while the G-code is written. It works for slices on the server and in your browser, on the Slice page and on the job's page, and Cancel stops it from there.",
+    ],
+  },
+  {
     id: "2026-11-14f",
     date: "2026-11-14",
     title: "Multi-colour models, and more ways to edit them",

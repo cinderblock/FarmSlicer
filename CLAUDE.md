@@ -73,7 +73,8 @@ Native builds mirror the Dockerfile's steps:
 Output: `web/public/wasm/{st,mt}/farmslicer-engine*.{mjs,wasm,data}` +
 `manifest.json`. `node wasm/test/smoke.mjs --variant st --config <merged.json>`
 slices a cube (`--plate`: three parts from two models; `--package`: a
-`.gcode.3mf` too; CI runs the first two); `wasm/test/resolve-profile.mjs`
+`.gcode.3mf` too; `--live`: the live view's frames; CI runs the first two
+with `--live`, and `--plates`); `wasm/test/resolve-profile.mjs`
 produces such a config from the profiles dir without a server (one
 filament; a multi-filament config comes from `POST /api/jobs` with
 `source=browser`, its `config_json`). An empty config fails libslic3r's
@@ -129,6 +130,17 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (`components/NozzlePlanView.tsx`). Plan: `plans/nozzle-choice.md`
 - `src/progress.rs` — process-wide progress sink + cancellation flags (libslic3r
   calls back without user data, so jobs are looked up by id)
+- The live view (`plans/live-slice-preview.md`): `cxx/live_geometry.{hpp,cpp}`
+  copies each object step (outlines = `lslices`, walls, infill after
+  ironing, supports) out of libslic3r at the first status callback after it
+  is DONE (the next step's start, before its parallel work; also after
+  `process()`), within a point budget, as binary frames (`Callbacks::geometry`).
+  Server: `slicer::slice_geometry` → `src/live.rs` (in memory per job,
+  `GET /api/jobs/{id}/live`); wasm: `Module.fsLive` → worker `live`
+  messages. Web: `preview/liveSlice.ts` (decode, merge into a `ParsedGcode`,
+  unit-tested), `preview/useLiveSlice.ts`, `preview/LiveSlicePreview.tsx`
+  (SliceResult and the Job page while slicing; G-code export's "layer N"
+  sweeps it with the ghost)
 - `src/slicer.rs` — cxx bridge: `Slicer::slice(job_id, &models, config_json,
   out, options)` (`ModelInput`: path, name, per copy a rotation and offset);
   `extern "Rust"` `slice_progress` / `slice_cancelled`
@@ -544,7 +556,8 @@ digest and deploys. The old SSH `deploy.sh` skill is gone on purpose.
   (`bridge/farmslicer_wasm.cpp`: `fs_version`, `fs_slice`, `fs_slice_start` (mt),
   `fs_set_options` (package + thumbnail overlay for the next slice; the
   package lands in MEMFS at the report's `package` path), `fs_cancel`,
-  `fs_free`), vendored find-modules/shims/patch, `build.sh`, tests
+  `fs_free`; `Module.fsLive` gets the live view's frames), vendored
+  find-modules/shims/patch, `build.sh`, tests
 - `web/src/engine/` — browser engine: `client.ts` (main thread API),
   `worker.ts` (Web Worker hosting the module), `types.ts`
 - `web/src/pages/Slice.tsx` — the plate (Prepare) and the last slice

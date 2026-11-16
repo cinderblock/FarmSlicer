@@ -24,6 +24,7 @@ fn main() {
         .file("cxx/slicer_bridge.cpp")
         .file("cxx/slice_core.cpp")
         .file("cxx/thumbnail.cpp")
+        .file("cxx/live_geometry.cpp")
         .file("cxx/color_space_shim.cpp")
         .file("cxx/nanosvg_impl.cpp")
         .std("c++17")
@@ -132,6 +133,8 @@ fn main() {
     println!("cargo:rerun-if-changed=cxx/slicer_bridge.cpp");
     println!("cargo:rerun-if-changed=cxx/thumbnail.hpp");
     println!("cargo:rerun-if-changed=cxx/thumbnail.cpp");
+    println!("cargo:rerun-if-changed=cxx/live_geometry.hpp");
+    println!("cargo:rerun-if-changed=cxx/live_geometry.cpp");
     println!("cargo:rerun-if-changed=cxx/color_space_shim.cpp");
     println!("cargo:rerun-if-changed=cxx/shims");
     println!("cargo:rerun-if-changed=src/slicer.rs");

@@ -171,6 +171,7 @@ add_executable(farmslicer_engine
   bridge/fast_strtod.cpp
   ../cxx/slice_core.cpp
   ../cxx/thumbnail.cpp
+  ../cxx/live_geometry.cpp
   ../cxx/color_space_shim.cpp)
 set_target_properties(farmslicer_engine PROPERTIES OUTPUT_NAME "${_engine_name}" SUFFIX ".mjs")
 target_include_directories(farmslicer_engine PRIVATE

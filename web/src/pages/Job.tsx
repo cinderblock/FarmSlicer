@@ -15,6 +15,8 @@ import { formatCost, packageVerdict, type NozzlePlan, type Plate, type Prices, t
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
 import { positiveParam, printPath } from "../links";
 import { bedFromConfig, packagePlates, parseObject, plateColors } from "../jobConfig";
+import LiveSlicePreview from "../components/preview/LiveSlicePreview";
+import { useServerLiveSlice } from "../components/preview/useLiveSlice";
 
 interface Job {
   id: string;
@@ -116,6 +118,9 @@ export default function JobPage() {
   const plate = plates.find((p) => p.index === plateChoice) ?? plates[0] ?? null;
   const filamentColors = useMemo(() => plateColors(plate), [plate]);
   const source = useMemo(() => ({ url: `/api/jobs/${id}/gcode${plate ? `?plate=${plate.index}` : ""}` }), [id, plate]);
+  // A server slice under way: watch it take shape.
+  const showLive = active && job?.source === "server";
+  const live = useServerLiveSlice(id, showLive);
 
   if (!job) {
     return (
@@ -287,7 +292,18 @@ export default function JobPage() {
         </p>
       )}
 
-      {active && (
+      {showLive && (
+        <div className="job-preview">
+          <LiveSlicePreview
+            live={live}
+            bed={bed}
+            percent={job.progress}
+            message={job.progress_message}
+            title={job.status === "queued" ? "Waiting for the slicer…" : "Slicing…"}
+          />
+        </div>
+      )}
+      {active && !showLive && (
         <div className="job-progress">
           <div className="progress-bar">
             <div className="progress-fill" style={{ width: `${job.progress}%` }} />

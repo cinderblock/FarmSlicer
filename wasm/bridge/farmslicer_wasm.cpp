@@ -1,7 +1,7 @@
 // FarmSlicer WebAssembly engine: a small C ABI around the shared slicing
 // pipeline (cxx/slice_core.cpp), driven from web/src/engine/worker.ts.
 //
-//   fs_version()      → JSON {engine, orca, threads, placement, plate}
+//   fs_version()      → JSON {engine, orca, threads, placement, plate, live, ...}
 //   fs_slice(...)     → slice synchronously (single-threaded build, or the
 //                       pthreads build when the caller wants to block)
 //   fs_slice_start()  → pthreads build only: slice on a dedicated pthread,
@@ -15,6 +15,8 @@
 //   fs_free(p)        → free a buffer returned through an out-parameter
 //
 // Progress: Module.fsProgress(percent, message) if the host installed it.
+// The live view: Module.fsLive(bytes), each frame of the slice's geometry
+// as it's made (cxx/live_geometry.hpp), if the host installed it.
 // The report out-parameter is JSON: {ok, cancelled, error, warnings[],
 // stats{printTimeSec, filamentG, filamentMm, layers}, package}; `package` is
 // the MEMFS path of the sliced project (the host reads and unlinks it) or
@@ -49,6 +51,9 @@
 namespace {
 
 std::atomic<bool> g_cancel{false};
+/// The host takes live frames (Module.fsLive), as found on the main runtime
+/// thread when the slice was asked for.
+std::atomic<bool> g_live{false};
 
 /// How the next slice runs (fs_set_options); consumed by it.
 struct NextSlice {
@@ -119,6 +124,51 @@ void progress(int percent, const std::string& msg)
     }
 #endif
     fs_js_progress(percent, msg.c_str());
+}
+
+// ---- live view ---------------------------------------------------------------
+
+// Module.fsLive(bytes) gets each frame of the live view
+// (cxx/live_geometry.hpp) as a Uint8Array of its own (copied out of the
+// heap, so the host can transfer it).
+EM_JS(void, fs_js_live, (const uint8_t* data, size_t len), {
+    try {
+        if (typeof Module["fsLive"] === "function")
+            Module["fsLive"](HEAPU8.slice(data, data + len));
+    } catch (e) {}
+});
+
+bool live_wanted()
+{
+    return EM_ASM_INT({ return typeof Module["fsLive"] === "function" ? 1 : 0; }) != 0;
+}
+
+#ifdef __EMSCRIPTEN_PTHREADS__
+struct LiveMsg { size_t len; uint8_t data[1]; };
+void live_on_main(void* p)
+{
+    auto* m = static_cast<LiveMsg*>(p);
+    fs_js_live(m->data, m->len);
+    std::free(m);
+}
+#endif
+
+void live_frame(const std::string& frame)
+{
+#ifdef __EMSCRIPTEN_PTHREADS__
+    // Like progress: Module.fsLive lives on the main runtime thread.
+    if (!emscripten_is_main_runtime_thread()) {
+        auto* m = static_cast<LiveMsg*>(std::malloc(sizeof(LiveMsg) + frame.size()));
+        if (!m) return;
+        m->len = frame.size();
+        std::memcpy(m->data, frame.data(), frame.size());
+        if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(),
+                                    live_on_main, m))
+            std::free(m);
+        return;
+    }
+#endif
+    fs_js_live(reinterpret_cast<const uint8_t*>(frame.data()), frame.size());
 }
 
 // ---- report JSON -------------------------------------------------------------
@@ -245,6 +295,7 @@ int do_slice(const char* model_name, const uint8_t* model, int model_len,
         farmslicer::core::Callbacks cb;
         cb.progress = [](int percent, const std::string& message) { progress(percent, message); };
         cb.cancelled = []() { return g_cancel.load(); };
+        if (g_live) cb.geometry = live_frame;
         outcome = farmslicer::core::slice_models(
             models, std::string(config_json ? config_json : "", config_len > 0 ? size_t(config_len) : 0),
             gcode_path, cb, next.options);
@@ -365,7 +416,7 @@ EMSCRIPTEN_KEEPALIVE const char* fs_version()
         // model with an engine that would ignore it), and a plate of several
         // parts with fs_stage_model for the further models, and several
         // plates (`plates`; their G-code goes into the package).
-        ",\"placement\":true,\"plate\":true,\"plates\":true,\"height_changes\":true,\"height_change_plates\":true}";
+        ",\"placement\":true,\"plate\":true,\"plates\":true,\"height_changes\":true,\"height_change_plates\":true,\"live\":true}";
     return v.c_str();
 }
 
@@ -373,6 +424,7 @@ EMSCRIPTEN_KEEPALIVE int fs_slice(const char* model_name, const uint8_t* model, 
                                   const char* config_json, int config_len,
                                   uint8_t** out_gcode, int* out_gcode_len, char** out_report)
 {
+    g_live.store(live_wanted());
 #ifdef __EMSCRIPTEN_PTHREADS__
     // Called ON the main runtime thread of the pthreads build: that thread is
     // blocked for the whole call, and a pthread whose creation is requested by
@@ -511,6 +563,7 @@ EMSCRIPTEN_KEEPALIVE int fs_slice_start(const char* model_name, const uint8_t* m
 {
     ensure_runtime();
     engine_threads();
+    g_live.store(live_wanted());
     state[0] = 0;
     state[1] = -1;
     auto* a = new StartArgs{model_name ? model_name : "", model, model_len,

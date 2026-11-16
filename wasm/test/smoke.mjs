@@ -3,7 +3,7 @@
 //
 //   node wasm/test/smoke.mjs [--engine web/public/wasm] [--variant st|mt]
 //                            [--model path.stl] [--config merged.json] [--out out.gcode]
-//                            [--plate] [--plates] [--package]
+//                            [--plate] [--plates] [--package] [--live]
 //
 // With no --model it slices a generated 20 mm cube with libslic3r's defaults
 // (an empty config), which exercises load → place → slice → export. Exit code
@@ -20,6 +20,11 @@
 //
 // --package: also write a Bambu sliced project (.gcode.3mf), as the server
 // asks for Bambu printers; fails unless one comes back.
+//
+// --live: take the live view's frames (Module.fsLive,
+// cxx/live_geometry.hpp); fails unless every part's outlines, walls and
+// infill came, with layers and points. --live-out <file> also writes them
+// as GET /api/jobs/{id}/live streams them.
 import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -56,6 +61,8 @@ const modelName = args.model ? args.model.split(/[\\/]/).pop() : "cube20.stl";
 const model = args.model ? readFileSync(args.model) : Buffer.from(cubeStl());
 const config = args.config ? readFileSync(args.config, "utf8") : "{}";
 
+/** The live view's frames (--live). */
+const frames = [];
 const t0 = performance.now();
 const { default: factory } = await import(pathToFileURL(js).href);
 const m = await factory({
@@ -63,6 +70,7 @@ const m = await factory({
   // pthread workers re-import the engine module from here (Node: a filesystem path).
   mainScriptUrlOrBlob: js,
   fsProgress: (pct, msg) => process.stderr.write(`  ${String(pct).padStart(3)}% ${msg}\n`),
+  ...(args.live ? { fsLive: (bytes) => frames.push(bytes) } : {}),
   print: (l) => console.log("[engine]", l),
   printErr: (l) => console.error("[engine]", l),
 });
@@ -180,6 +188,57 @@ if (args.package) {
     const plates = ["Metadata/plate_1.gcode", "Metadata/plate_2.gcode"].filter((n) => names.includes(n));
     console.log(`  plates: report ${report.plates}, package ${JSON.stringify(plates)}`);
     if (report.plates !== 2 || plates.length !== 2) rc = 1;
+  }
+}
+if (args.live) {
+  // The frame's header (plans/live-slice-preview.md), and its points.
+  const seen = new Map();
+  for (const f of frames) {
+    const v = new DataView(f.buffer, f.byteOffset, f.byteLength);
+    if (String.fromCharCode(...f.subarray(0, 4)) !== "FSL1") {
+      console.log("  live: a frame without its magic");
+      rc = 1;
+      continue;
+    }
+    const plate = v.getUint32(4, true), object = v.getUint32(8, true), step = v.getUint8(12), flags = v.getUint8(13);
+    let at = 16;
+    at += 4 + v.getUint32(at, true) * 8; // instances
+    const names = v.getUint16(at, true);
+    at += 2;
+    for (let i = 0; i < names; i++) at += 2 + v.getUint16(at, true);
+    const layers = v.getUint32(at, true);
+    at += 4;
+    let points = 0;
+    for (let l = 0; l < layers; l++) {
+      const paths = v.getUint32(at + 8, true);
+      at += 12;
+      for (let p = 0; p < paths; p++) {
+        const n = v.getUint32(at + 8, true);
+        points += n;
+        at += 12 + n * 8;
+      }
+    }
+    if (at !== f.byteLength) {
+      console.log(`  live: a frame of ${f.byteLength} bytes reads as ${at}`);
+      rc = 1;
+    }
+    seen.set(`${plate}:${object}:${step}`, { layers, points, skipped: (flags & 1) === 1 });
+  }
+  const steps = ["outlines", "walls", "infill"];
+  const objects = new Set([...seen.keys()].map((k) => k.split(":").slice(0, 2).join(":")));
+  console.log(`  live: ${frames.length} frames, ${objects.size} object(s)`);
+  for (const o of objects)
+    for (let s = 0; s < steps.length; s++) {
+      const f = seen.get(`${o}:${s}`);
+      console.log(`    ${o} ${steps[s]}: ${f ? `${f.layers} layers, ${f.points} points${f.skipped ? " (skipped)" : ""}` : "missing"}`);
+      if (!f || f.skipped || f.layers === 0 || f.points === 0) rc = 1;
+    }
+  if (objects.size === 0) rc = 1;
+  // --live-out <file>: the frames as the server streams them (each after its u32 length).
+  if (args["live-out"]) {
+    const parts = frames.flatMap((f) => [new Uint8Array(new Uint32Array([f.byteLength]).buffer), f]);
+    writeFileSync(args["live-out"], Buffer.concat(parts));
+    console.log(`  live: wrote ${args["live-out"]}`);
   }
 }
 if (m.fsTerminateThreads) m.fsTerminateThreads();

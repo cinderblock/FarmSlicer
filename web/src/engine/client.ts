@@ -19,6 +19,8 @@ import type {
 } from "./types";
 
 export type ProgressFn = (percent: number, message: string) => void;
+/** A frame of the live view (components/preview/liveSlice.ts decodes it). */
+export type LiveFn = (frame: ArrayBuffer) => void;
 
 export interface EngineInfo {
   manifest: EngineManifest;
@@ -67,6 +69,7 @@ export class BrowserEngine {
   private pending: {
     id: number;
     onProgress?: ProgressFn;
+    onLive?: LiveFn;
     resolve: (out: SliceOutput) => void;
     reject: (err: Error) => void;
   } | null = null;
@@ -120,6 +123,9 @@ export class BrowserEngine {
       case "progress":
         if (msg.id === p.id) p.onProgress?.(msg.percent, msg.message);
         break;
+      case "live":
+        if (msg.id === p.id) p.onLive?.(msg.frame);
+        break;
       case "done":
         if (msg.id === p.id) {
           this.pending = null;
@@ -147,18 +153,20 @@ export class BrowserEngine {
   /**
    * Slice the plate's model files (in the order the plate's `model` indexes
    * them) with a merged OrcaSlicer config (JSON object). One slice at a time.
+   * `onLive` gets the live view's frames (engines from before it send none).
    */
   async slice(
     files: File[],
     configJson: string,
     onProgress?: ProgressFn,
     options?: SliceOptions,
+    onLive?: LiveFn,
   ): Promise<SliceOutput> {
     if (this.pending) throw new Error("engine is busy");
     const models = await Promise.all(files.map(async (f) => ({ name: f.name, data: await f.arrayBuffer() })));
     const id = this.nextId++;
     return new Promise<SliceOutput>((resolve, reject) => {
-      this.pending = { id, onProgress, resolve, reject };
+      this.pending = { id, onProgress, onLive, resolve, reject };
       const req: WorkerRequest = { type: "slice", id, models, config: configJson, options };
       // The logo is small; it's copied rather than transferred so the caller keeps it.
       this.worker.postMessage(req, models.map((m) => m.data));

@@ -681,6 +681,8 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 
         // What the package records per plate, filled while each plate's
         // Print still exists. The project config is plate 1's (the cover).
+        // Points the live view may still send, for every plate together.
+        size_t live_budget = LIVE_POINT_BUDGET;
         std::vector<std::unique_ptr<PlateData>> plate_data;
         std::vector<std::unique_ptr<ThumbnailData>> plate_thumbnails;
         DynamicPrintConfig project_config;
@@ -715,10 +717,18 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                 Model::setExtruderParams(config, filament_count);
 
                 std::mutex status_mutex;
+                // The live view: each object step's geometry once it's done.
+                std::unique_ptr<LiveGeometry> live;
+                if (cb.geometry) live = std::make_unique<LiveGeometry>(cb.geometry, p + 1, live_budget);
+                auto poll_live = [&] {
+                    std::lock_guard<std::mutex> lock(status_mutex);
+                    if (live) live->poll(print);
+                };
                 print.set_status_callback([&](const PrintBase::SlicingStatus& s) {
                     std::lock_guard<std::mutex> lock(status_mutex);
                     if (s.percent >= 0) step(s.percent / 100.0, s.text);
                     if (s.warning_step != -1 && !s.text.empty()) out.warnings.push_back(prefix + s.text);
+                    if (live) live->poll(print);
                 });
                 if (cb.cancelled) {
                     print.set_cancel_callback([&cb]() {
@@ -741,9 +751,11 @@ Outcome slice_models(const std::vector<ModelInput>& models,
 
                 step(0, "Slicing");
                 print.process();
+                poll_live();
                 if (fit_wipe_tower(print, config)) {
                     print.apply(model, config);
                     print.process();
+                    poll_live();
                 }
                 if (std::string conflict = print.get_conflict_string(); !conflict.empty())
                     out.warnings.push_back(prefix + conflict);
@@ -755,9 +767,11 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                 if (move_unreachable_filaments(print, gcode_result, config, moved)) {
                     print.apply(model, config);
                     print.process();
+                    poll_live();
                     if (fit_wipe_tower(print, config)) {
                         print.apply(model, config);
                         print.process();
+                        poll_live();
                     }
                     gcode_result = GCodeProcessorResult();
                     written = print.export_gcode(output, &gcode_result, thumbnails);

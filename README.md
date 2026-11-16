@@ -84,6 +84,13 @@ can run in the user's browser.
   that device only (IndexedDB; the job is tagged **local** and can be sliced
   again from that browser). Jobs can be deleted, one or a selection, with
   their files.
+- **Watching it slice:** while a job slices, the Slice page (and, for a
+  server slice, its job page) shows it taking shape on the bed: each part's layer outlines as
+  soon as it's sliced, then its walls, infill and supports as the slicer
+  finishes each, then the layers filling in as the G-code is written. The
+  finished G-code's preview takes over when it's done. Both engines do it:
+  the browser engine hands the geometry to the page, a server slice streams
+  it (`GET /api/jobs/{id}/live`).
 - **Preview:** after slicing, the Slice page stays and shows the result
   (Preview, next to the plate's Prepare); every job's G-code is on its job
   page (`/jobs/{id}`) too, layer by layer, like the desktop slicers'
@@ -614,6 +621,7 @@ summary prints the `pin.json` to paste there.
 | `DELETE /api/jobs/{id}`, `POST /api/jobs/delete` `{ids}` | delete jobs with their files (creator, group managers, admins); refused while slicing or while a print still needs the package. The bulk form answers `{deleted, refused: [{id, error}]}` |
 | `GET /api/jobs/{id}/model`, `GET /api/jobs/{id}/models/{idx}` | the job's (first, or idx-th) source model; 404 when it stayed in a browser |
 | `GET /api/jobs/{id}/gcode?plate=` | the job's G-code for the preview (plate N of a `.gcode.3mf`, default the first; the plain file when there is one), streamed; gzip when accepted (a package's plate is sent as the archive's own deflate stream); `X-Gcode-Bytes` = uncompressed size |
+| `GET /api/jobs/{id}/live` | a server slice's live view as it's made: each object step's geometry (outlines, walls, infill, supports), length-prefixed binary frames, until the slice ends; 204 when nothing is slicing (format: `plans/live-slice-preview.md`) |
 | `POST /api/jobs/{id}/progress` | browser engine progress tick |
 | `POST /api/jobs/{id}/result` (multipart `gcode`, stats, optional `package`) | browser engine result upload (the `.gcode.3mf` makes the job sendable) |
 | `POST /api/jobs/{id}/fail`, `POST /api/jobs/{id}/cancel` | browser failure / cancel either kind |

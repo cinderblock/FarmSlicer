@@ -1,7 +1,8 @@
 //! cxx bridge to libslic3r (see cxx/slicer_bridge.cpp).
 //!
-//! The C++ side reports progress and polls for cancellation through the two
-//! `extern "Rust"` functions below; they forward to [`crate::progress`].
+//! The C++ side reports progress and polls for cancellation through the
+//! `extern "Rust"` functions below; they forward to [`crate::progress`],
+//! and the live view's frames to [`crate::live`].
 //!
 //! Built with `FARMSLICER_SKIP_CXX` (cfg `farmslicer_no_cxx`), a pure-Rust
 //! stub with the same interface takes the bridge's place: the server runs
@@ -92,6 +93,8 @@ mod ffi {
     extern "Rust" {
         fn slice_progress(job_id: &str, percent: i32, message: &str);
         fn slice_cancelled(job_id: &str) -> bool;
+        /// One frame of the live view (cxx/live_geometry.hpp).
+        fn slice_geometry(job_id: &str, frame: &[u8]);
     }
 
     unsafe extern "C++" {
@@ -239,4 +242,9 @@ fn slice_progress(job_id: &str, percent: i32, message: &str) {
 #[cfg(not(farmslicer_no_cxx))]
 fn slice_cancelled(job_id: &str) -> bool {
     crate::progress::is_cancelled(job_id)
+}
+
+#[cfg(not(farmslicer_no_cxx))]
+fn slice_geometry(job_id: &str, frame: &[u8]) {
+    crate::live::frame(job_id, frame);
 }

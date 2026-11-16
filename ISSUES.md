@@ -123,3 +123,15 @@ and closes the connection while the client is still writing it. Reproduce:
 `PORT=9356 tests/run-e2e.sh tests/printers-e2e.mjs`. It matters because
 `run-e2e.sh` exits 1, so every e2e run (CI included) fails, and the rest of
 that suite never runs.
+
+## G-code preview sometimes blank until the first drag
+
+Seen once (live view check, `plans/live-slice-preview.md`): after a browser
+slice finished, the Slice page's G-code preview showed its readout ("Layer
+120 / 120") but an empty canvas, not even the bed, 1.5 s and later after it
+mounted; one drag in the view drew everything. Headless Chromium with
+swiftshader, CPU busy; two later identical runs drew at once. The view
+renders on demand (`frameloop="demand"`), so a missed `invalidate()` on the
+first frame would look like this.
+
+Why it matters: someone could think the slice is empty.

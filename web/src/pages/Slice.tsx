@@ -7,6 +7,7 @@ import type { HeightChange } from "../engine/types";
 import SupportsPanel, { type SupportSettings } from "../components/SupportsPanel";
 import NozzlePlanView from "../components/NozzlePlanView";
 import SliceResult from "../components/SliceResult";
+import { useLocalLiveSlice } from "../components/preview/useLiveSlice";
 import OverridesPanel from "../components/OverridesPanel";
 import {
   BrowserEngine,
@@ -326,7 +327,8 @@ export default function SlicePage() {
   const [supportCheck, setSupportCheck] = useState<SupportCheck | null>(null);
   // After slicing the page stays: the plate (Prepare) or the last slice
   // (Preview: the layers, warnings, sending it).
-  const [sliced, setSliced] = useState<{ jobId: string; gcode?: Uint8Array } | null>(null);
+  // `browser`: this browser slices it (the live view is the engine's).
+  const [sliced, setSliced] = useState<{ jobId: string; gcode?: Uint8Array; browser?: boolean } | null>(null);
   const [view, setView] = useState<"prepare" | "preview">("prepare");
   // The slices this browser remembers (sliceCache.ts), and the one the
   // slice on screen is compared with.
@@ -361,6 +363,8 @@ export default function SlicePage() {
   const [progress, setProgress] = useState<{ percent: number; message: string } | null>(null);
   const [browserJobId, setBrowserJobId] = useState<string | null>(null);
   const engineRef = useRef<BrowserEngine | null>(null);
+  // A browser slice's live view (the engine's frames).
+  const { live: liveSlice, add: addLiveFrame, reset: resetLive } = useLocalLiveSlice();
 
   useEffect(() => {
     fetch("/api/printers")
@@ -1175,6 +1179,10 @@ export default function SlicePage() {
     if (!res.ok) throw new Error(job.error ?? `HTTP ${res.status}`);
     if (job.project_id) setProjectChoice(job.project_id);
     setBrowserJobId(job.id);
+    // Watch it take shape.
+    resetLive();
+    setSliced({ jobId: job.id, browser: true });
+    setView("preview");
 
     let lastPost = 0;
     const started = performance.now();
@@ -1200,7 +1208,7 @@ export default function SlicePage() {
             })
             .catch(() => {});
         }
-      }, options);
+      }, options, addLiveFrame);
 
       setProgress({ percent: 100, message: "Uploading G-code" });
       const upload = new FormData();
@@ -1225,7 +1233,7 @@ export default function SlicePage() {
       void rememberSlice(key, inputs, job.id, job.project_id, "browser", stats).then(() =>
         putGcode(job.id, 1, new Blob([out.gcode], { type: "text/plain" })),
       );
-      setSliced({ jobId: job.id, gcode: out.gcode });
+      setSliced({ jobId: job.id, gcode: out.gcode, browser: true });
       setView("preview");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1242,7 +1250,7 @@ export default function SlicePage() {
     } finally {
       setBrowserJobId(null);
     }
-  }, [modelFiles, buildJobForm, keepLocal, rememberSlice]);
+  }, [modelFiles, buildJobForm, keepLocal, rememberSlice, resetLive, addLiveFrame]);
 
   /** Slice the plate, or show the remembered slice of it (unless `fresh`). */
   const handleSlice = useCallback(async (fresh = false) => {
@@ -1358,6 +1366,17 @@ export default function SlicePage() {
                 bed={bed}
                 onBack={() => setView("prepare")}
                 history={sliceHistory}
+                local={
+                  sliced.browser
+                    ? {
+                        live: liveSlice,
+                        // Done slicing: the G-code goes up, then the preview comes.
+                        percent: progress?.percent ?? 100,
+                        message: progress?.message ?? "Saving the slice",
+                        onCancel: handleCancelBrowserSlice,
+                      }
+                    : null
+                }
               />
             </div>
           )}

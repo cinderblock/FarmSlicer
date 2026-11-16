@@ -1,6 +1,6 @@
-// What the Slice page shows after slicing: the job's progress while it
-// slices, then the layer preview, the numbers, what the slicer warned
-// about, the G-code check, and sending it to a printer. Above it, the
+// What the Slice page shows after slicing: the slice taking shape while
+// it slices (LiveSlicePreview), then the layer preview, the numbers, what
+// the slicer warned about, the G-code check, and sending it to a printer. Above it, the
 // recent slices kept in this browser (SliceHistory); comparing the one on
 // screen with one of them swaps the preview for SliceCompare.
 
@@ -13,6 +13,9 @@ import { changeSummary, inputsDiff, type SliceEntry } from "../sliceHistory";
 import { parseWarnings, sortWarnings } from "../slicerWarnings";
 import { GcodeChip } from "./GcodeCheck";
 import GcodePreview, { GcodeLoading } from "./preview/GcodePreview";
+import LiveSlicePreview from "./preview/LiveSlicePreview";
+import type { LiveSlice } from "./preview/liveSlice";
+import { useServerLiveSlice } from "./preview/useLiveSlice";
 import SliceCompare from "./preview/SliceCompare";
 import SendDialog from "./SendDialog";
 import SliceHistory from "./SliceHistory";
@@ -24,6 +27,8 @@ interface ResultJob {
   id: string;
   model_name: string;
   status: string;
+  /** "server" or "browser". */
+  source?: string;
   progress: number;
   progress_message: string | null;
   print_time_sec: number | null;
@@ -50,12 +55,21 @@ export interface SliceHistoryProps {
   onRestore: (e: SliceEntry) => void;
 }
 
+/** A slice this browser is making: its live view and progress, and how to stop it. */
+export interface LocalSlice {
+  live: LiveSlice;
+  percent: number;
+  message: string;
+  onCancel: () => void;
+}
+
 export default function SliceResult({
   jobId,
   gcode,
   bed,
   onBack,
   history,
+  local,
 }: {
   jobId: string;
   /** Plate 1's G-code, when this browser sliced it (no download needed). */
@@ -64,6 +78,8 @@ export default function SliceResult({
   /** Back to the plate. */
   onBack: () => void;
   history: SliceHistoryProps;
+  /** The slice is being made in this browser (else the server's live view is streamed). */
+  local?: LocalSlice | null;
 }) {
   const navigate = useNavigate();
   const [rev, setRev] = useState(0);
@@ -86,6 +102,16 @@ export default function SliceResult({
   const gcodeSource = useSliceGcode(jobId, plateIndex, several, gcode);
   const currency = useJson<Prices>("/api/prices").data?.currency ?? "$";
   const busy = !job || job.status === "queued" || job.status === "slicing";
+  // The slice taking shape: the browser's own frames, else the server's.
+  const serverLive = useServerLiveSlice(jobId, busy && !local && job?.source !== "browser");
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = () => {
+    if (local) local.onCancel();
+    else {
+      setCancelling(true);
+      void fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" }).finally(() => setRev((r) => r + 1));
+    }
+  };
   // The package lands after the G-code (its check runs): wait a little for
   // it too (a G-code that can't be one never gets one).
   const settling = job?.status === "done" && !job.package_json && rev < SETTLE_POLLS;
@@ -128,17 +154,29 @@ export default function SliceResult({
   const partner = compareWith ? entries.find((e) => e.jobId === compareWith) : undefined;
 
   if (!job || busy) {
+    const queued = !local && job?.status === "queued";
     return (
-      <div className="slice-result slice-result-waiting">
-        <p>{job?.status === "queued" ? "Waiting for the slicer…" : "Slicing…"}</p>
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${job?.progress ?? 0}%` }} />
+      <div className="slice-result">
+        <div className="slice-result-bar">
+          <button className="btn-sm" onClick={onBack}>
+            ← Plate
+          </button>
+          <span className="slice-result-actions">
+            <button className="btn-sm btn-danger" onClick={cancel} disabled={cancelling || !job}>
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          </span>
         </div>
-        <p className="hint">{job?.progress_message ?? ""}</p>
-        <button className="btn-sm" onClick={onBack}>
-          Back to the plate
-        </button>
         {historyPanel}
+        <div className="slice-result-preview">
+          <LiveSlicePreview
+            live={local?.live ?? serverLive}
+            bed={bed}
+            percent={local ? local.percent : (job?.progress ?? 0)}
+            message={local ? local.message : (job?.progress_message ?? null)}
+            title={queued ? "Waiting for the slicer…" : local ? "Slicing in this browser…" : "Slicing…"}
+          />
+        </div>
       </div>
     );
   }

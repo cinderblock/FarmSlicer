@@ -1632,7 +1632,9 @@ pub(crate) fn run_slice(state: &Arc<AppState>, job_id: &str, config_json: &str) 
 
     let output_path = gcode_output_path(state, job_id);
     let options = slice_options(state, job_id, config_json);
+    crate::live::start(job_id);
     let result = handle.0.slice(job_id, &models, config_json, &output_path, &options);
+    crate::live::finish(job_id);
     drop(handle);
     progress::clear(job_id);
 
@@ -1944,6 +1946,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/discovery", get(list_discovered))
         .merge(printers_api::routes())
         .merge(prints_api::routes())
+        .merge(crate::live::routes())
         .merge(crate::print_host::routes())
         .merge(crate::mcp::routes())
         .merge(crate::projects_api::routes())

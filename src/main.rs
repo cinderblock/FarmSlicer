@@ -19,6 +19,7 @@ mod groups_api;
 mod incidents;
 mod integration;
 mod join_api;
+mod live;
 mod mcp;
 mod model_check;
 mod moonraker;

@@ -62,6 +62,9 @@ SliceResult Slicer::slice(
         slice_progress(job, percent, message);
     };
     cb.cancelled = [&job]() { return slice_cancelled(job); };
+    cb.geometry = [&job](const std::string& frame) {
+        slice_geometry(job, rust::Slice<const uint8_t>(reinterpret_cast<const uint8_t*>(frame.data()), frame.size()));
+    };
 
     core::Options opts;
     opts.package_path = std::string(options.package_path);

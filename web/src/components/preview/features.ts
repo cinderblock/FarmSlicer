@@ -24,6 +24,8 @@ export const FEATURE_COLORS: Record<string, string> = {
   Custom: "#5ed194",
   "Multiple": "#00ff00",
   Extrusion: "#4a9eff",
+  // The live view's layer outlines, before the walls come (liveSlice.ts).
+  Outline: "#8da2bd",
 };
 
 /** Colours for feature names nobody listed above. */

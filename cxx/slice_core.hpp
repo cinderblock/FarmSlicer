@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "live_geometry.hpp"
 #include "thumbnail.hpp"
 
 namespace farmslicer::core {
@@ -17,6 +18,9 @@ struct Callbacks {
     std::function<void(int percent, const std::string& message)> progress;
     /// Polled at libslic3r's cancellation checkpoints; return true to abort.
     std::function<bool()> cancelled;
+    /// The live view's frames (live_geometry.hpp): each object step's
+    /// geometry as it's done. Unset = none are made.
+    GeometryFn geometry;
 };
 
 /// Where the user put a part on the bed (the web viewer's placement).
