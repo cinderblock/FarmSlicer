@@ -2,8 +2,14 @@
 // one track (layer 1 at the bottom). Drag a handle, click the track to move
 // the nearer one, or use the keyboard on a focused handle: arrows ±1,
 // Page Up/Down ±10, Home/End.
+//
+// A drag follows the pointer exactly: each move renders synchronously
+// (flushSync) and the views apply their range in that commit, so the 3D view
+// is drawn in the same frame as the move. Chrome sends at most one pointer
+// move per frame, so a slow frame skips layers instead of trailing behind.
 
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { flushSync } from "react-dom";
 
 interface Props {
   /** Number of layers. */
@@ -44,11 +50,12 @@ export default function LayerSlider({ count, bottom, top, onChange, label }: Pro
     dragging.current = which;
     e.currentTarget.setPointerCapture(e.pointerId);
     (e.currentTarget.querySelector(`[data-handle="${which}"]`) as HTMLElement | null)?.focus();
-    if (!target) set(which, layer);
+    if (!target) flushSync(() => set(which, layer));
     e.preventDefault();
   };
   const move = (e: PointerEvent<HTMLDivElement>) => {
-    if (dragging.current) set(dragging.current, layerAt(e.clientY));
+    const which = dragging.current;
+    if (which) flushSync(() => set(which, layerAt(e.clientY)));
   };
   const up = () => {
     dragging.current = null;

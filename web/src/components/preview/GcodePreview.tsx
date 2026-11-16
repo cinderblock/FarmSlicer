@@ -11,7 +11,7 @@
 // Z up, origin at the bed centre, like the Slice page's viewer; the
 // toolpaths (absolute G-code coordinates) are shifted by the bed centre.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -213,6 +213,10 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
     () => ({ bottom, top, upTo: scrub, hidden, travel, retractions, dim, ghost }),
     [bottom, top, scrub, hidden, travel, retractions, dim, ghost],
   );
+  // Applied in the commit, here rather than in the canvas's own React tree:
+  // a layer drag renders synchronously (LayerSlider) and the canvas draws it
+  // in that frame (Toolpaths.drawnBy), not a few frames behind the pointer.
+  useLayoutEffect(() => toolpaths.setView(view), [toolpaths, view]);
 
   const setLayers = (b0: number, t0: number) => {
     const b = Math.max(0, Math.min(last, b0));
@@ -245,7 +249,7 @@ function PreviewView({ parsed, parseMs, bed, filamentColors, showStats, classNam
     <div className={`gcode-preview ${className ?? ""}`}>
       <div className="gp-viewport" tabIndex={0} onKeyDown={key} aria-label="G-code preview: arrow keys change the layer and the move">
         <Canvas frameloop="demand" camera={{ position: [0, -330, 260], up: [0, 0, 1], fov: 45, near: 0.5, far: 5000 }} dpr={[1, 2]}>
-          <PreviewScene toolpaths={toolpaths} parsed={parsed} bed={shape} view={view} colorMode={colorMode} tools={tools} mode={mode} />
+          <PreviewScene toolpaths={toolpaths} parsed={parsed} bed={shape} colorMode={colorMode} tools={tools} mode={mode} />
           {showStats && <Stats />}
         </Canvas>
 
@@ -367,13 +371,12 @@ interface SceneProps {
   toolpaths: Toolpaths;
   parsed: ParsedGcode;
   bed: SceneBed;
-  view: ViewRange;
   colorMode: ColorMode;
   tools: string[];
   mode: RenderMode;
 }
 
-function PreviewScene({ toolpaths, parsed, bed, view, colorMode, tools, mode }: SceneProps) {
+function PreviewScene({ toolpaths, parsed, bed, colorMode, tools, mode }: SceneProps) {
   const invalidate = useThree((s) => s.invalidate);
   const get = useThree((s) => s.get);
   const controls = useThree((s) => s.controls);
@@ -385,10 +388,7 @@ function PreviewScene({ toolpaths, parsed, bed, view, colorMode, tools, mode }: 
     toolpaths.recolor(colorMode, tools);
     invalidate();
   }, [toolpaths, mode, colorMode, tools, invalidate]);
-  useEffect(() => {
-    toolpaths.setView(view);
-    invalidate();
-  }, [toolpaths, view, mode, invalidate]);
+  useEffect(() => toolpaths.drawnBy(invalidate), [toolpaths, invalidate]);
 
   // Frame the print (not the purge lines at the bed's edge) from the front, above.
   useEffect(() => {

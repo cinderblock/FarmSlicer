@@ -14,7 +14,7 @@
 // (comparing layer heights is common). Next to the views: the numbers (time,
 // filament, layers, time per feature) and the settings that differ.
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -140,8 +140,9 @@ function CompareView({ pa, pb, a, b, bed, onSwap, onClose }: ViewProps) {
   const diffing = mode === "overlay" && show === "both";
   const viewA = useMemo(() => viewAt(pa, zBottom, zTop, travel && !diffing), [pa, zBottom, zTop, travel, diffing]);
   const viewB = useMemo(() => viewAt(pb, zBottom, zTop, travel && !diffing), [pb, zBottom, zTop, travel, diffing]);
-  useEffect(() => ta.setView(viewA), [ta, viewA]);
-  useEffect(() => tb.setView(viewB), [tb, viewB]);
+  // In the commit, so a layer drag is drawn in its own frame (as in GcodePreview).
+  useLayoutEffect(() => ta.setView(viewA), [ta, viewA]);
+  useLayoutEffect(() => tb.setView(viewB), [tb, viewB]);
   // What the canvases draw changed: they draw again when this does.
   const version = `${zBottom}:${zTop}:${travel}:${colorMode}:${show}:${mode}`;
 
@@ -336,6 +337,8 @@ function OverlayScene({ ta, tb, bedA, bedB, show, box, version }: OverlayProps) 
       tb.setDepth(THREE.LessEqualDepth, true);
     };
   }, [ta, tb, bedA, bedB, show, holder, overB, invalidate]);
+  useEffect(() => ta.drawnBy(invalidate), [ta, invalidate]);
+  useEffect(() => tb.drawnBy(invalidate), [tb, invalidate]);
   useEffect(() => invalidate(), [version, invalidate]);
 
   // Priority 1: this draws the frame (react-three-fiber leaves it to us).
@@ -436,6 +439,7 @@ function LinkedScene({ toolpaths, bed, box, link, version }: { toolpaths: Toolpa
     toolpaths.group.position.set(-bed.center.x, -bed.center.y, 0);
     invalidate();
   }, [toolpaths, bed, invalidate]);
+  useEffect(() => toolpaths.drawnBy(invalidate), [toolpaths, invalidate]);
   useEffect(() => invalidate(), [version, invalidate]);
   return (
     <>

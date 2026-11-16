@@ -269,6 +269,8 @@ export class Toolpaths {
   private retract: THREE.Points | null = null;
   private head: THREE.Mesh;
   private view: ViewRange | null = null;
+  /** The canvases drawing this (their invalidate), told when the view changes. */
+  private drawers = new Set<() => void>();
 
   constructor(parsed: ParsedGcode, mode: RenderMode = autoMode(parsed.extrusions.count)) {
     this.p = parsed;
@@ -282,6 +284,18 @@ export class Toolpaths {
     this.head.renderOrder = 2;
     this.group.add(this.head);
     this.build();
+  }
+
+  /**
+   * A canvas draws this: `setView` asks it for a frame, so a caller can
+   * change the view outside the canvas's React tree (in the same event as
+   * the pointer move) and see it drawn that frame. Returns the undo.
+   */
+  drawnBy(invalidate: () => void): () => void {
+    this.drawers.add(invalidate);
+    return () => {
+      this.drawers.delete(invalidate);
+    };
   }
 
   /** How this file is drawn in 3D, or "lines" when it's too big for that. */
@@ -373,6 +387,7 @@ export class Toolpaths {
     // The tool head where the scrubbed path ends.
     this.head.visible = scrubbing && hi > 0;
     if (this.head.visible) this.head.position.fromArray(extrusions.points, hi * 3);
+    for (const draw of this.drawers) draw();
   }
 
   /** Draw every extrusion in one colour (null: their own colours again). */
