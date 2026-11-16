@@ -237,6 +237,7 @@ mod stub {
 #[cfg(not(farmslicer_no_cxx))]
 fn slice_progress(job_id: &str, percent: i32, message: &str) {
     crate::progress::report(job_id, percent, message);
+    crate::live::progress(job_id, percent, message);
 }
 
 #[cfg(not(farmslicer_no_cxx))]

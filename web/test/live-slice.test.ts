@@ -10,6 +10,7 @@ import {
   STEP_SUPPORTS,
   STEP_WALLS,
   decodeFrame,
+  decodeProgress,
   exportLayer,
   messagePlate,
 } from "../src/components/preview/liveSlice";
@@ -252,6 +253,32 @@ describe("LiveSlice", () => {
     expect(steps[STEP_INFILL]).toEqual({ step: STEP_INFILL, done: 1, skipped: 1 });
     // A skipped step draws nothing of its own.
     expect(live.build(1)!.info.features).toEqual(["Outline"]);
+  });
+});
+
+describe("decodeProgress", () => {
+  // src/live.rs progress_frame: "FSP1", percent, u16 length, UTF-8.
+  const progress = (percent: number, message: string) => {
+    const text = new TextEncoder().encode(message);
+    return new Uint8Array([0x46, 0x53, 0x50, 0x31, percent, text.length & 0xff, text.length >> 8, ...text]);
+  };
+
+  test("reads a progress frame", () => {
+    expect(decodeProgress(progress(80, "Generating G-code: layer 12"))).toEqual({ percent: 80, message: "Generating G-code: layer 12" });
+    expect(decodeProgress(progress(5, "Décalage"))).toEqual({ percent: 5, message: "Décalage" });
+  });
+
+  test("passes geometry frames by, refuses a truncated one", () => {
+    expect(decodeProgress(encode({ step: STEP_OUTLINES }))).toBeNull();
+    expect(() => decodeProgress(progress(1, "abc").slice(0, 9))).toThrow("truncated");
+  });
+
+  test("comes through the stream's framing with geometry", () => {
+    const parts = [encode({ step: STEP_WALLS }), progress(40, "Generating infill toolpath")];
+    const stream: number[] = [];
+    for (const f of parts) stream.push(f.length & 0xff, (f.length >> 8) & 0xff, 0, 0, ...f);
+    const out = new FrameReader().push(new Uint8Array(stream));
+    expect(out.map((f) => decodeProgress(f)?.percent ?? "geometry")).toEqual(["geometry", 40]);
   });
 });
 

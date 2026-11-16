@@ -295,10 +295,10 @@ export default function JobPage() {
       {showLive && (
         <div className="job-preview">
           <LiveSlicePreview
-            live={live}
+            live={live.live}
             bed={bed}
-            percent={job.progress}
-            message={job.progress_message}
+            percent={live.progress?.percent ?? job.progress}
+            message={live.progress?.message ?? job.progress_message}
             title={job.status === "queued" ? "Waiting for the slicer…" : "Slicing…"}
           />
         </div>

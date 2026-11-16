@@ -3,9 +3,13 @@
 //! (cxx/live_geometry.cpp, through `slicer::slice_geometry`), the frames
 //! are kept here in memory while the job slices and a little after, and
 //! `GET /api/jobs/{id}/live` streams them to whoever can see the job: every
-//! frame so far, then each new one, until the slice ends.
+//! frame so far, then each new one, until the slice ends. The slicer's
+//! progress goes along as it comes (the latest, at most every `PACE`), so
+//! the page needn't poll the job for it.
 //!
 //! On the wire each frame is preceded by its length (u32, little-endian).
+//! Geometry frames start "FSL1" (plans/live-slice-preview.md), progress
+//! frames "FSP1" (`progress_frame`).
 //! Browser slices make their frames in the page and never come here.
 
 use std::collections::HashMap;
@@ -30,14 +34,28 @@ const KEEP: Duration = Duration::from_secs(60);
 /// Bytes kept per slice; frames beyond it are dropped (the C++ side's point
 /// budget keeps a slice far below it).
 const MAX_BYTES: usize = 96 * 1024 * 1024;
+/// A reader gets at most one chunk this often: progress comes once per layer
+/// while the G-code is written (hundreds a second), the page needs ~20.
+const PACE: Duration = Duration::from_millis(50);
+
+/// A progress frame's magic ("FSP1"); geometry frames start with "FSL1".
+const PROGRESS_MAGIC: &[u8; 4] = b"FSP1";
 
 struct Stream {
     frames: Vec<Bytes>,
     bytes: usize,
+    /// The latest progress (number, percent, message); number 0 = none yet.
+    progress: (u64, i32, String),
     /// When the slice ended (no more frames).
     ended: Option<Instant>,
-    /// Frames so far and whether the slice ended, for the readers.
-    tx: watch::Sender<(usize, bool)>,
+    /// Bumped on every change (frame, progress, end), for the readers.
+    tx: watch::Sender<u64>,
+}
+
+impl Stream {
+    fn changed(&self) {
+        self.tx.send_modify(|v| *v += 1);
+    }
 }
 
 static STREAMS: Mutex<Option<HashMap<String, Stream>>> = Mutex::new(None);
@@ -52,8 +70,9 @@ pub fn start(job_id: &str) {
     with(|streams| {
         let now = Instant::now();
         streams.retain(|_, s| s.ended.is_none_or(|t| now.duration_since(t) < KEEP));
-        let (tx, _) = watch::channel((0, false));
-        streams.insert(job_id.to_string(), Stream { frames: Vec::new(), bytes: 0, ended: None, tx });
+        let (tx, _) = watch::channel(0);
+        let stream = Stream { frames: Vec::new(), bytes: 0, progress: (0, 0, String::new()), ended: None, tx };
+        streams.insert(job_id.to_string(), stream);
     });
 }
 
@@ -67,7 +86,22 @@ pub fn frame(job_id: &str, frame: &[u8]) {
         }
         s.bytes += frame.len();
         s.frames.push(Bytes::copy_from_slice(frame));
-        s.tx.send_replace((s.frames.len(), false));
+        s.changed();
+    });
+}
+
+/// The slicer's progress (any thread): readers get the latest as it comes,
+/// instead of waiting for the page's next poll of the job.
+#[cfg_attr(farmslicer_no_cxx, allow(dead_code))]
+pub fn progress(job_id: &str, percent: i32, message: &str) {
+    with(|streams| {
+        let Some(s) = streams.get_mut(job_id) else { return };
+        if s.ended.is_some() {
+            return;
+        }
+        let n = s.progress.0 + 1;
+        s.progress = (n, percent.clamp(0, 100), message.to_string());
+        s.changed();
     });
 }
 
@@ -76,29 +110,58 @@ pub fn finish(job_id: &str) {
     with(|streams| {
         if let Some(s) = streams.get_mut(job_id) {
             s.ended = Some(Instant::now());
-            s.tx.send_replace((s.frames.len(), true));
+            s.changed();
         }
     });
 }
 
-/// Frames from `from` on, and whether the slice ended; None = no stream.
-fn frames_since(job_id: &str, from: usize) -> Option<(Vec<Bytes>, bool)> {
+/// What a reader hasn't had yet.
+#[derive(Debug, PartialEq)]
+struct News {
+    frames: Vec<Bytes>,
+    /// The latest progress, when newer than the reader's: (number, percent, message).
+    progress: Option<(u64, i32, String)>,
+    ended: bool,
+}
+
+/// Frames from `from` on, the progress if newer than `seen`, and whether
+/// the slice ended; None = no stream.
+fn news(job_id: &str, from: usize, seen: u64) -> Option<News> {
     with(|streams| {
         let s = streams.get(job_id)?;
-        Some((s.frames.get(from..).unwrap_or_default().to_vec(), s.ended.is_some()))
+        Some(News {
+            frames: s.frames.get(from..).unwrap_or_default().to_vec(),
+            progress: (s.progress.0 > seen).then(|| s.progress.clone()),
+            ended: s.ended.is_some(),
+        })
     })
 }
 
-fn subscribe(job_id: &str) -> Option<watch::Receiver<(usize, bool)>> {
+fn subscribe(job_id: &str) -> Option<watch::Receiver<u64>> {
     with(|streams| streams.get(job_id).map(|s| s.tx.subscribe()))
 }
 
 /// A frame as it goes out: its length, then the frame.
-fn framed(frame: &Bytes) -> Bytes {
+fn framed(frame: &[u8]) -> Bytes {
     let mut out = Vec::with_capacity(4 + frame.len());
     out.extend_from_slice(&(frame.len() as u32).to_le_bytes());
     out.extend_from_slice(frame);
     Bytes::from(out)
+}
+
+/// A progress frame: "FSP1", the percent (u8), the message (u16 length + UTF-8).
+fn progress_frame(percent: i32, message: &str) -> Vec<u8> {
+    let mut cut = message.len().min(u16::MAX as usize);
+    while !message.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let text = &message.as_bytes()[..cut];
+    let mut out = Vec::with_capacity(7 + text.len());
+    out.extend_from_slice(PROGRESS_MAGIC);
+    out.push(percent.clamp(0, 100) as u8);
+    out.extend_from_slice(&(text.len() as u16).to_le_bytes());
+    out.extend_from_slice(text);
+    out
 }
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -117,23 +180,33 @@ async fn job_live(
     let Some(rx) = subscribe(&id) else {
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
-    // (job, receiver, frames sent, ended)
-    let stream = futures_util::stream::unfold((id, rx, 0usize, false), |(id, mut rx, sent, ended)| async move {
+    // (job, receiver, frames sent, progress sent, ended)
+    let state = (id, rx, 0usize, 0u64, false);
+    let stream = futures_util::stream::unfold(state, |(id, mut rx, sent, seen, ended)| async move {
         if ended {
             return None;
         }
         loop {
-            let (frames, done) = frames_since(&id, sent)?;
-            if !frames.is_empty() || done {
+            let news = news(&id, sent, seen)?;
+            if !news.frames.is_empty() || news.progress.is_some() || news.ended {
                 let mut chunk = Vec::new();
-                for f in &frames {
+                for f in &news.frames {
                     chunk.extend_from_slice(&framed(f));
                 }
-                let next = (id, rx, sent + frames.len(), done);
+                let mut seen = seen;
+                if let Some((n, percent, message)) = &news.progress {
+                    chunk.extend_from_slice(&framed(&progress_frame(*percent, message)));
+                    seen = *n;
+                }
+                if !news.ended {
+                    // Whatever comes meanwhile goes out in the next chunk.
+                    tokio::time::sleep(PACE).await;
+                }
+                let next = (id, rx, sent + news.frames.len(), seen, news.ended);
                 return Some((Ok::<_, std::convert::Infallible>(Bytes::from(chunk)), next));
             }
-            // Nothing new: wait for the next frame or the end. A stream
-            // replaced or dropped meanwhile ends this one.
+            // Nothing new: wait for the next change. A stream replaced or
+            // dropped meanwhile ends this one.
             if rx.changed().await.is_err() {
                 return None;
             }
@@ -156,20 +229,37 @@ mod tests {
     fn frames_are_kept_in_order_until_the_end() {
         let job = "live-test-order";
         frame(job, b"before"); // no stream yet: dropped
-        assert!(frames_since(job, 0).is_none());
+        assert!(news(job, 0, 0).is_none());
         start(job);
         frame(job, b"one");
         frame(job, b"two");
-        let (frames, ended) = frames_since(job, 0).unwrap();
-        assert_eq!(frames, vec![Bytes::from_static(b"one"), Bytes::from_static(b"two")]);
-        assert!(!ended);
-        assert_eq!(frames_since(job, 1).unwrap().0, vec![Bytes::from_static(b"two")]);
+        let n = news(job, 0, 0).unwrap();
+        assert_eq!(n.frames, vec![Bytes::from_static(b"one"), Bytes::from_static(b"two")]);
+        assert!(!n.ended);
+        assert_eq!(news(job, 1, 0).unwrap().frames, vec![Bytes::from_static(b"two")]);
         finish(job);
         frame(job, b"late"); // after the end: dropped
-        let (frames, ended) = frames_since(job, 0).unwrap();
-        assert_eq!(frames.len(), 2);
-        assert!(ended);
-        assert!(frames_since(job, 5).unwrap().0.is_empty());
+        let n = news(job, 0, 0).unwrap();
+        assert_eq!(n.frames.len(), 2);
+        assert!(n.ended);
+        assert!(news(job, 5, 0).unwrap().frames.is_empty());
+    }
+
+    #[test]
+    fn readers_get_the_latest_progress_once() {
+        let job = "live-test-progress";
+        start(job);
+        assert_eq!(news(job, 0, 0).unwrap().progress, None);
+        progress(job, 10, "Generating walls");
+        progress(job, 80, "Generating G-code: layer 3");
+        let n = news(job, 0, 0).unwrap();
+        assert_eq!(n.progress, Some((2, 80, "Generating G-code: layer 3".to_string())));
+        assert_eq!(news(job, 0, 2).unwrap().progress, None);
+        progress(job, 150, "clamped");
+        assert_eq!(news(job, 0, 2).unwrap().progress, Some((3, 100, "clamped".to_string())));
+        finish(job);
+        progress(job, 100, "after the end");
+        assert_eq!(news(job, 0, 3).unwrap().progress, None);
     }
 
     #[test]
@@ -177,26 +267,29 @@ mod tests {
         let job = "live-test-again";
         start(job);
         frame(job, b"old");
+        progress(job, 50, "half");
         finish(job);
         start(job);
-        assert_eq!(frames_since(job, 0).unwrap(), (Vec::new(), false));
+        assert_eq!(news(job, 0, 0).unwrap(), News { frames: Vec::new(), progress: None, ended: false });
     }
 
     #[test]
-    fn framing_prefixes_the_length() {
-        assert_eq!(&framed(&Bytes::from_static(b"abc"))[..], &[3, 0, 0, 0, b'a', b'b', b'c']);
+    fn framing() {
+        assert_eq!(&framed(b"abc")[..], &[3, 0, 0, 0, b'a', b'b', b'c']);
+        assert_eq!(progress_frame(42, "hi"), vec![b'F', b'S', b'P', b'1', 42, 2, 0, b'h', b'i']);
     }
 
     #[tokio::test]
-    async fn readers_wake_on_new_frames() {
+    async fn readers_wake_on_every_change() {
         let job = "live-test-wake";
         start(job);
         let mut rx = subscribe(job).unwrap();
         frame(job, b"x");
         rx.changed().await.unwrap();
-        assert_eq!(*rx.borrow(), (1, false));
+        progress(job, 5, "p");
+        rx.changed().await.unwrap();
         finish(job);
         rx.changed().await.unwrap();
-        assert_eq!(*rx.borrow(), (1, true));
+        assert!(news(job, 1, 1).unwrap().ended);
     }
 }

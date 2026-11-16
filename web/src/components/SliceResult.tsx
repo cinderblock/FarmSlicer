@@ -170,10 +170,10 @@ export default function SliceResult({
         {historyPanel}
         <div className="slice-result-preview">
           <LiveSlicePreview
-            live={local?.live ?? serverLive}
+            live={local?.live ?? serverLive.live}
             bed={bed}
-            percent={local ? local.percent : (job?.progress ?? 0)}
-            message={local ? local.message : (job?.progress_message ?? null)}
+            percent={local ? local.percent : (serverLive.progress?.percent ?? job?.progress ?? 0)}
+            message={local ? local.message : (serverLive.progress?.message ?? job?.progress_message ?? null)}
             title={queued ? "Waiting for the slicer…" : local ? "Slicing in this browser…" : "Slicing…"}
           />
         </div>

@@ -49,6 +49,24 @@ export interface LiveFrame {
 }
 
 const MAGIC = 0x314c5346; // "FSL1", little-endian
+const PROGRESS_MAGIC = 0x31505346; // "FSP1"
+
+/** The slicer's progress, as a server slice's stream carries it (src/live.rs). */
+export interface LiveProgress {
+  percent: number;
+  message: string;
+}
+
+/** A progress frame ("FSP1": percent, message), or null for any other frame. */
+export function decodeProgress(buffer: ArrayBuffer | Uint8Array): LiveProgress | null {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (bytes.byteLength < 7) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, true) !== PROGRESS_MAGIC) return null;
+  const len = view.getUint16(5, true);
+  if (7 + len > bytes.byteLength) throw new Error("live progress: truncated");
+  return { percent: view.getUint8(4), message: new TextDecoder().decode(bytes.subarray(7, 7 + len)) };
+}
 
 /** Decode one frame; throws on anything that isn't one. */
 export function decodeFrame(buffer: ArrayBuffer | Uint8Array): LiveFrame {
