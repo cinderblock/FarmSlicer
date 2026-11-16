@@ -605,6 +605,30 @@ void report(const Callbacks& cb, int percent, const std::string& message)
     if (cb.progress) cb.progress(percent, message);
 }
 
+// How many layers G-code export goes through: one "Generating G-code:
+// layer N" status each (all at 80 %, so the bar needs this count to move).
+// Together, objects' layers at one height are one layer; printed one object
+// at a time, each object's layers come again for each of its copies.
+size_t export_layer_count(const Slic3r::Print& print)
+{
+    auto heights = [](const Slic3r::PrintObject& po, std::set<long long>& zs) {
+        for (const Slic3r::Layer* l : po.layers()) zs.insert(llround(l->print_z * 1e4));
+        for (const Slic3r::SupportLayer* l : po.support_layers()) zs.insert(llround(l->print_z * 1e4));
+    };
+    if (print.config().print_sequence.value == Slic3r::PrintSequence::ByObject) {
+        size_t total = 0;
+        for (const Slic3r::PrintObject* po : print.objects()) {
+            std::set<long long> zs;
+            heights(*po, zs);
+            total += zs.size() * std::max<size_t>(1, po->instances().size());
+        }
+        return total;
+    }
+    std::set<long long> zs;
+    for (const Slic3r::PrintObject* po : print.objects()) heights(*po, zs);
+    return zs.size();
+}
+
 } // namespace
 
 void init_runtime(const std::string& resources_dir, const std::string& temp_dir)
@@ -717,6 +741,10 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                 Model::setExtruderParams(config, filament_count);
 
                 std::mutex status_mutex;
+                // During G-code export: its layers, and how many are done.
+                // The export fills the plate's last 20 %.
+                size_t export_layers = 0, exported = 0;
+                constexpr double EXPORT_START = 0.8;
                 // The live view: each object step's geometry once it's done.
                 std::unique_ptr<LiveGeometry> live;
                 if (cb.geometry) live = std::make_unique<LiveGeometry>(cb.geometry, p + 1, live_budget);
@@ -726,7 +754,16 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                 };
                 print.set_status_callback([&](const PrintBase::SlicingStatus& s) {
                     std::lock_guard<std::mutex> lock(status_mutex);
-                    if (s.percent >= 0) step(s.percent / 100.0, s.text);
+                    if (export_layers > 0 && s.percent >= 0) {
+                        // One "Generating G-code: layer N" per layer (N
+                        // starts again per object printed one at a time);
+                        // the rest ("Generating G-code") hold the bar.
+                        if (s.text.rfind("Generating G-code: layer", 0) == 0)
+                            exported = std::min(exported + 1, export_layers);
+                        step(EXPORT_START + (1 - EXPORT_START) * double(exported) / double(export_layers), s.text);
+                    } else if (s.percent >= 0) {
+                        step(std::min(s.percent / 100.0, EXPORT_START), s.text);
+                    }
                     if (s.warning_step != -1 && !s.text.empty()) out.warnings.push_back(prefix + s.text);
                     if (live) live->poll(print);
                 });
@@ -760,10 +797,23 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                 if (std::string conflict = print.get_conflict_string(); !conflict.empty())
                     out.warnings.push_back(prefix + conflict);
 
-                step(1, "Exporting G-code");
+                // Between the steps and the export, statuses are the
+                // steps' own percentages; during it, layers done.
+                auto export_gcode = [&](GCodeProcessorResult& result) {
+                    {
+                        std::lock_guard<std::mutex> lock(status_mutex);
+                        export_layers = std::max<size_t>(1, export_layer_count(print));
+                        exported = 0;
+                        step(EXPORT_START, "Exporting G-code");
+                    }
+                    std::string path = print.export_gcode(output, &result, thumbnails);
+                    std::lock_guard<std::mutex> lock(status_mutex);
+                    export_layers = 0;
+                    return path;
+                };
                 GCodeProcessorResult gcode_result;
                 std::vector<std::string> moved;
-                std::string written = print.export_gcode(output, &gcode_result, thumbnails);
+                std::string written = export_gcode(gcode_result);
                 if (move_unreachable_filaments(print, gcode_result, config, moved)) {
                     print.apply(model, config);
                     print.process();
@@ -774,7 +824,7 @@ Outcome slice_models(const std::vector<ModelInput>& models,
                         poll_live();
                     }
                     gcode_result = GCodeProcessorResult();
-                    written = print.export_gcode(output, &gcode_result, thumbnails);
+                    written = export_gcode(gcode_result);
                 }
                 for (const std::string& w : moved) out.warnings.push_back(prefix + w);
                 check_nozzle_reach(gcode_result);
