@@ -178,6 +178,31 @@ once its walls are in.
       and size from the first live frame to the finished preview, server
       and browser; the camera carries over (a dragged angle kept).
 
+- [x] 2026-11-15 ~10:04 PM PST (06:04Z): handover pushed as `ddd1cdb`
+      (the user said deploy); CI building, then the ops pin.
+- [x] 2026-11-15: progress fills during G-code export (the user: "i don't
+      see why not"), `ed1beb2` on origin. slice_core counts "Generating
+      G-code: layer N" statuses against `export_layer_count` (distinct
+      print_z of layers and support layers; by object: per object ×
+      copies) and fills the plate's last 20 % (process statuses capped at
+      80 %). The one plain "Generating G-code" status Print::export_gcode
+      sends first doesn't count. Measured on sentinel (torus, tree
+      supports, X1C): 73 % → 90 % in step with layers 1..120 over ~1 s,
+      then 96 % Packaging, 100 % Done; never backwards. Test image and dir
+      removed.
+- [x] 2026-11-15 ~10:27 PM PST (06:27Z): ops `a6c43676` pins `ed1beb2`
+      (`sha256:1771d25c…`): handover + export progress.
+- [x] 2026-11-15: local master leveled with origin (the user asked).
+      Master held slices 2-6 of `plans/organization-and-access.md`
+      (printer access, labels and folders, sharing, signed-in devices),
+      never pushed; the user chose to push them. Cherry-picked onto
+      `ed1beb2` (painting, changes by height and the changelog id fix were
+      already on origin as `74de144`, `63e3b09`, `7a415db`; index.css
+      conflicts were older swept-in copies of the model editor's styles,
+      origin's kept), pushed as `61fb9c6`, whose tree equals old local
+      master's exactly; master moved with `reset --soft` (0/0). Web tsc
+      and 146 tests pass; the 15 lint findings are all pre-existing.
+
 ## Open questions for the user
 
 (none yet)
@@ -190,8 +215,11 @@ once its walls are in.
 - Inside a step (walls, infill, supports) nothing can be shown before the
   step ends: libslic3r reports no per-layer progress there and its data is
   being written in parallel. Only G-code export reports per layer.
-- During export the percent stays put (libslic3r says 80 for every
-  layer; slice_core maps it to one value), while the message counts layers.
+- During export libslic3r says 80 % for every layer; slice_core now turns
+  the layer statuses into the fraction done (see the progress log).
+- Docker on sentinel: `--build-arg JOBS` is part of the deps stage's RUN
+  line, so a different value rebuilds every dependency. Use `JOBS=12`, as
+  the cached layers were built with.
 
 ## Things not to do
 
