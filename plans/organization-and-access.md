@@ -185,6 +185,8 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 
 ## Decisions already made (don't re-ask)
 
+- Public share links show no layer preview (it would hand out the G-code):
+  the user confirmed, 2026-11-15.
 - Build on groups, pools, and `pending_approval`; no parallel systems.
 - Everything in scope (all options chosen, 2026-11-14); permissions and
   organization first.
@@ -313,12 +315,7 @@ Replace the single admin bit with **capabilities** granted by **roles**.
 
 ## Open questions for the user
 
-1. **Public links show no layer preview** (slice 5). The approved design
-   said "facts, preview, plate pictures"; the 3D/layer preview needs the
-   G-code itself, which conflicts with "no G-code download". Built:
-   facts and plate pictures only. Recommendation: keep it that way; add
-   the preview only if you're fine with links handing out the G-code.
-2. Not built (small follow-ups, say if you want them): a `label:` filter
+1. Not built (small follow-ups, say if you want them): a `label:` filter
    in the command palette; per-group override of the public-links site
    setting; folders/libraries shared with you opening in the file
    browser (they show in "Shared with me" and the flat view).
