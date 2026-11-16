@@ -156,6 +156,9 @@ once its walls are in.
       inside support generation (libslic3r reports nothing there); the
       Slice page's text changed every ~55 ms in headless Chromium. Rust
       live tests 5/5, 26 e2e suites pass; web 15 live tests.
+- [x] 2026-11-15 ~6:05 PM PST (02:05Z): deployed. FarmSlicer `debc246` on
+      origin (CI green), ops `4b7ac472` pins `sha256:713e5115…`; Server
+      Deploys green; production serves `debc246`, health 200.
 
 ## Open questions for the user
 
