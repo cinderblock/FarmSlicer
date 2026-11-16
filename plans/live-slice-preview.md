@@ -146,6 +146,17 @@ once its walls are in.
       health 200, `/live` 401 signed out. Buildhost: test container, image
       and `~/farmslicer-liveslice-*` removed.
 
+- [x] 2026-11-15: server progress over the live stream (`1ccd784` local,
+      `debc246` on top of origin/master, not pushed). The page polled the
+      job (1.5 s / 2 s), so the bar and the export sweep moved ~1 Hz. Now
+      `slicer::slice_progress` also feeds `live::progress`; the stream sends
+      the latest in "FSP1" frames, at most every 50 ms per reader.
+      Measured on buildhost (torus, tree supports, X1C): 20.5 progress
+      updates/s during export (layer 4, 14, 28, ...), the longest gap 202 ms
+      inside support generation (libslic3r reports nothing there); the
+      Slice page's text changed every ~55 ms in headless Chromium. Rust
+      live tests 5/5, 26 e2e suites pass; web 15 live tests.
+
 ## Open questions for the user
 
 (none yet)
@@ -154,6 +165,12 @@ once its walls are in.
   slice was blank under headless swiftshader while the CPU was loaded; it
   drew on the first drag, and two later runs drew at once. Logged in
   ISSUES.md ("G-code preview sometimes blank until the first drag").
+
+- Inside a step (walls, infill, supports) nothing can be shown before the
+  step ends: libslic3r reports no per-layer progress there and its data is
+  being written in parallel. Only G-code export reports per layer.
+- During export the percent stays put (libslic3r says 80 for every
+  layer; slice_core maps it to one value), while the message counts layers.
 
 ## Things not to do
 
