@@ -135,3 +135,14 @@ renders on demand (`frameloop="demand"`), so a missed `invalidate()` on the
 first frame would look like this.
 
 Why it matters: someone could think the slice is empty.
+
+## `gcode::harvest::tests::orca_data_is_fresh` fails: `src/gcode/data/orca.json` is stale
+
+With OrcaSlicer's tree next to the source (submodule at v2.4.2), `FARMSLICER_SKIP_CXX=1 cargo test`
+fails one test: `src/gcode/data/orca.json is stale: run
+FARMSLICER_REGEN_GCODE_DATA=1 cargo test gcode::harvest` (seen 2026-11-15
+on buildhost, on `origin/master` `ae6441e` plus an unrelated change). CI's
+`check` job checks out without the submodule, so the test skips there
+("skipped: no OrcaSlicer profiles") and nothing has caught it. Why it
+matters: the G-code check's allowlist may lag the profiles the server
+slices with, so Orca's own G-code could be held.
