@@ -292,7 +292,7 @@ sent to browsers.
 2. RUST CRATES (linked into the server binary)
 ================================================================================
 
-304 crates, for x86_64-unknown-linux-gnu.
+306 crates, for x86_64-unknown-linux-gnu.
 
   adler2 2.0.1
       0BSD OR MIT OR Apache-2.0  [T48] [T49] [T50]
@@ -1086,6 +1086,9 @@ sent to browsers.
   tokio-tungstenite 0.29.0
       MIT  [T234]
       https://github.com/snapview/tokio-tungstenite
+  tokio-tungstenite 0.30.0
+      MIT  [T234]
+      https://github.com/snapview/tokio-tungstenite
   tokio-util 0.7.18
       MIT  [T231]
       https://github.com/tokio-rs/tokio
@@ -1114,6 +1117,9 @@ sent to browsers.
       MIT  [T238]
       https://github.com/seanmonstar/try-lock
   tungstenite 0.29.0
+      MIT OR Apache-2.0  [Apache-2.0] [T239]
+      https://github.com/snapview/tungstenite-rs
+  tungstenite 0.30.0
       MIT OR Apache-2.0  [Apache-2.0] [T239]
       https://github.com/snapview/tungstenite-rs
   typed-path 0.13.0
@@ -14821,7 +14827,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-[T234] tokio-tungstenite 0.29.0
+[T234] tokio-tungstenite 0.29.0, tokio-tungstenite 0.30.0
 --------------------------------------------------------------------------------
 
 --- LICENSE ---
@@ -14971,7 +14977,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-[T239] tungstenite 0.29.0
+[T239] tungstenite 0.29.0, tungstenite 0.30.0
 --------------------------------------------------------------------------------
 
 --- LICENSE-MIT ---
