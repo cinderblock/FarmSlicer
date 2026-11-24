@@ -55,7 +55,7 @@ base64 = "0.23"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "query", "stream", "rustls-no-provider"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 # Discovery of Klipper, OctoPrint and PrusaLink printers (mDNS / DNS-SD).
-mdns-sd = "0.21"
+mdns-sd = "0.22"
 # Webhooks: HTTPS to the internet, certificates checked against Mozilla's
 # root store (the printers' client above accepts anything).
 webpki-roots = "1"
