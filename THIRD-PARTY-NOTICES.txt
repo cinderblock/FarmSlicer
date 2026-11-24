@@ -292,7 +292,7 @@ sent to browsers.
 2. RUST CRATES (linked into the server binary)
 ================================================================================
 
-305 crates, for x86_64-unknown-linux-gnu.
+306 crates, for x86_64-unknown-linux-gnu.
 
   adler2 2.0.1
       0BSD OR MIT OR Apache-2.0  [T48] [T49] [T50]
@@ -1096,6 +1096,9 @@ sent to browsers.
       MIT  [T235]
       https://github.com/tower-rs/tower
   tower-http 0.6.10
+      MIT  [T236]
+      https://github.com/tower-rs/tower-http
+  tower-http 0.7.1
       MIT  [T236]
       https://github.com/tower-rs/tower-http
   tower-layer 0.3.3
@@ -14883,7 +14886,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-[T236] tower-http 0.6.10
+[T236] tower-http 0.6.10, tower-http 0.7.1
 --------------------------------------------------------------------------------
 
 --- LICENSE ---
